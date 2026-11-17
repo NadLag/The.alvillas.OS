@@ -1,3 +1,5 @@
+import {CashCustodyRepository} from "@/modules/finance/infrastructure/cash-custody-repository";
+import {cashCustodyDisclosureSources} from "@/platform/authz/cash-custody-resource";
 import {ExpensePurchaseRepository} from "@/modules/finance/infrastructure/expense-purchase-repository";
 import {expensePurchaseDisclosureSources} from "@/platform/authz/expense-purchase-resource";
 import type { TenantTransaction } from "@/platform/db/tenant";
@@ -9,7 +11,7 @@ import { expenseFundingWalletResource } from "@/modules/finance/domain/expense";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
-export type NativeFinancialResource = Resource & { personalExpenseSources?:readonly Resource[]; salarySources?: readonly Resource[];financialSources?:readonly Resource[];companyFinancialSources?:readonly Resource[];walletSources?:readonly Resource[];compensationRoot?:Resource & { sourceRecordId?: string };sourceRecordId?:string;organizationOnlyEmployeeSource?:boolean;
+export type NativeFinancialResource = Resource & { custodySources?:readonly Resource[]; personalExpenseSources?:readonly Resource[]; salarySources?: readonly Resource[];financialSources?:readonly Resource[];companyFinancialSources?:readonly Resource[];walletSources?:readonly Resource[];compensationRoot?:Resource & { sourceRecordId?: string };sourceRecordId?:string;organizationOnlyEmployeeSource?:boolean;
   guestPayment?: { receiptId: string; actorId: string; reason: string | null; provenance: unknown; originalCollectionId: string | null; receivedAt: Date; fundingSources: readonly Resource[]; cashSource?: Resource } };
 export const employeeSubmissionFinancialSourceFields={id:true,costOn:true,run:{select:{id:true,createdBy:true,currency:true,createdAt:true,
   lines:{select:employeeCompensationAuthorityLineFields}}},
@@ -39,6 +41,7 @@ export class FinancialTransactionResourceRepository {
           account: { select: { id: true, code: true, name: true, accountType: true, normalSide: true, archivedAt: true, teamWallet: { select: { id: true, personId: true, person: { select: { archivedAt: true } } } } } } } },
         postings: { select: { side: true, amount: true, currency: true, dimensions: true,ledgerAccount:{select:{id:true,code:true,accountType:true,normalSide:true,archivedAt:true,teamWallet:{select:{id:true,personId:true,person:{select:{archivedAt:true}}}}}} } } }
     });
+    const custodyIds=[...new Set(rows.flatMap(row=>row.postings.flatMap(line=>{const d=line.dimensions;if(!d||typeof d!=="object"||Array.isArray(d))return[];return typeof d.custody_collection_id==="string"&&uuidPattern.test(d.custody_collection_id)?[d.custody_collection_id]:[];})))],custodyRows=new Map((await new CashCustodyRepository(this.tx,this.organizationId).handoverSources(custodyIds)).map(row=>[row.id,row]));
     const expenseClaim=(postings:typeof rows[number]["postings"])=>{const ids=new Set(postings.flatMap(posting=>{const d=posting.dimensions;return d&&typeof d==="object"&&!Array.isArray(d)&&typeof d.employee_expense_claim_id==="string"&&uuidPattern.test(d.employee_expense_claim_id)?[d.employee_expense_claim_id]:[];}));return ids.size===1?[...ids][0]:null;};
     const purchaseIds=[...new Set(rows.flatMap(row=>{const id=expenseClaim(row.postings);return id?[id,...row.postings.flatMap(posting=>{const d=posting.dimensions;if(!d||typeof d!=="object"||Array.isArray(d))return[];const expenseId=d.personal_expense_source_id??d.expense_id;return typeof expenseId==="string"&&uuidPattern.test(expenseId)?[expenseId]:[];})]:[];}))];
     const expenseRoots=new Map((await new ExpensePurchaseRepository(this.tx,this.organizationId).roots(purchaseIds,true)).map(row=>[row.id,row]));
@@ -58,6 +61,7 @@ export class FinancialTransactionResourceRepository {
         }));
         return ids.size === 1 ? [...ids][0] : undefined;
       };
+      const custodyId=dimension("custody_collection_id"),custody=custodyId?custodyRows.get(custodyId):null,custodySources=custodyId?[...custody?cashCustodyDisclosureSources(this.organizationId,custody):[],...row.postings.map(line=>({type:"financial_transaction",organizationId:this.organizationId,id:line.ledgerAccount.id,financialRecordId:line.ledgerAccount.id,amount:line.amount.toString(),occurredAt:row.occurredAt,dataClass:"financial"as const}))]:undefined;
       const claimId=employeeClaims.get(row.id),claim=claimId?claims.get(claimId):undefined,settlement=Boolean(claimId&&!row.employeeRecognitionLine&&!row.employeeCorrectionOpposite),sources=settlement&&claimId?employeeSettlementAuditSources({organizationId:this.organizationId,claimId,originalJournalId:row.reversesTransactionId??row.id,postedAt:row.occurredAt,receipt:receipts.get(row.reversesTransactionId??row.id),accounts:row.postings.map(posting=>posting.ledgerAccount)}):null;
       const bound=!settlement||sources?.bound,fundingSources=sources?.financialSources??[],walletSources=sources?.walletSources??[];
       const expenseId=expenseClaim(row.postings),purchase=expenseId?expenseRoots.get(expenseId):null;
@@ -72,7 +76,7 @@ export class FinancialTransactionResourceRepository {
         assignedUserAccountId: row.createdBy, occurredAt: row.occurredAt, status: "POSTED",
         propertyId: dimension("property_id"), ownerId: dimension("owner_id"), reservationId: dimension("reservation_id"),
         amount: totals.size === 1 ? [...totals.values()][0].amount.toString() : undefined, dataClass: "financial",
-        ...(expenseId?{personalExpenseSources}:{}),
+        ...(expenseId?{personalExpenseSources}:{}),...(custodyId?{custodySources:custody?custodySources:[]}:{}),
         ...payment ? { guestPayment: { receiptId: payment.id, actorId: payment.createdBy, reason: payment.originalAudit.reason, provenance: payment.provenance,
           originalCollectionId: payment.originalCollectionId, receivedAt: payment.receivedAt,
           fundingSources: [{ type: "financial_transaction", organizationId: this.organizationId, id: payment.account.id, financialRecordId: payment.account.id,

@@ -1,3 +1,4 @@
+import {TransferTask} from "@/modules/services/ui/transfer-task";
 import {GroceryTask} from "@/modules/services/ui/grocery-task";
 import { randomUUID } from "node:crypto";
 import Link from "next/link";
@@ -39,7 +40,7 @@ export default async function ProxyTaskPage({ params }: { params: Promise<{ loca
     <ShellHeader eyebrow={task.property.name} title={localizedText(taskText(task.titleTranslations), locale)} subtitle={t("help")}
       actions={<Link className="secondary-button" href={`/${locale}/app/field/validate`}>{t("backToValidation")}</Link>} />
     <FieldLanguage locale={locale} path={`/app/field/validate/${task.id}`} />
-    <GroceryTask locale={locale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/><FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} audience="supervised" />
+    <TransferTask locale={locale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/><GroceryTask locale={locale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/><FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} audience="supervised" />
     <dl className="field-proxy-identities" data-testid="field-proxy-identities">
       <div><dt>{t("performedBy")}</dt><dd>{person(task.completedByPersonId ?? task.assignedToPersonId)}</dd></div>
       <div><dt>{t("validatedBy")}</dt><dd>{completed ? person(task.validatedByPersonId) : session?.user?.name ?? t("you")}</dd></div>

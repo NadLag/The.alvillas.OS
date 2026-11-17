@@ -7,7 +7,7 @@ import {captureAuthorizationCap} from "@/platform/authz/authorization-cap";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {serviceOrderPolicyKey,serviceOrderPolicySchema} from "@/platform/config/service-order-policy";
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
-import {nativeServiceOrderProperty,nativeServiceOrderReservation} from "@/platform/services/order-source";
+import {nativeServiceOrderProperty,nativeServiceOrderReservation,nativeServicePickupTimezone} from "@/platform/services/order-source";
 import {nativeServiceCatalogCurrency} from "@/platform/services/catalog-provider-source";
 import {serviceCatalogRuleKey} from "@/platform/config/service-catalog-policy";
 import {ServiceOrderRepository} from "../infrastructure/service-order-repository";
@@ -58,6 +58,7 @@ export async function inspectNewServiceOrder(actor:AccountActorContext,tx:Tenant
  if(!currency||currency.minorUnit<0||currency.minorUnit>2||priced.price.kind==="PRICED"&&priced.price.amount.amount.decimalPlaces()>currency.minorUnit)throw new ServiceOrderConfigurationError();
  const checks:CurrentAuthorityCheck[]=[...authority.checks,...policyChecks,...catalog.checks,...terms.checks,{action:"create",resource:{...authority.resource,occurredAt:authority.now,amount:priced.price.kind==="PRICED"?priced.price.amount.amount.toFixed(2):undefined}}];
  assertAccountAuthorization(actor,authority.stored,authority.now,checks,new ServiceOrderAccessError());
- const snapshot=Object.fromEntries(["key","name","description","available","pricing_model","amount","currency","order_terms"].filter(key=>entry[key]!==undefined).map(key=>[key,entry[key]])),witnesses={catalogRule:catalog.witness,policyRule:head,property:authority.property,reservation:authority.reservation,financialFingerprint:terms.fingerprint,currency};
+ const pickupTimezone=request.transfer?await nativeServicePickupTimezone(tx,actor.organizationId,authority.property.id):null;if(request.transfer&&(!pickupTimezone||pickupTimezone.xmin!==authority.property.xmin||pickupTimezone.tuple!==authority.property.tuple))throw new ServiceOrderConflictError();
+ const snapshot=Object.fromEntries(["key","name","description","available","pricing_model","amount","currency","order_terms"].filter(key=>entry[key]!==undefined).map(key=>[key,entry[key]])),witnesses={catalogRule:catalog.witness,policyRule:head,property:{...authority.property,...pickupTimezone?{timezone:pickupTimezone.timezone}:{}},reservation:authority.reservation,financialFingerprint:terms.fingerprint,currency};
  return{...authority,...priced,catalog,entry,currency,snapshot,witnesses,checks,reviewFingerprint:commandFingerprint({request,authority:authority.fingerprint,witnesses,catalogKey:serviceCatalogRuleKey,terms:terms.fingerprint})};
 }

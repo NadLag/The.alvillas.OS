@@ -201,3 +201,9 @@ prisma/migrations/20261115230000_native_service_order_tenant_policy_names/migrat
 /prisma/migrations/20261116203000_native_purchase_original_receipt_admission/migration.sql text eol=lf
 /prisma/migrations/20261116210000_native_purchase_receipt_family_admission/migration.sql text eol=lf
 /prisma/migrations/20261116213000_native_grocery_purchase_families/migration.sql text eol=lf
+/prisma/migrations/20261116220000_native_service_transfer_requests/migration.sql text eol=lf
+/prisma/migrations/20261116223000_native_cash_custody_handovers/migration.sql text eol=lf
+
+/prisma/migrations/20261116224500_native_custody_physical_birth/migration.sql text eol=lf
+/prisma/migrations/20261116230000_native_custody_amount_reference/migration.sql text eol=lf
+/prisma/migrations/20261116231500_native_transfer_original_timezone/migration.sql text eol=lf

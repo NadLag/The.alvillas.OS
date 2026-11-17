@@ -1,3 +1,4 @@
+import {TransferTask} from "@/modules/services/ui/transfer-task";
 import {GroceryTask} from "@/modules/services/ui/grocery-task";
 import { OperationEvidencePanel } from "@/modules/reservations/ui/operation-evidence-panel";
 import { EmployeeWorkTimePanel } from "@/modules/finance/ui/employee-work-time-panel";
@@ -398,7 +399,7 @@ export default async function TaskPage({
           ) : null}
         </section>
       </div>
-      <GroceryTask locale={locale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/>{task.type==="CHEF"?<ChefTaskRecipe locale={locale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/>:null}
+      <TransferTask locale={locale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/><GroceryTask locale={locale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/>{task.type==="CHEF"?<ChefTaskRecipe locale={locale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/>:null}
       <OperationEvidencePanel ctx={ctx} taskId={task.id} locale={locale} />
       {task.state==="COMPLETED"?<EmployeeWorkTimePanel taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}.${task.id}`}/>:null}
     </ManagerShell>

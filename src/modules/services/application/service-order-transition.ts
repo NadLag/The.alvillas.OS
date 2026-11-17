@@ -26,6 +26,7 @@ async function prepareTransition(actor:AccountActorContext,tx:TenantTransaction,
  const source=await inspectOriginalServiceOrder(actor,tx,draft.orderId);if(source.root.version!==draft.expectedVersion)throw new ServiceOrderConflictError();
  if(draft.taskPlan)validateChefMenuTask(source.entry,draft.taskPlan.type);
  if(draft.taskPlan&&source.entry.order_terms?.grocery_order&&draft.taskPlan.type!==source.entry.order_terms.grocery_order.task_type)throw new ServiceOrderValidationError();
+ if(draft.taskPlan&&source.entry.order_terms?.transfer_order&&draft.taskPlan.type!=="TRANSFER")throw new ServiceOrderValidationError();
  const work=await nativeServiceOrderWork(actor,tx,source.root,source.authority.stored,source.authority.now),total=validateServiceOrderTransition({from:serviceOrderStateSchema.parse(source.root.state),to:draft.state,pricingModel:source.entry.pricing_model,total:source.total,quote:draft.quote,currency:source.root.currency,currencyPrecision:source.currency.minorUnit,hasActualTaskStart:work.started,hasActualTaskCompletion:work.completed}),
   action=actions[draft.state];if(!action)throw new ServiceOrderConflictError();const actionCheck=source.actionCheck(action,total?.toJSON().amount);
  assertAccountAuthorization(actor,source.authority.stored,source.authority.now,[...source.checks,...work.checks,actionCheck],new ServiceOrderAccessError());

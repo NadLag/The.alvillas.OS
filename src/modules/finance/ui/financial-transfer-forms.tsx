@@ -3,15 +3,21 @@
 import { useEffect,useRef,useState,useTransition } from "react";
 import Link from "next/link";
 import { useRouter,usePathname,useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale,useTranslations } from "next-intl";
+import {safeLocale} from "@/i18n/routing";
+import {formatNumber} from "@/i18n/format";
+import {normalizeAmountInput} from "@/platform/money/amount-input";
+import {readCommandNonce,writeCommandNonce,clearCommandNonce} from "@/platform/http/command-nonce";
 import { financialTransferKinds,financialTransferSchema } from "../domain/financial-transfer";
-import { postFinancialTransferAction,voidFinancialTransferAction } from "../application/financial-transfer-actions";
+import { postFinancialTransferAction,voidFinancialTransferAction,recoverCustodyHandoverAction } from "../application/financial-transfer-actions";
 
 type ErrorCode="forbidden"|"conflict"|"validation"|"unavailable"|"closed"|"error";
-export function FinancialTransferForm({accounts,currencies,baseCurrency,next,canCreate}:{accounts:Array<{id:string;name:string}>;currencies:Array<{code:string}>;baseCurrency:string;next?:string;canCreate:boolean}){
-  const t=useTranslations("FinancialTransfers"),router=useRouter(),pathname=usePathname(),query=useSearchParams(),key=useRef<string|null>(null);
+export function FinancialTransferForm({accounts,currencies,baseCurrency,next,canCreate,custody,nonceScope}:{accounts:Array<{id:string;name:string}>;currencies:Array<{code:string}>;baseCurrency:string;next?:string;canCreate:boolean;nonceScope?:string;custody?:{collectionId:string;fromAccountId:string;available:{amount:string;currency:string}}|null}){
+  const t=useTranslations("FinancialTransfers"),locale=safeLocale(useLocale()),router=useRouter(),pathname=usePathname(),query=useSearchParams(),key=useRef<string|null>(null);
   const [ready,setReady]=useState(false),[pending,startTransition]=useTransition(),[error,setError]=useState<ErrorCode|null>(null),[saved,setSaved]=useState<string|null>(null);
-  useEffect(()=>{queueMicrotask(()=>{key.current=crypto.randomUUID();setReady(true)})},[]);
+  const custodyCollectionId=custody?.collectionId;
+  const recoveryScope="alvillas.custody-handover."+nonceScope+"."+custody?.collectionId;
+  useEffect(()=>{let live=true;queueMicrotask(()=>{void(async()=>{if(!custodyCollectionId){key.current=crypto.randomUUID();setReady(true);return;}try{if(!nonceScope)throw Error("scope");let nonce=readCommandNonce(recoveryScope);if(nonce){const recovered=await recoverCustodyHandoverAction({cashCollectionId:custodyCollectionId,idempotencyKey:nonce});if(!live)return;if(!recovered.ok)throw Error("recovery");if(recovered.data.recorded){setSaved(recovered.data.id);clearCommandNonce(recoveryScope,nonce);nonce=null;}}key.current=nonce??crypto.randomUUID();writeCommandNonce(recoveryScope,key.current);if(readCommandNonce(recoveryScope)!==key.current)throw Error("storage");if(live)setReady(true);}catch{if(live){setReady(false);setError("error");}}})()});return()=>{live=false;};},[custodyCollectionId,nonceScope,recoveryScope]);
   function selection(name:"from"|"to",value:string){const params=new URLSearchParams(query);params.delete("historyAfter");if(value)params.set(name,value);else params.delete(name);startTransition(()=>router.replace(`${pathname}?${params}`))}
   const nextQuery=new URLSearchParams(query);if(next)nextQuery.set("after",next);
   return <div className="financial-transfer-editor">
@@ -26,25 +32,25 @@ export function FinancialTransferForm({accounts,currencies,baseCurrency,next,can
     {canCreate?<form className="resource-form financial-transfer-form" data-testid="financial-transfer-form" aria-busy={pending} onSubmit={event=>{
       event.preventDefault();if(!key.current||pending)return;const element=event.currentTarget,form=new FormData(element);setError(null);setSaved(null);
       const amount=form.get("amount");
-      const input=financialTransferSchema.safeParse({fromAccountId:form.get("fromAccountId"),toAccountId:form.get("toAccountId"),kind:form.get("kind"),amount:typeof amount==="string"?amount.replace(",","."):amount,currency:form.get("currency"),purpose:form.get("purpose"),reason:form.get("reason"),idempotencyKey:key.current});
+      const input=financialTransferSchema.safeParse({fromAccountId:custody?.fromAccountId??form.get("fromAccountId"),toAccountId:form.get("toAccountId"),kind:custody?"CUSTODY_HANDOVER":form.get("kind"),amount:typeof amount==="string"?normalizeAmountInput(amount):amount,currency:custody?.available.currency??form.get("currency"),purpose:form.get("purpose"),reason:form.get("reason"),idempotencyKey:key.current,...custody?{cashCollectionId:custody.collectionId}:{}});
       if(!input.success){setError("validation");return}
-      startTransition(async()=>{try{const result=await postFinancialTransferAction(input.data);if(!result.ok){setError(result.code);return}setSaved(result.data.id);key.current=crypto.randomUUID();element.reset();router.refresh()}catch{setError("error")}});
+      startTransition(async()=>{try{const result=await postFinancialTransferAction(input.data);if(!result.ok){setError(result.code);return}setSaved(result.data.id);if(custody)clearCommandNonce(recoveryScope,input.data.idempotencyKey);key.current=crypto.randomUUID();if(custody){writeCommandNonce(recoveryScope,key.current);if(readCommandNonce(recoveryScope)!==key.current)setReady(false);}element.reset();router.refresh()}catch{setError("error");if(custody)setReady(false);}});
     }}>
-      <h2>{t("create")}</h2><p>{t("separation")}</p>
-      {error?<p role="alert" data-testid="transfer-error">{t(error)}</p>:null}
+      <h2>{t("create")}</h2><p>{t("separation")}</p>{custody?<p data-testid="custody-available">{t("custodyAvailable",{amount:formatNumber(locale,custody.available.amount,{minimumFractionDigits:2,maximumFractionDigits:2}),currency:custody.available.currency})}</p>:null}
+      {error?<><p role="alert" data-testid="transfer-error">{t(error)}</p>{custody?<button type="button" className="secondary-button" onClick={()=>window.location.reload()}>{t("recover")}</button>:null}</>:null}
       {saved?<p role="status" data-testid="transfer-saved">{t("saved")}</p>:null}
-      <fieldset className="resource-form" disabled={!ready||pending}>
+      <fieldset className="resource-form" disabled={!ready||pending||custody?.available.amount==="0.00"}>
         <legend>{t("details")}</legend>
         <div className="form-grid two">
-          <label className="field"><span>{t("from")}</span><select name="fromAccountId" data-testid="transfer-from" value={query.get("from")??""} required onChange={event=>selection("from",event.target.value)}>
+          <label className="field"><span>{t("from")}</span><select name="fromAccountId" data-testid="transfer-from" value={custody?.fromAccountId??query.get("from")??""} disabled={Boolean(custody)} required onChange={event=>selection("from",event.target.value)}>
             <option value="">{t("selectAccount")}</option>{accounts.map(account=><option value={account.id} key={account.id}>{account.name}</option>)}
           </select></label>
           <label className="field"><span>{t("to")}</span><select name="toAccountId" data-testid="transfer-to" value={query.get("to")??""} required onChange={event=>selection("to",event.target.value)}>
             <option value="">{t("selectAccount")}</option>{accounts.map(account=><option value={account.id} key={account.id}>{account.name}</option>)}
           </select></label>
-          <label className="field"><span>{t("kind")}</span><select name="kind" data-testid="transfer-kind" defaultValue="" required><option value="">{t("selectKind")}</option>{financialTransferKinds.map(kind=><option key={kind} value={kind}>{t(`kinds.${kind}`)}</option>)}</select></label>
-          <label className="field"><span>{t("amount")}</span><input name="amount" data-testid="transfer-amount" inputMode="decimal" pattern="(?:0|[1-9][0-9]{0,15})(?:[.,][0-9]{1,2})?" required/></label>
-          <label className="field"><span>{t("currency")}</span><select name="currency" data-testid="transfer-currency" defaultValue={currencies.some(currency=>currency.code===baseCurrency)?baseCurrency:""} required><option value="">{t("selectCurrency")}</option>{currencies.map(currency=><option key={currency.code} value={currency.code}>{currency.code}</option>)}</select></label>
+          <label className="field"><span>{t("kind")}</span><select name="kind" data-testid="transfer-kind" defaultValue={custody?"CUSTODY_HANDOVER":""} required><option value="">{t("selectKind")}</option>{financialTransferKinds.filter(kind=>custody?kind==="CUSTODY_HANDOVER":kind!=="CUSTODY_HANDOVER").map(kind=><option key={kind} value={kind}>{t(`kinds.${kind}`)}</option>)}</select></label>
+          <label className="field"><span>{t("amount")}</span><input name="amount" data-testid="transfer-amount" onInput={event=>{event.currentTarget.value=normalizeAmountInput(event.currentTarget.value);}} inputMode="decimal" pattern="(?:0|[1-9][0-9]{0,15})(?:[.,][0-9]{1,2})?" required/></label>
+          <label className="field"><span>{t("currency")}</span><select name="currency" data-testid="transfer-currency" defaultValue={custody?.available.currency??(currencies.some(currency=>currency.code===baseCurrency)?baseCurrency:"")} disabled={Boolean(custody)} required><option value="">{t("selectCurrency")}</option>{currencies.map(currency=><option key={currency.code} value={currency.code}>{currency.code}</option>)}</select></label>
         </div>
         <label className="field"><span>{t("purpose")}</span><input name="purpose" data-testid="transfer-purpose" minLength={3} maxLength={500} required/></label>
         <label className="field"><span>{t("reason")}</span><textarea name="reason" data-testid="transfer-reason" minLength={6} maxLength={500} required/></label>

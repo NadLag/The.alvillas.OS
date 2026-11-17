@@ -12,16 +12,16 @@ import { FinancialTransferForm,FinancialTransferVoidForm } from "@/modules/finan
 import { financialTransferKinds } from "@/modules/finance/domain/financial-transfer";
 
 export const dynamic="force-dynamic";
-export default async function FinancialTransfersPage({params,searchParams}:{params:Promise<{locale:string}>;searchParams:Promise<{q?:string;after?:string;from?:string;to?:string;historyAfter?:string}>}){
+export default async function FinancialTransfersPage({params,searchParams}:{params:Promise<{locale:string}>;searchParams:Promise<{q?:string;after?:string;from?:string;to?:string;historyAfter?:string;cashCollectionId?:string}>}){
   const {locale:value}=await params,locale=safeLocale(value);setRequestLocale(locale);
   const actor=await financeActorContextFromSession(await auth());if(!actor)redirect(`/${locale}/login`);
   const query=await searchParams,t=await getTranslations("FinancialTransfers");let history,editor;
-  try{[history,editor]=await Promise.all([listFinancialTransfers(actor,{after:query.historyAfter}),getFinancialTransferEditor(actor,{query:query.q,after:query.after,from:query.from,to:query.to})])}
+  try{[history,editor]=await Promise.all([listFinancialTransfers(actor,{after:query.historyAfter}),getFinancialTransferEditor(actor,{query:query.q,after:query.after,from:query.from,to:query.to,cashCollectionId:query.cashCollectionId})])}
   catch(error){if(error instanceof FinancialTransferAccessError||error instanceof z.ZodError)notFound();throw error}
   const next=new URLSearchParams();for(const [key,value] of Object.entries(query))if(value)next.set(key,value);if(history.next)next.set("historyAfter",history.next);
   return <AdminShell className="resource-page financial-transfer-page" testId="financial-transfer-page">
     <ShellHeader eyebrow={t("eyebrow")} title={t("title")} subtitle={t("description")} actions={<Link className="secondary-button" href={`/${locale}/app/finance/accounts`}>{t("back")}</Link>}/>
-    <FinancialTransferForm {...editor} canCreate={history.canCreate}/>
+    <FinancialTransferForm {...editor} canCreate={history.canCreate} nonceScope={actor.organizationId+"."+actor.actorId}/>
     <section aria-label={t("history")}><h2>{t("history")}</h2>
       {!history.rows.length?<p data-testid="transfer-empty">{t("empty")}</p>:<ul className="resource-list">{history.rows.map(row=>{
         const source=row.postings.find(line=>line.side==="CREDIT"),destination=row.postings.find(line=>line.side==="DEBIT");

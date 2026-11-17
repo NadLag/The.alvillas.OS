@@ -16,6 +16,14 @@ export class CashCustodyRepository {
     return this.tx.cashCollection.findUnique({ where: { organizationId_deviceId_clientOpId: { organizationId: this.organizationId, deviceId, clientOpId } } });
   }
   currency(code: string) { return this.tx.currency.findUnique({ where: { code }, select: { code: true, minorUnit: true } }); }
+  async handoverSource(id:string){return(await this.handoverSources([id]))[0]??null;}
+  async handoverSources(ids:readonly string[]){
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<Array<{id:string;propertyId:string;reservationId:string|null;collectorPersonId:string;collectorUserAccountId:string;custodyAccountId:string;transactionId:string;amount:string;currency:string;recordedAt:Date;cityId:string|null;regionId:string|null;sealed:boolean;reversed:boolean}>>(Prisma.sql`SELECT c.id,c.property_id AS "propertyId",c.reservation_id AS "reservationId",c.collector_person_id AS "collectorPersonId",c.collector_user_account_id AS "collectorUserAccountId",c.custody_account_id AS "custodyAccountId",c.transaction_id AS "transactionId",c.amount::text,c.currency,c.recorded_at AS "recordedAt",p.city_id AS "cityId",p.region_id AS "regionId",j.sealed,EXISTS(SELECT 1 FROM financial_transaction r WHERE r.organization_id=c.organization_id AND r.reverses_transaction_id=j.id) AS reversed FROM cash_collection c JOIN property p ON p.organization_id=c.organization_id AND p.id=c.property_id JOIN financial_transaction j ON j.organization_id=c.organization_id AND j.id=c.transaction_id WHERE c.organization_id=${this.organizationId}::uuid AND c.id IN (${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})`);
+  }
+  async handoverAvailable(source:{id:string;custodyAccountId:string;transactionId:string;currency:string}){
+    const rows=await this.tx.$queryRaw<Array<{amount:string}>>(Prisma.sql`SELECT COALESCE(sum(CASE WHEN p.side='DEBIT' THEN p.amount ELSE -p.amount END),0)::text AS amount FROM posting p JOIN financial_transaction j ON j.organization_id=p.organization_id AND j.id=p.transaction_id WHERE p.organization_id=${this.organizationId}::uuid AND p.ledger_account_id=${source.custodyAccountId}::uuid AND p.currency=${source.currency} AND j.sealed AND(j.id=${source.transactionId}::uuid OR j.reverses_transaction_id=${source.transactionId}::uuid OR p.dimensions->>'custody_collection_id'=${source.id})`);return rows[0].amount;
+  }
   async currencies() {
     const [organization, currencies] = await Promise.all([
       this.tx.organization.findUniqueOrThrow({ where: { id: this.organizationId }, select: { baseCurrency: true } }),

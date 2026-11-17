@@ -7,6 +7,7 @@ import { captureException } from "@/platform/observability/sentry";
 import { financeActorContextFromSession } from "./finance-access";
 import { postFinancialTransfer,voidFinancialTransfer,FinancialTransferAccessError,FinancialTransferConflictError,FinancialTransferConfigurationError } from "./financial-transfer-service";
 import { AccountingPeriodClosedError } from "../domain/accounting-period";
+import {recoverCustodyHandover} from "./financial-transfer-service";
 
 async function perform(input:unknown,reverse:boolean){
   const requestId=crypto.randomUUID();
@@ -24,3 +25,6 @@ async function perform(input:unknown,reverse:boolean){
 }
 export async function postFinancialTransferAction(input:unknown){return perform(input,false)}
 export async function voidFinancialTransferAction(input:unknown){return perform(input,true)}
+export async function recoverCustodyHandoverAction(input:unknown){
+ const requestId=crypto.randomUUID();try{const actor=await financeActorContextFromSession(await auth());if(!actor)throw new FinancialTransferAccessError();return{ok:true as const,data:await recoverCustodyHandover(actor,input,{requestId})};}catch(error){const code=error instanceof FinancialTransferAccessError?"forbidden"as const:error instanceof FinancialTransferConflictError?"conflict"as const:error instanceof z.ZodError?"validation"as const:"error"as const;if(code==="error")await captureException(error,{source:"api",requestId,tags:{feature:"custody-handover-recovery"}});return{ok:false as const,code};}
+}

@@ -1,0 +1,16 @@
+import type {TenantTransaction} from "@/platform/db/tenant";
+import type {AccountActorContext} from "@/platform/authz/session-context";
+import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
+import {assertAccountAuthorization} from "@/platform/authz/current-authority";
+import {taskResource} from "@/platform/authz/task-resource";
+import {commandFingerprint} from "@/platform/http/command-fingerprint";
+import {OperationRepository} from "@/modules/reservations/infrastructure/operation-repository";
+import {ServiceOrderRepository} from "@/modules/services/infrastructure/service-order-repository";
+import {TransferOrderRepository} from "@/modules/services/infrastructure/transfer-order-repository";
+import {ServiceOrderAccessError,ServiceOrderConflictError} from "@/modules/services/domain/service-order";
+import {transferTaskResponseSchema} from "./transfer-task-contracts";
+export async function nativeTransferTask(actor:AccountActorContext,tx:TenantTransaction,taskId:string){
+ const operations=new OperationRepository(tx,actor.organizationId),orders=new ServiceOrderRepository(tx,actor.organizationId),transfers=new TransferOrderRepository(tx,actor.organizationId);
+ async function read(){const[task,stored,now]=await Promise.all([operations.serviceOrderTaskHead(taskId),authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId),orders.clock()]);if(!task||task.archivedAt)throw new ServiceOrderAccessError();assertAccountAuthorization(actor,stored,now,[{action:"view",resource:taskResource(task)}],new ServiceOrderAccessError());const row=(await transfers.taskRequests([task.id]))[0];if(row&&(row.propertyId!==task.propertyId||row.reservationId!==task.reservationId))throw new ServiceOrderAccessError();return{value:transferTaskResponseSchema.parse(row?{available:true,taskId:row.taskId,orderId:row.orderId,propertyId:row.propertyId,name:row.name,date:row.date,timezone:row.timezone,guests:row.guests,transfer:row.transfer}:{available:false,taskId:task.id}),fingerprint:commandFingerprint({task,row})};}
+ const before=await read(),after=await read();if(before.fingerprint!==after.fingerprint)throw new ServiceOrderConflictError();return after.value;
+}

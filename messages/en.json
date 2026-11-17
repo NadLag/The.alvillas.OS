@@ -2739,7 +2739,8 @@
     "kinds": {
       "TRANSFER": "Transfer",
       "ADVANCE": "Staff advance",
-      "RETURN": "Advance return"
+      "RETURN": "Advance return",
+      "CUSTODY_HANDOVER": "Cash custody handover"
     },
     "amount": "Amount",
     "currency": "Currency",
@@ -2767,7 +2768,9 @@
     "closed": "The posting period is closed. An authorized administrator must reopen it before posting.",
     "error": "The transfer could not be completed. Your entered details remain available to retry.",
     "loading": "Loading transfers…",
-    "retry": "Try again"
+    "retry": "Try again",
+    "custodyAvailable": "Remaining custody for this receipt: {amount} {currency}. Record only the amount actually handed over.",
+    "recover": "Recover handover result"
   },
   "OwnerLedger": {
     "eyebrow": "Owner finances",
@@ -4270,7 +4273,8 @@
     "paymentReversed": "Payment reversed; original movement retained.",
     "noPayments": "No payments recorded.",
     "reviewAgain": "Review a new allocation decision",
-    "cancelReview": "Return to admitted allocation"
+    "cancelReview": "Return to admitted allocation",
+    "cashHandover": "Record actual cash handover"
   },
   "GuestDeposits": {
     "provenanceTitle": "Original payment details",
@@ -7162,5 +7166,18 @@
     "historical": "Original retained expense",
     "open": "Open expense, receipt and reimbursement",
     "next": "Next expenses"
+  },
+  "Transfers": {
+    "title": "Transfer pickup",
+    "pickup": "Pickup location",
+    "destination": "Destination",
+    "pickupTime": "Pickup time",
+    "guests": "Passengers",
+    "flightReference": "Flight reference",
+    "instructions": "Pickup instructions",
+    "timeHelp": "Use the pickup date and local time at the property. Request each return pickup as another transfer.",
+    "cashHelp": "Record only money actually received in the assigned task cash form. Cash custody, service allocation and driver compensation remain separate.",
+    "service": "Transfer service",
+    "serviceHelp": "Confirmation creates the native Transfer task. Assign its actual driver and schedule in Operations; cash uses the existing custody ledger."
   }
 }

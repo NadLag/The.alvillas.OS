@@ -1,4 +1,5 @@
 "use client";
+import {TransferDetails} from "@/modules/services/ui/transfer-details";
 
 import { useEffect, useRef, useState } from "react";
 import { liveQuery } from "dexie";
@@ -30,7 +31,7 @@ import { FieldProxyForm } from "@/modules/reservations/ui/field-proxy-form";
 import type { FieldCacheAudience } from "./field-queue-store";
 
 function fieldMessages(messages: typeof en) {
-  return { Groceries:messages.Groceries,ChefMenu:messages.ChefMenu,ChefShopping:messages.ChefShopping, Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCash: messages.FieldCash, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, FieldWallet: messages.FieldWallet, Operations: { manage: messages.Operations.manage } };
+  return { Transfers:messages.Transfers,Groceries:messages.Groceries,ChefMenu:messages.ChefMenu,ChefShopping:messages.ChefShopping, Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCash: messages.FieldCash, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, FieldWallet: messages.FieldWallet, Operations: { manage: messages.Operations.manage } };
 }
 const catalogs = { en: fieldMessages(en), fr: fieldMessages(fr), ar: fieldMessages(ar) };
 export function OfflineFieldApp({ initialLocale }: { initialLocale: AppLocale }) {
@@ -124,7 +125,7 @@ function CachedProxy({ task, scope, locale }: { task: FieldWorkSnapshot; scope: 
   return <><p>{task.propertyAddress}</p><dl className="field-proxy-identities" data-testid="field-proxy-identities">
     <dt>{t("performedBy")}</dt><dd>{task.proxyValidation.performerName ?? task.proxyValidation.performedByPersonId}</dd>
     <dt>{t("validatedBy")}</dt><dd>{t("you")}</dd></dl>
-    <CachedChefRecipe task={task} locale={locale} />{task.groceryRequest?<GroceryItems locale={locale} items={task.groceryRequest.items}/>:null}
+    <CachedChefRecipe task={task} locale={locale} />{task.transferRequest?<TransferDetails locale={locale} transfer={task.transferRequest.transfer} date={task.transferRequest.date} timezone={task.transferRequest.timezone} guests={task.transferRequest.guests}/>:null}{task.groceryRequest?<GroceryItems locale={locale} items={task.groceryRequest.items}/>:null}
     <FieldProxyForm locale={locale} taskId={task.id} version={task.proxyValidation.expectedVersion} performerId={task.proxyValidation.performedByPersonId}
       organizationId={scope.organizationId} userId={scope.userId} idempotencyKey={idempotencyKey} cached
       checklist={task.checklistItems.map(item => ({ id: item.id, label: localizedTaskTitle(item.label, locale) }))} /></>;
@@ -137,7 +138,7 @@ function CachedChecklist({ task, scope, locale }: { task: FieldWorkSnapshot; sco
   return <>
     <p>{task.propertyAddress}</p><p>{cache("dueDate", { date: task.dueDate, timezone: task.propertyTimezone })}</p>
     {!task.canEdit ? <p role="status">{cache("readOnly")}</p> : null}
-    <CachedChefRecipe task={task} locale={locale} />{task.groceryRequest?<GroceryItems locale={locale} items={task.groceryRequest.items}/>:null}
+    <CachedChefRecipe task={task} locale={locale} />{task.transferRequest?<TransferDetails locale={locale} transfer={task.transferRequest.transfer} date={task.transferRequest.date} timezone={task.transferRequest.timezone} guests={task.transferRequest.guests}/>:null}{task.groceryRequest?<GroceryItems locale={locale} items={task.groceryRequest.items}/>:null}
     <FieldTaskCompletionForm locale={locale} taskId={task.id} idempotencyKey={idempotencyKey} userId={scope.userId} organizationId={scope.organizationId}
       beforeComplete={<><FieldLinen scope={scope} taskId={task.id} locale={locale} />
         <FieldInventory scope={scope} taskId={task.id} locale={locale} />
