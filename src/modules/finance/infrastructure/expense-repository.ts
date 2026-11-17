@@ -24,6 +24,7 @@ export class ExpenseRepository {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":expense:" + key},0))::text`);
   }
   find(id: string) { return this.tx.expense.findFirst({ where: { organizationId: this.organizationId, id }, include }); }
+  async inventoryPurchaseIdentity(id:string){return(await this.tx.$queryRaw<Array<{id:string;propertyId:string;reservationId:string|null;state:string;transactionId:string|null;version:number;sealed:boolean|null;reversed:boolean}>>(Prisma.sql`SELECT e.id,e.property_id AS "propertyId",e.reservation_id AS "reservationId",e.state,e.transaction_id AS "transactionId",e.version,j.sealed,EXISTS(SELECT 1 FROM financial_transaction r WHERE r.organization_id=e.organization_id AND r.reverses_transaction_id=e.transaction_id) AS reversed FROM expense e LEFT JOIN financial_transaction j ON j.organization_id=e.organization_id AND j.id=e.transaction_id WHERE e.organization_id=${this.organizationId}::uuid AND e.id=${id}::uuid`))[0]??null;}
   byKey(idempotencyKey: string) { return this.tx.expense.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include }); }
   async externalCaptureInstant(expenseId: string) {
     const fee = await this.tx.externalPaymentFee.findUnique({ where: { organizationId_expenseId: { organizationId: this.organizationId, expenseId } }, select: { capture: { select: { capturedAt: true } } } });
