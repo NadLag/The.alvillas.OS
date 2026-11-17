@@ -12,4 +12,4 @@ Publication locks the original accounting source and takes catalog, location and
 
 General operational audit payloads contain receiving/movement references. The separate source-link audit uses the original protected financial transaction resource. Original financial facts stay in the private source receipt rather than a broad operational audit payload.
 
-Additive migrations 296–298 validate the original accounting/receipt ancestry, paired receipts, exact native movement amounts and atomic audits. Forward corrections qualify SQL JSON entry/leg identifiers; applied migration history is retained.
+Additive migrations 296–299 validate the original accounting/receipt ancestry, paired receipts, exact native movement amounts and atomic audits. Forward corrections qualify SQL JSON entry/leg identifiers and retain the native Financial Attachment/admission shared identity; applied migration history is retained.

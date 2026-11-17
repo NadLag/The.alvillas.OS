@@ -26,7 +26,7 @@ type Dependencies={db?:TenantTransactionRunner;requestId?:string};
 const resource=(organizationId:string,type="inventory_movement",id?:string):Resource=>({type,organizationId,id,dataClass:"operational"});
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value))as Prisma.InputJsonObject;
 const identity=z.object({id:z.uuid()}).strict();
-const selection=z.object({locationId:z.uuid().optional(),itemId:z.uuid().optional(),after:z.uuid().optional()}).strict();
+const selection=z.object({groupId:z.uuid().optional(),locationId:z.uuid().optional(),itemId:z.uuid().optional(),after:z.uuid().optional()}).strict();
 async function authority(actor:AccountActorContext,tx:TenantTransaction,actions:readonly Action[]=["view"]){
  const inventory=new InventoryRepository(tx,actor.organizationId),[stored,now]=await Promise.all([authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId),inventory.catalogClock()]);
  const checks:CurrentAuthorityCheck[]=[...new Set(["view"as const,...actions])].map(action=>({action,organizationOnly:true,resource:resource(actor.organizationId)}));

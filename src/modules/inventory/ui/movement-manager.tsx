@@ -10,7 +10,7 @@ import {readCommandNonce,clearCommandNonce} from "@/platform/http/command-nonce"
 import {inventoryMovementPageSchema,inventoryMovementRecoverySchema,type InventoryMovementHistory} from "../domain/movement-view";
 import {inventoryCatalogRequest,InventoryBrowserError,type InventoryBrowserState} from "./item-browser";
 const Editor=dynamic(()=>import("./movement-editor").then(module=>module.InventoryMovementEditor),{loading:()=> <SkeletonBlock/>});
-export function InventoryMovementManager({locale,authorizationScope:scope}:{locale:AppLocale;authorizationScope:string}){
+export function InventoryMovementManager({locale,authorizationScope:scope,initialGroupId}:{locale:AppLocale;authorizationScope:string;initialGroupId?:string}){
  const t=useTranslations("InventoryMovements"),nonceKey="alvillas:inventory-movement:"+scope,[page,setPage]=useState<z.infer<typeof inventoryMovementPageSchema>|null>(null),[state,setState]=useState<InventoryBrowserState>("loading"),[editor,setEditor]=useState<{original:InventoryMovementHistory|null}|null>(null),[visible,setVisible]=useState(true),[notice,setNotice]=useState<"saved"|"unconfirmed"|"notRecorded"|null>(null),controller=useRef<AbortController|null>(null),epoch=useRef(0);
  const invalidate=useCallback(()=>{controller.current?.abort();epoch.current++;},[]);
  const denied=useCallback(()=>{invalidate();setPage(null);setEditor(null);setNotice(null);setState("forbidden");},[invalidate]);
@@ -18,9 +18,9 @@ export function InventoryMovementManager({locale,authorizationScope:scope}:{loca
   invalidate();const own=epoch.current,abort=new AbortController();controller.current=abort;setPage(null);setEditor(null);setState("loading");
   try{
    const nonce=readCommandNonce(nonceKey);if(nonce){const recovered=inventoryMovementRecoverySchema.parse(await inventoryCatalogRequest("movements","recover",{idempotencyKey:nonce},abort.signal,scope));if(abort.signal.aborted||own!==epoch.current)return;if(recovered.receipt&&(recovered.receipt.organizationId+"."+recovered.receipt.actorId!==scope||recovered.receipt.groupId!==nonce))throw new InventoryBrowserError("forbidden");clearCommandNonce(nonceKey,nonce);setNotice(recovered.recorded?"saved":"notRecorded");}
-   const value=inventoryMovementPageSchema.parse(await inventoryCatalogRequest("movements","page",after?{after}:{},abort.signal,scope));if(abort.signal.aborted||own!==epoch.current)return;setPage(value);setState("ready");
+   const value=inventoryMovementPageSchema.parse(await inventoryCatalogRequest("movements","page",{...initialGroupId?{groupId:initialGroupId}:{},...after?{after}:{}},abort.signal,scope));if(abort.signal.aborted||own!==epoch.current)return;setPage(value);setState("ready");
   }catch(error){if(abort.signal.aborted||own!==epoch.current)return;setPage(null);setState(error instanceof InventoryBrowserError?error.state:"unavailable");}
- },[invalidate,nonceKey,scope]);
+ },[invalidate,nonceKey,scope,initialGroupId]);
  useEffect(()=>{
   const hide=()=>{invalidate();setVisible(false);setPage(null);setEditor(null);setNotice(null);},show=()=>{if(document.hidden)return;setVisible(true);void load();},visibility=()=>document.hidden?hide():show(),offline=()=>{hide();setState("offline");},pageShow=(event:PageTransitionEvent)=>{if(event.persisted)show();};
   let mounted=true;document.addEventListener("visibilitychange",visibility);window.addEventListener("pagehide",hide);window.addEventListener("pageshow",pageShow);window.addEventListener("offline",offline);window.addEventListener("online",show);queueMicrotask(()=>{if(mounted){if(document.hidden)hide();else void load();}});

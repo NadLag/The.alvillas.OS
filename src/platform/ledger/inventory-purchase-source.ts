@@ -7,13 +7,26 @@ import {ExpensePurchaseRepository} from "@/modules/finance/infrastructure/expens
 import {CompanyExpenseInvoiceRepository} from "@/modules/finance/infrastructure/company-expense-invoice-repository";
 import {SupplierPayableRepository} from "@/modules/finance/infrastructure/supplier-payable-repository";
 import {getExpense,ExpenseAccessError,ExpenseConflictError} from "@/modules/finance/application/expense-service";
-import {inspectFinancialAttachmentContext} from "@/modules/finance/application/financial-attachments";
+import {inspectFinancialAttachmentContext,readFinancialAttachments} from "@/modules/finance/application/financial-attachments";
 import {inspectSupplierInvoiceSettlementSource} from "@/modules/finance/application/supplier-payment-service";
 import {inspectPurchaseReceipt} from "./purchase-evidence";
 import type {InventoryPurchaseExpenseSource} from "@/modules/inventory/domain/purchase-expense";
 import {InventoryCatalogAccessError,InventoryCatalogConflictError} from "@/modules/inventory/domain/catalog-errors";
-import {FinancialAttachmentAccessError} from "@/modules/finance/domain/financial-attachment";
+import {FinancialAttachmentAccessError,FinancialAttachmentConfigurationError} from "@/modules/finance/domain/financial-attachment";
 import {SupplierInvoiceAccessError,SupplierInvoiceConflictError} from "@/modules/finance/application/supplier-invoice-access";
+import {inventoryPurchaseReceiptChoicesSchema} from "@/modules/inventory/domain/purchase-expense";
+async function receiptChoices(actor:AccountActorContext,tx:TenantTransaction,input:{kind:"EXPENSE"|"SUPPLIER_INVOICE_LINE";id:string;before?:string}){
+ const items:Array<{id:string;label:string;receiptSource:"DOCUMENT_VERSION"|"FINANCIAL_ATTACHMENT"}>=[];let reference:string,amount:{amount:string;currency:string},transactionId:string,rootId:string,originId:string,originalSha:string|undefined;let recheck:()=>Promise<unknown>;
+ if(input.kind==="EXPENSE"){
+  const repository=new ExpenseRepository(tx,actor.organizationId),row=await repository.find(input.id),identity=await repository.inventoryPurchaseIdentity(input.id);if(!row||!identity?.transactionId||identity.state!=="POSTED"||!identity.sealed||identity.reversed)throw new InventoryCatalogAccessError();await getExpense(actor,row.id,{db:{$transaction:async work=>work(tx)}});const purchase=await new ExpensePurchaseRepository(tx,actor.organizationId).find(row.id);originId=row.id;reference=row.purpose;amount=Money.of(row.amount.toString(),row.currency).toJSON();transactionId=identity.transactionId;rootId=purchase?.rootExpenseId??row.correctsExpenseId??row.id;
+  if(purchase){const receipt=await inspectPurchaseReceipt(actor,tx,{propertyId:row.propertyId,reservationId:row.reservationId,receiptVersionId:purchase.receiptVersionId});originalSha=receipt.version.admission.sha256;if(!input.before)items.push({id:receipt.version.id,label:receipt.version.title,receiptSource:"DOCUMENT_VERSION"});}recheck=()=>getExpense(actor,row.id,{db:{$transaction:async work=>work(tx)}});
+ }else{
+  const line=await new CompanyExpenseInvoiceRepository(tx,actor.organizationId).line(input.id);if(!line)throw new InventoryCatalogAccessError();const source=await inspectSupplierInvoiceSettlementSource(actor,line.revision.invoiceId,tx),cost=source.costs.find(row=>row.id===line.id),recognition=source.existing?.lines.find(row=>row.invoiceLineId===line.id),journal=recognition?source.journals.find(row=>row.id===recognition.transactionId):null;if(!cost||!recognition||!journal||journal.reversedByTransactions.length)throw new InventoryCatalogAccessError();originId=source.row.id;reference=source.revision.invoiceNumber;amount=cost.amount.toJSON();transactionId=recognition.transactionId;rootId=line.id;recheck=async()=>source.recheckSettlement(await source.finance.clock());
+ }
+ let next:string|null=null;try{const history=await readFinancialAttachments(actor,{transactionId,...input.before?{before:input.before}:{}},{db:{$transaction:async work=>work(tx)}});items.push(...history.items.filter(row=>!row.supersededById&&["RECEIPT","INVOICE"].includes(row.kind)&&(!originalSha||row.sha256===originalSha)).map(row=>({id:row.id,label:row.fileName,receiptSource:"FINANCIAL_ATTACHMENT"as const})));next=history.next;}catch(error){if(!(error instanceof FinancialAttachmentConfigurationError)&&(!items.length||!(error instanceof FinancialAttachmentAccessError)))throw error;}
+ await recheck();return{...inventoryPurchaseReceiptChoicesSchema.parse({originId,reference,amount,items,next}),rootId};
+}
+export async function inventoryPurchaseReceiptChoices(...args:Parameters<typeof receiptChoices>){try{return await receiptChoices(...args);}catch(error){if(error instanceof ExpenseAccessError||error instanceof SupplierInvoiceAccessError||error instanceof FinancialAttachmentAccessError)throw new InventoryCatalogAccessError();throw error;}}
 export async function lockInventoryPurchaseExpenseSource(actor:AccountActorContext,tx:TenantTransaction,input:InventoryPurchaseExpenseSource){if(input.kind==="EXPENSE")await new ExpenseRepository(tx,actor.organizationId).lock(input.id);else{const line=await new CompanyExpenseInvoiceRepository(tx,actor.organizationId).line(input.id);if(!line)throw new InventoryCatalogAccessError();await new SupplierPayableRepository(tx,actor.organizationId).lockInvoice(line.revision.invoiceId);}}
 /** Read original approved accounting evidence. Receiving goods never recognizes
  * another expense, pays a supplier/employee or changes an allocation or posting. */
