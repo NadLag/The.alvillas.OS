@@ -2948,3 +2948,6 @@ textarea:disabled {
 .inventory-page :is(th, td) { padding: var(--space-3); border-block-end: 1px solid var(--border-subtle); text-align: start; vertical-align: top; }
 .inventory-page .checkbox-field { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); }
 .inventory-page .checkbox-field input { inline-size: var(--target-compact); block-size: var(--target-compact); min-block-size: var(--target-compact); flex: 0 0 auto; }
+.inventory-stock-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: var(--space-4); margin: 0; }
+.inventory-stock-totals dt { color: var(--text-secondary); }
+.inventory-stock-totals dd { margin: 0; padding-block-start: var(--space-2); overflow-wrap: anywhere; }
