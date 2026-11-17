@@ -1,6 +1,8 @@
 import {z} from "zod";
 import {stockQuantitySchema} from "./stocktake";
 import {inventoryItemReasonSchema} from "./item-catalog";
+import {inventoryMovementReceiptSchema} from "./movement-command";
+import {inventoryMovementPreviewSchema} from "./movement-view";
 const id=z.uuid().transform(value=>value.toLowerCase()),hash=z.string().regex(/^[a-f0-9]{64}$/u);
 export const inventoryPurchaseExpenseSourceSchema=z.discriminatedUnion("kind",[
  z.object({kind:z.literal("EXPENSE"),id,receiptId:id,receiptSource:z.enum(["DOCUMENT_VERSION","FINANCIAL_ATTACHMENT"])}).strict(),
@@ -13,6 +15,12 @@ export const inventoryPurchaseDraftSchema=z.object({source:inventoryPurchaseExpe
 });
 export type InventoryPurchaseDraft=z.infer<typeof inventoryPurchaseDraftSchema>;
 export const inventoryPurchaseCommandSchema=z.object({draft:inventoryPurchaseDraftSchema,reviewFingerprint:hash,idempotencyKey:id}).strict();
+export const inventoryPurchaseProofSchema=z.object({kind:inventoryPurchaseExpenseSourceSchema.options[0].shape.kind.or(inventoryPurchaseExpenseSourceSchema.options[1].shape.kind),id,rootId:id,transactionId:id,propertyId:id.nullable(),reservationId:id.nullable(),reference:z.string(),amount:z.object({amount:z.string(),currency:z.string()}).passthrough(),supplierId:id.nullable(),purchaserId:id.nullable(),fundingKind:z.enum(["COMPANY","PERSONAL"]).nullable(),receiptId:id,receiptSource:z.enum(["DOCUMENT_VERSION","FINANCIAL_ATTACHMENT"]),receiptSha256:hash,fingerprint:hash}).strict();
+export const inventoryPurchaseReceiptSchema=z.object({schemaVersion:z.literal(1),organizationId:id,actorId:id,idempotencyKey:id,draft:inventoryPurchaseDraftSchema,reviewFingerprint:hash,source:inventoryPurchaseProofSchema,movements:z.array(inventoryMovementReceiptSchema).min(1).max(50),receivedAt:z.iso.datetime()}).strict();
+export const inventoryPurchaseReviewSchema=z.object({draft:inventoryPurchaseDraftSchema,reviewFingerprint:hash,source:inventoryPurchaseProofSchema,lines:z.array(inventoryMovementPreviewSchema).min(1).max(50)}).strict();
+export const inventoryPurchaseReceived="inventory.purchase.received",inventoryPurchaseSourceReceived="inventory.purchase.source_received",inventoryPurchaseCancelled="inventory.purchase.cancelled";
+export const inventoryPurchaseReceiptKey=(nonce:string)=>"inventory-purchase:"+nonce;
+export const inventoryPurchaseSourceKey=(kind:string,rootId:string)=>"inventory-purchase-source:"+kind+":"+rootId;
 /** Goods receiving keeps exact native counting units. Invoice monetary values
  * and allocations stay in their original financial engine; no unit conversion
  * or cost allocation is inferred from physical quantities. */
