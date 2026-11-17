@@ -28,7 +28,7 @@ export function InventoryLocationManager({locale,authorizationScope:scope}:{loca
   return()=>{mounted=false;invalidate();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("pagehide",hide);window.removeEventListener("pageshow",pageShow);window.removeEventListener("offline",offline);window.removeEventListener("online",show);};
  },[invalidate,load]);
  function search(event:FormEvent){event.preventDefault();void load(query);}
- if(!visible)return <p role="status">{t(state==="offline"?"states.offline":"privateHidden")}</p>;
+ if(!visible)return <div className="resource-form" data-testid="inventory-location-manager"><p role="status">{t(state==="offline"?"states.offline":"privateHidden")}</p></div>;
  return <div className="resource-form" data-testid="inventory-location-manager"><div className="form-actions"><button type="button" className="quiet-button" onClick={()=>void load()}>{t("refresh")}</button>{page?.capabilities.create&&state==="ready"&&!editor&&notice!=="unconfirmed"?<button type="button" className="primary-button" onClick={()=>setEditor({initial:null,operation:"CREATE"})}>{t("operations.CREATE")}</button>:null}</div>
   {notice?<p role="status">{t(notice)}</p>:null}
   {editor?<Editor key={editor.initial?.id??"new"} {...editor} scope={scope} nonceKey={nonceKey} onClose={()=>setEditor(null)} onDenied={denied} onSaved={()=>{setNotice("saved");void load(query);}} onUnknown={()=>{setNotice("unconfirmed");void load(query);}}/>:<>
