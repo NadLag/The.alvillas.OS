@@ -161,6 +161,7 @@ test.describe("property template administration", () => {
           .fill(`turnover-${suffix}`);
       }
       if (kind === "INVENTORY") {
+        await page.getByTestId("template-property-types").fill(property.propertyType+"\nCustom original property type");
         await entry.getByRole("spinbutton", { name: "Minimum quantity", exact: true }).fill("8");
         await entry.getByRole("textbox", { name: "Unit", exact: true }).fill("piece");
       }
@@ -171,6 +172,7 @@ test.describe("property template administration", () => {
       await saveAndOpen(page, `${kind.toLowerCase()}-${suffix}`, `${kind} ${suffix}`);
       await apply(page);
       await expect(page.getByTestId("template-diff-row").first()).toBeVisible();
+      if(kind==="INVENTORY"){const query=new URL(page.url()).search;for(const locale of["en","fr","ar"]){await page.goto(`/${locale}/app/templates${query}`);await expect(page.getByTestId("template-property-types")).toHaveValue(property.propertyType+"\nCustom original property type");await expect(page.locator("html")).toHaveAttribute("dir",locale==="ar"?"rtl":"ltr");expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);}}
     }
   });
 });
