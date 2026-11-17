@@ -7063,5 +7063,16 @@
     "orders": "Commandes originales",
     "servings": "Portions : {count}",
     "narrowWindow": "Choisissez une période plus courte pour recevoir la liste complète."
+  },
+  "ChefCompensation": {
+    "title": "Règles de rémunération du chef",
+    "help": "Ouvrez les contrats du chef choisi dans cette commande originale. Les accès opérationnels et financiers sont autorisés séparément.",
+    "read": "Lire les accès aux contrats du chef",
+    "refresh": "Actualiser les accès aux contrats du chef",
+    "rules": "Utilisez les contrats du personnel existants pour définir une rémunération par tâche, par heure, mensuelle ou en pourcentage avec une date d’effet. Chaque modification conserve son historique.",
+    "configure": "Configurer les contrats de ce chef",
+    "contracts": "Consulter les contrats de ce chef",
+    "payables": "Examiner les périodes de rémunération et les dettes",
+    "earned": "Une estimation contractuelle ne crée pas de rémunération acquise. Le travail terminé, le temps réel approuvé, les périodes mensuelles admissibles ou les sources originales du pourcentage doivent satisfaire les contrôles existants."
   }
 }
