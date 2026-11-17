@@ -18,6 +18,7 @@ import { SupplierInvoiceRepository } from "@/modules/finance/infrastructure/supp
 import { invoiceAutomationSource, type InvoiceAutomationSource } from "./invoice-source";
 import {inventoryReorderSignalSchema,inventoryReorderSignalKey,type InventoryReorderSignal} from "@/modules/inventory/domain/reorder-event";
 import {inventoryMinimumsForLocation} from "@/modules/inventory/domain/reorder";
+import {nativeInventoryCountEventSource,type NativeInventoryCountEventSource} from "@/platform/inventory/stocktake-event-source";
 
 export const json = (v: unknown) =>
   JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -163,10 +164,16 @@ export class AutomationRepository {
     expense?: { resource: Resource; approvalId: string | null; submissionId: string };
     invoice?: InvoiceAutomationSource;
     inventorySource?: InventoryReorderSignal;
+    inventoryCountSource?: NativeInventoryCountEventSource;
   }> {
     const event = await this.event(eventId);
     if (!event) throw new Error("automation_source_missing");
     const p = event.payload as Record<string, unknown>;
+    const inventoryCountSource=await nativeInventoryCountEventSource(this.tx,this.organizationId,event);
+    if(inventoryCountSource){
+      if(propertyOverride&&propertyOverride!==inventoryCountSource.propertyId)throw Error("automation_scope_mismatch");const property=inventoryCountSource.propertyId?await this.property(inventoryCountSource.propertyId):null;if(inventoryCountSource.propertyId&&!property)throw Error("automation_source_missing");
+      const scopes=property?await new ReservationConfigScopeRepository(this.tx,this.organizationId).scopes({propertyId:property.id,asOf:event.occurredAt}):[{scopeType:"organization",scopeId:null}];return{event,property,scopes,inventoryCountSource,evaluation:{fields:{event:{id:event.id,type:event.type,date:new Intl.DateTimeFormat("en-CA",{timeZone:inventoryCountSource.timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(event.occurredAt),occurred_at:event.occurredAt.toISOString()},...property?{property:{id:property.id,timezone:property.timezone}}:{},inventory:{item:inventoryCountSource.itemKey,quantity:inventoryCountSource.actual},stocktake:{id:inventoryCountSource.id,expected:inventoryCountSource.expected,actual:inventoryCountSource.actual,delta:inventoryCountSource.delta,revision:inventoryCountSource.revision}},configs:{}}};
+    }
     if(event.type==="InventoryBelowMinimum"&&Object.hasOwn(p,"inventorySource")){
       const signal=inventoryReorderSignalSchema.parse(p.inventorySource);
       if(signal.organizationId!==this.organizationId||event.idempotencyKey!==inventoryReorderSignalKey(signal)||

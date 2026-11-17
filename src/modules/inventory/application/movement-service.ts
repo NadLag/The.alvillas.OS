@@ -36,6 +36,7 @@ async function authority(actor:AccountActorContext,tx:TenantTransaction,actions:
 }
 type Authority=Awaited<ReturnType<typeof authority>>;
 export const inventoryMovementReadAuthorityInTransaction=(actor:AccountActorContext,tx:TenantTransaction)=>authority(actor,tx);
+export const inventoryMovementAuthorityInTransaction=authority;
 async function sources(actor:AccountActorContext,context:Authority,itemId:string,locationIds:readonly string[],reservationIds:readonly string[],writing=false){
  const item=await context.inventory.catalogItemById(itemId),locations=await Promise.all([...new Set(locationIds)].sort().map(id=>context.inventory.locationCatalogById(id))),reservations=await Promise.all([...new Set(reservationIds)].sort().map(id=>context.movements.reservation(id)));
  if(!item||locations.some(row=>!row)||reservations.some(row=>!row))throw new InventoryCatalogAccessError();
@@ -76,6 +77,8 @@ async function verifySources(actor:AccountActorContext,tx:TenantTransaction,valu
  await recheckAccountAuthorization(actor,tx,await current.inventory.catalogClock(),value.checks,new InventoryCatalogAccessError());
 }
 export async function assertInventoryMovementsViewer(actor:AccountActorContext,deps:Dependencies={}){return withTenant(deps.db??prisma,actor.organizationId,async tx=>{const context=await authority(actor,tx);await recheckAccountAuthorization(actor,tx,await context.inventory.catalogClock(),context.checks,new InventoryCatalogAccessError());});}
+export const inventoryMovementSourcesInTransaction=sources;
+export const verifyInventoryMovementSourcesInTransaction=verifySources;
 export async function previewInventoryMovement(actor:AccountActorContext,raw:unknown,deps:Dependencies={}){
  const draft=inventoryMovementRequestSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{const before=await prepare(actor,tx,draft),after=await prepare(actor,tx,draft);if(before.reviewFingerprint!==after.reviewFingerprint)throw new InventoryCatalogConflictError();return review(draft,after);});
 }
