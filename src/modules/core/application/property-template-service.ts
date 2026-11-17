@@ -8,6 +8,7 @@ import { present, maskedValue, type FieldPolicy } from "@/platform/authz/present
 import { authorizeUnconditionalSource, authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import {inventoryPolicyAppliesToProperty} from "@/platform/config/inventory-policy";
 import { writePropertyConfiguration,PropertyConfigurationAuthorizationError } from "@/platform/config/property-configuration";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -146,7 +147,7 @@ async function templateDisclosure(ctx: TemplateActorContext, repo: PropertyTempl
   const property = propertyId ? (await repo.presentationProperties([propertyId]))[0] : undefined;
   if (propertyId && !property) throw new TemplateNotFoundError();
   if(ownerId){const head=propertyId?await repo.authorizationProperty(propertyId):null;if(!head?.ownership.some(row=>row.ownerId===ownerId))throw new TemplateAccessError();}
-  const current = financial ? await authContextForAccountInTransaction(repo.tx, ctx.organizationId, ctx.actorId) : ctx.authContext, at = new Date();
+  const current = await authContextForAccountInTransaction(repo.tx, ctx.organizationId, ctx.actorId), at = new Date();
   return { current, property, at, source: { organizationId: ctx.organizationId, propertyId, ownerId,id: propertyId ?? undefined,
     city: property?.cityId ?? property?.city, region: property?.regionId ?? property?.region } };
 }
@@ -169,6 +170,8 @@ export async function savePropertyTemplate(ctx: TemplateActorContext, raw: unkno
   const audit = await meta(deps);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async (tx) => {
     const repo = new PropertyTemplateRepository(tx, ctx.organizationId);
+    const inventoryAuthority=async()=>{if(input.kind!=="INVENTORY")return;const property=input.propertyId?await repo.authorizationProperty(input.propertyId):undefined;if(input.propertyId&&!property)throw new TemplateAccessError();const current=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);for(const authContext of[ctx.authContext,current])allowed({...ctx,authContext},input.expectedVersion?"configure":"create",input.propertyId,input.kind,property??undefined);if(input.propertyId){const type=await repo.inventoryTemplatePropertyType(input.propertyId);if(type===null||!inventoryPolicyAppliesToProperty(input.values.rules?.["inventory.minimums"],type))throw new TemplateConflictError();}};
+    await inventoryAuthority();
     await repo.lock(input.key);
     const before = await repo.latest(input.key);
     if (
@@ -203,6 +206,7 @@ export async function savePropertyTemplate(ctx: TemplateActorContext, raw: unkno
       reason: input.reason,
       occurredAt: new Date()
     });
+    await inventoryAuthority();
     if (input.kind !== "SERVICE_CATALOG") return after;
     const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, input.expectedVersion ? "configure" : "create");
     return presentFinancialTemplate(ctx, disclosure, after, ["values", "reason"]);
@@ -263,13 +267,14 @@ export async function templateCatalog(
       organization: propertyId !== null || completeOrganization,
       allProperties: !propertyId && completeOrganization,
       versionIds: versions,
+      targetPropertyId:propertyId??undefined,
       kind: input.kind,
       search,
       page
     });
     const sourceIds = [...new Set([...properties.map(property => property.id), ...(target ? [target.id] : []), ...rows.slice(0, 24).flatMap(row => row.propertyId ? [row.propertyId] : []), ...(propertyId ? [propertyId] : [])])],
       sourceProperties = new Map((await repo.presentationProperties(sourceIds)).map(property => [property.id, property])),
-      current = rows.slice(0, 24).some(row => row.kind === "SERVICE_CATALOG") ? await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId) : ctx.authContext, at = new Date();
+      current = await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId), at = new Date();
     const propertyVisible = (id: string) => { const source = sourceProperties.get(id); return Boolean(source && authorize(current, "view", {
       type: "property", organizationId: ctx.organizationId, id, propertyId: id, city: source.cityId ?? source.city, region: source.regionId ?? source.region }, at)); };
     if (!authorizeCollection(current, "view", "config_rule") || !authorizeCollection(current, "view", "property") || propertyId && !propertyVisible(propertyId)) throw new TemplateAccessError();
@@ -396,6 +401,8 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       throw new TemplateConflictError();
     const template = selected ?? binding?.templateVersion;
     if (!template) throw new TemplateNotFoundError();
+    const inventoryApplicability=async()=>{if(kind!=="INVENTORY"||input.action!=="APPLY")return;const type=await repo.inventoryTemplatePropertyType(input.propertyId),values=z.object({rules:z.record(z.string(),z.unknown())}).passthrough().parse(template.values);if(type===null||!inventoryPolicyAppliesToProperty(values.rules["inventory.minimums"],type))throw new TemplateConflictError();};
+    await inventoryApplicability();
     await repo.lock(template.key);
     if (template.propertyId && template.propertyId !== input.propertyId) throw new TemplateAccessError();
     if (
@@ -493,6 +500,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       occurredAt: new Date()
     });
     await writeAuthority(kind);
+    await inventoryApplicability();
     if (kind !== "SERVICE_CATALOG") return revision;
     const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure",input.ownerId);
     return presentFinancialTemplate(ctx, disclosure, revision, ["snapshot", "overrides", "command", "reason"]);

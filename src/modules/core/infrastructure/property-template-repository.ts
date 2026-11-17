@@ -21,6 +21,7 @@ export class PropertyTemplateRepository {
     readonly tx: TenantTransaction,
     readonly organizationId: string
   ) {}
+  private inventoryPropertyTypeSelection(values:Prisma.Sql,propertyId:string){return Prisma.sql`(${values}#>'{rules,inventory.minimums,property_types}' IS NULL OR ${values}#>'{rules,inventory.minimums,property_types}' @> (SELECT jsonb_build_array(p.property_type) FROM property p WHERE p.organization_id=${this.organizationId}::uuid AND p.id=${propertyId}::uuid AND p.archived_at IS NULL))`;}
 
   /** Native template sources select identities and authority metadata before any names, values or reasons. */
   nativeInventoryTemplateHeads(ids:readonly string[],kind:"INVENTORY"|"SERVICE_CATALOG"|"WORKFLOW"="INVENTORY") {
@@ -39,7 +40,7 @@ export class PropertyTemplateRepository {
 
   nativeInventoryTemplatePage(propertyId:string,query:string,after:string|undefined,asOf:Date,kind:"INVENTORY"|"SERVICE_CATALOG"|"WORKFLOW"="INVENTORY") {
     const pattern="%"+query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
-    return this.tx.$queryRaw<Array<{id:string;propertyId:string|null;status:string;createdBy:string;createdAt:Date}>>(Prisma.sql`SELECT t.id,t.property_id AS "propertyId",t.status,t.created_by AS "createdBy",t.created_at AS "createdAt" FROM property_template_version t WHERE t.organization_id=${this.organizationId}::uuid AND t.kind=${kind} AND(t.property_id IS NULL OR t.property_id=${propertyId}::uuid) AND t.status='ACTIVE' AND t.created_at<=${asOf} AND NOT EXISTS(SELECT 1 FROM property_template_version v WHERE v.organization_id=t.organization_id AND v.key=t.key AND v.version>t.version AND v.created_at<=${asOf}) ${after?Prisma.sql`AND t.id>${after}::uuid`:Prisma.empty} AND(${query}='' OR t.key ILIKE ${pattern} OR t.name->>'en' ILIKE ${pattern} OR t.name->>'fr' ILIKE ${pattern} OR t.name->>'ar' ILIKE ${pattern}) ORDER BY t.id LIMIT 51`);
+    return this.tx.$queryRaw<Array<{id:string;propertyId:string|null;status:string;createdBy:string;createdAt:Date}>>(Prisma.sql`SELECT t.id,t.property_id AS "propertyId",t.status,t.created_by AS "createdBy",t.created_at AS "createdAt" FROM property_template_version t WHERE t.organization_id=${this.organizationId}::uuid AND t.kind=${kind} AND(t.property_id IS NULL OR t.property_id=${propertyId}::uuid) AND t.status='ACTIVE' AND t.created_at<=${asOf} AND NOT EXISTS(SELECT 1 FROM property_template_version v WHERE v.organization_id=t.organization_id AND v.key=t.key AND v.version>t.version AND v.created_at<=${asOf}) ${kind==="INVENTORY"?Prisma.sql`AND ${this.inventoryPropertyTypeSelection(Prisma.sql`t.values`,propertyId)}`:Prisma.empty} ${after?Prisma.sql`AND t.id>${after}::uuid`:Prisma.empty} AND(${query}='' OR t.key ILIKE ${pattern} OR t.name->>'en' ILIKE ${pattern} OR t.name->>'fr' ILIKE ${pattern} OR t.name->>'ar' ILIKE ${pattern}) ORDER BY t.id LIMIT 51`);
   }
   nativeInventoryTemplateChoiceRows(ids:readonly string[],kind:"INVENTORY"|"SERVICE_CATALOG"="INVENTORY") {
     if(!ids.length)return Promise.resolve([]);
@@ -49,6 +50,7 @@ export class PropertyTemplateRepository {
     const [property] = await new CoreRepository(this.tx, this.organizationId).onboardingPropertyHeads([propertyId]);
     return property ?? null;
   }
+  async inventoryTemplatePropertyType(propertyId:string){return(await this.tx.property.findFirst({where:{organizationId:this.organizationId,id:propertyId,archivedAt:null},select:{propertyType:true}}))?.propertyType??null;}
   lock(key: string) {
     return this.tx.$executeRaw(
       Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`template:${this.organizationId}:${key}`}, 0))`
@@ -207,6 +209,7 @@ export class PropertyTemplateRepository {
     organization: boolean;
     allProperties?: boolean;
     versionIds?: string[];
+    targetPropertyId?:string;
     kind?: TemplateKind;
     search: string;
     page: number;
@@ -220,6 +223,7 @@ export class PropertyTemplateRepository {
           OR id::text=ANY(${input.versionIds ?? []}::text[]))
         ORDER BY key, version DESC) AS latest
       WHERE (${input.kind ?? null}::text IS NULL OR kind = ${input.kind ?? null})
+        ${input.targetPropertyId?Prisma.sql`AND(kind<>'INVENTORY' OR ${this.inventoryPropertyTypeSelection(Prisma.sql`latest.values`,input.targetPropertyId)})`:Prisma.empty}
         AND (name->>'en' ILIKE ${`%${input.search}%`} OR name->>'fr' ILIKE ${`%${input.search}%`} OR key ILIKE ${`%${input.search}%`})
       ORDER BY "createdAt" DESC, id DESC LIMIT 25 OFFSET ${(input.page - 1) * 24}`);
   }

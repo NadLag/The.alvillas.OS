@@ -1846,7 +1846,9 @@
     "automationRules": "Règles d’automatisation avancées",
     "automationDefinition": "Définition du processus (JSON)",
     "automationHelp": "Incluez des définitions réutilisables d’événements, de conditions et d’actions. Ces paramètres utilisent la configuration de processus de l’application.",
-    "automationInvalid": "Vérifiez les références, événements, conditions et actions de cette définition."
+    "automationInvalid": "Vérifiez les références, événements, conditions et actions de cette définition.",
+    "inventoryPropertyTypes": "Types de logement concernés",
+    "inventoryPropertyTypesHelp": "Saisissez chaque type exact sur une ligne distincte. Laissez vide pour tous les types. Les adaptations propres au logement sont conservées lors de l’application d’une nouvelle version."
   },
   "Team": {
     "inviteAccount": "Inviter à se connecter",
