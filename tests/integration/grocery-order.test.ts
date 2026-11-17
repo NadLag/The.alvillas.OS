@@ -36,7 +36,7 @@ it("keeps an actual purchaser reachable after a full page of same-name people an
 it("still rejects an actual reservation binding change after capturing unreserved field work",async()=>{
  const f=await nativeServiceOrderFixture(admin,db);await withTenant(db,f.organizationId,async tx=>{
   const task=await tx.operationTask.create({data:{organizationId:f.organizationId,propertyId:f.property.id,assignedToPersonId:f.person.id,assignedToUserAccountId:f.account.id,reservationId:null,type:"INSPECTION",state:"ASSIGNED",titleTranslations:{en:"Original unreserved scope",fr:"Périmètre original sans réservation"},dueDate:new Date(f.request.serviceDate),idempotencyKey:randomUUID(),createdBy:f.account.id},include:{property:true}});
-  const original={...taskResource(task),reservationId:undefined},snapshot=await fieldServiceSnapshots(tx,f.ctx,[original],"assigned",async()=>[{taskId:task.id,propertyId:task.propertyId,reservationId:null}],row=>({id:row.taskId}));expect(snapshot.items.get(task.id)).toEqual({id:task.id});
+  const original={...taskResource(task),reservationId:undefined},snapshot=await fieldServiceSnapshots(tx,f.ctx,[original],"assigned",()=>Promise.resolve([{taskId:task.id,propertyId:task.propertyId,reservationId:null}]),row=>({id:row.taskId}));expect(snapshot.items.get(task.id)).toEqual({id:task.id});
   await tx.operationTask.update({where:{id:task.id},data:{reservationId:f.reservation.id}});await expect(snapshot.recheck()).rejects.toThrow("forbidden");
  });
 });
