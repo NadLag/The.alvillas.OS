@@ -3244,6 +3244,7 @@ model InventoryStocktake {
   @@unique([organizationId, deviceId, clientOpId])
   @@unique([organizationId, locationId, itemId, revision])
   @@index([organizationId, taskId, receivedAt, id])
+  @@index([organizationId, receivedAt(sort: Desc), id(sort: Desc)], map: "inventory_stocktake_native_history_idx")
   @@map("inventory_stocktake")
 }
 
