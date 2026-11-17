@@ -4,7 +4,7 @@ import {advisoryTransactionLock} from "@/platform/db/advisory-lock-repository";
 import type {ServiceOrderState} from "../domain/service-order";
 
 const orderHead={id:true,organizationId:true,propertyId:true,reservationId:true,catalogRuleId:true,catalogRuleVersion:true,serviceKey:true,titleTranslations:true,serviceDate:true,lastServiceDate:true,quantity:true,guestCount:true,state:true,version:true,taskId:true,createdBy:true,createdAt:true,updatedAt:true}as const;
-export type ChefRecipeRecord={taskId:string;orderId:string;propertyId:string;name:unknown;description:unknown;menu:unknown;quantity:string;guests:number;serviceDate:string;lastServiceDate:string;rowVersion:string;tuple:string};
+export type ChefRecipeRecord={taskId:string;orderId:string;propertyId:string;name:unknown;description:unknown;menu:unknown;quantity:string;guests:number;pricingModel:unknown;dimensions:unknown;serviceDate:string;lastServiceDate:string;rowVersion:string;tuple:string};
 /** Public source identity is selected before any private original or price. */
 export class ServiceOrderRepository{
  constructor(readonly tx:TenantTransaction,readonly organizationId:string){}
@@ -13,6 +13,13 @@ export class ServiceOrderRepository{
  async clock(){const rows=await this.tx.$queryRaw<Array<{now:Date}>>(Prisma.sql`SELECT clock_timestamp() AS now`);return rows[0].now;}
  head(id:string){return this.tx.serviceOrder.findFirst({where:{organizationId:this.organizationId,id},select:orderHead});}
  byTaskHead(taskId:string){return this.tx.serviceOrder.findFirst({where:{organizationId:this.organizationId,taskId},select:orderHead});}
+ chefRequirementHeads(input:{propertyId:string;from:string;through:string}){
+  return this.tx.serviceOrder.findMany({where:{organizationId:this.organizationId,propertyId:input.propertyId,state:{in:["REQUESTED","QUOTED","CONFIRMED"]},serviceDate:{lte:new Date(input.through+"T00:00:00Z")},lastServiceDate:{gte:new Date(input.from+"T00:00:00Z")},catalogSnapshot:{path:["order_terms","chef_menu","schemaVersion"],equals:1}},orderBy:{id:"asc"},take:501,select:orderHead});
+ }
+ chefRequirementRows(orderIds:readonly string[]){
+  if(!orderIds.length)return Promise.resolve([]);
+  return this.tx.$queryRaw<Array<{orderId:string;ingredients:unknown;servingQuantity:string;pricingModel:unknown;dimensions:unknown}>>(Prisma.sql`SELECT s.id AS "orderId",s.catalog_snapshot#>'{order_terms,chef_menu,ingredients}' AS ingredients,(s.catalog_snapshot#>>'{order_terms,chef_menu,serving_quantity}')::text AS "servingQuantity",s.catalog_snapshot->>'pricing_model' AS "pricingModel",s.request_snapshot->'dimensions' AS dimensions FROM service_order s WHERE s.organization_id=${this.organizationId}::uuid AND s.id IN (${Prisma.join(orderIds.map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY s.id`);
+ }
  async chefTaskRecipe(id:string){
   return(await this.chefRecipeRows(Prisma.sql`s.id=${id}::uuid`))[0]??null;
  }
@@ -21,7 +28,7 @@ export class ServiceOrderRepository{
  }
  private chefRecipeRows(where:Prisma.Sql){
   return this.tx.$queryRaw<ChefRecipeRecord[]>(Prisma.sql`
-   SELECT s.task_id AS "taskId",s.id AS "orderId",s.property_id AS "propertyId",s.quantity::text AS quantity,s.guest_count AS guests,
+   SELECT s.task_id AS "taskId",s.id AS "orderId",s.property_id AS "propertyId",s.quantity::text AS quantity,s.guest_count AS guests,s.catalog_snapshot->>'pricing_model' AS "pricingModel",s.request_snapshot->'dimensions' AS dimensions,
     to_char(s.service_date,'YYYY-MM-DD') AS "serviceDate",to_char(s.last_service_date,'YYYY-MM-DD') AS "lastServiceDate",
     s.catalog_snapshot->'name' AS name,s.catalog_snapshot->'description' AS description,
     (s.catalog_snapshot#>'{order_terms,chef_menu}')-'chef_component_key' AS menu,s.xmin::text AS "rowVersion",s.ctid::text AS tuple

@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {serviceUnitsSchema,servicePricedUnits} from "@/platform/services/priced-units";
 import {Money} from "@/platform/money/money";
 import {servicePricingSchema,serviceCatalogOrderTermsSchema} from "@/platform/config/service-catalog-policy";
 import {localizedTextSchema} from "@/i18n/content";
@@ -49,7 +50,7 @@ export function canonicalServiceCatalogEntry(raw:unknown,previous?:ServiceCatalo
  return originalEntry.parse(result);
 }
 
-const units=z.object({quantity:z.number().int().positive().max(Number.MAX_SAFE_INTEGER),guests:z.number().int().positive().max(Number.MAX_SAFE_INTEGER),days:z.number().int().positive().max(Number.MAX_SAFE_INTEGER)}).strict();
+const units=serviceUnitsSchema;
 export type ServiceCatalogUnits=z.infer<typeof units>;
 /** Reservation/date authority supplies the integer dimensions. Monetary
  * multiplication stays inside Money and never passes through a JS float. */
@@ -57,7 +58,7 @@ export function serviceCatalogPrice(raw:unknown,dimensions:unknown):{kind:"PRICE
  const item=originalEntry.parse(raw),count=units.parse(dimensions);
  if(item.pricing_model==="CUSTOM")return{kind:"QUOTE_REQUIRED",indicative:item.amount!==undefined&&item.currency!==undefined?Money.of(item.amount,item.currency):null,units:count};
  if(item.amount===undefined||item.currency===undefined)throw new ServiceCatalogConfigurationError();
- const multiplier=BigInt(count.quantity)*(item.pricing_model==="PER_GUEST"?BigInt(count.guests):item.pricing_model==="PER_DAY"?BigInt(count.days):1n),amount=Money.of(item.amount,item.currency).multiply(multiplier.toString());
+ const multiplier=servicePricedUnits(item.pricing_model,count),amount=Money.of(item.amount,item.currency).multiply(multiplier.toString());
  if(!originalEntry.shape.amount.unwrap().safeParse(amount.toJSON().amount).success)throw new ServiceCatalogValidationError();
  return{kind:"PRICED",amount,units:count};
 }

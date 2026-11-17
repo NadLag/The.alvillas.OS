@@ -20,7 +20,7 @@ import { fieldQueue } from "./field-queue";
 import { type FieldQueueScope } from "./field-queue-store";
 import { resolveFieldScope } from "./field-session";
 import { FieldPhotoCapture } from "./field-photo-capture";
-import {ChefMenuRecipe} from "@/modules/services/ui/chef-menu-details";
+import {ChefMenuRecipe,ChefOrderRequirements} from "@/modules/services/ui/chef-menu-details";
 import { FieldIssueCapture } from "./field-issue-capture";
 import { FieldWallet } from "./field-wallet";
 import { FieldCash } from "./field-cash";
@@ -29,7 +29,7 @@ import { FieldProxyForm } from "@/modules/reservations/ui/field-proxy-form";
 import type { FieldCacheAudience } from "./field-queue-store";
 
 function fieldMessages(messages: typeof en) {
-  return { ChefMenu:messages.ChefMenu, Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCash: messages.FieldCash, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, FieldWallet: messages.FieldWallet, Operations: { manage: messages.Operations.manage } };
+  return { ChefMenu:messages.ChefMenu,ChefShopping:messages.ChefShopping, Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCash: messages.FieldCash, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, FieldWallet: messages.FieldWallet, Operations: { manage: messages.Operations.manage } };
 }
 const catalogs = { en: fieldMessages(en), fr: fieldMessages(fr), ar: fieldMessages(ar) };
 export function OfflineFieldApp({ initialLocale }: { initialLocale: AppLocale }) {
@@ -113,7 +113,7 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
   </FieldShell></div>;
 }
 function CachedChefRecipe({ task, locale }: { task: FieldWorkSnapshot; locale: AppLocale }) {
-  return task.chefRecipe ? <section data-testid="field-chef-recipe"><h2 dir="auto">{localizedTaskTitle(task.chefRecipe.name, locale)}</h2><ChefMenuRecipe locale={locale} menu={task.chefRecipe.menu} /></section> : null;
+  return task.chefRecipe ? <section data-testid="field-chef-recipe"><h2 dir="auto">{localizedTaskTitle(task.chefRecipe.name, locale)}</h2><ChefMenuRecipe locale={locale} menu={task.chefRecipe.menu} /><ChefOrderRequirements locale={locale} requirements={task.chefRecipe.requirements}/></section> : null;
 }
 function CachedProxy({ task, scope, locale }: { task: FieldWorkSnapshot; scope: FieldQueueScope; locale: AppLocale }) {
   const t = useTranslations("FieldProxy"), cache = useTranslations("FieldCache"), key = useRef<string | null>(null);
