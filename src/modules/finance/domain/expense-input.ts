@@ -1,5 +1,6 @@
 import {z} from "zod";
 import Decimal from "decimal.js";
+import {expensePurchaseSchema} from "./expense-purchase";
 
 /** Canonical native expense input, independent of policy resolution and journal modules. */
 export const expenseDraftSchema = z.object({
@@ -7,6 +8,7 @@ export const expenseDraftSchema = z.object({
   amount: z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u).pipe(z.string().refine(value => new Decimal(value).gt(0))),
   currency: z.string().regex(/^[A-Z]{3}$/u), purpose: z.string().trim().min(3).max(1000),
   occurredOn: z.iso.date(), fundingAccountId: z.uuid(), emergency: z.boolean().default(false), idempotencyKey: z.uuid(),
-  reason: z.string().trim().min(6).max(500)
+  reason: z.string().trim().min(6).max(500), purchase:expensePurchaseSchema.optional()
 }).strict();
 export type ExpenseDraftInput = z.infer<typeof expenseDraftSchema>;
+export const purchaseExpenseDraftSchema=expenseDraftSchema.omit({fundingAccountId:true,purchase:true}).extend({fundingAccountId:z.uuid().optional(),purchase:expensePurchaseSchema}).superRefine((input,ctx)=>{if(input.purchase.fundingKind==="COMPANY"&&!input.fundingAccountId)ctx.addIssue({code:"custom",path:["fundingAccountId"],message:"Company purchase requires its actual physical funding source"});});

@@ -92,6 +92,9 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  // Order history remains operational; the same atomic mutation has a native
+  // expense audit carrying its independently authorized financial evidence.
+  if(row.action.startsWith("service.grocery."))return present({...ctx.authContext,visibleDataClasses:new Set()},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
   if (row.action.startsWith("finance.external_payment.")) {
     const allowed = Boolean(row.resourceType === "financial_transaction" && financialResource?.id === row.resourceId &&
       canReadExternalPayment(ctx.authContext, financialResource, action, new Date(), row.action.startsWith("finance.external_payment.fee_")));
@@ -190,6 +193,7 @@ export function presentAuditHistoryRow(
     const allowed = Boolean(financialResource && financialResource.type === expectedType &&
       (!requiresSourceId || financialResource.id === row.resourceId) && permissionResource && authorize(ctx.authContext, action, permissionResource) &&
         (!financialResource.companyFinancialSources||financialResource.companyFinancialSources.every(source=>source.organizationId===ctx.organizationId&&source.type==="financial_transaction"&&authorizeOrganizationSource(ctx.authContext,"view",source,new Date())))&&
+        (!financialResource.personalExpenseSources||financialResource.personalExpenseSources.length>0&&financialResource.personalExpenseSources.every(source=>source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source)))&&
         (!financialResource.walletSources||financialResource.walletSources.every(source=>source.type==="wallet"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source)))&&
         (!financialResource.salarySources||Boolean(financialResource.compensationRoot?.type==="employee_payable"&&financialResource.compensationRoot.organizationId===ctx.organizationId&&authorize(ctx.authContext,action,financialResource.compensationRoot)&&
         financialResource.salarySources.length&&financialResource.salarySources.every(source=>source.type==="staff_compensation"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source))&&

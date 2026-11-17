@@ -9,7 +9,7 @@ import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
 import {nativeServiceOrderWork} from "@/platform/services/order-task-source";
 import {createNativeServiceOrderTask,cancelNativeServiceOrderTask,inspectNativeServiceOrderTaskPlan} from "@/platform/services/order-task-write";
 import {readNativeServiceCatalog,serviceCatalogTermsSources} from "./service-catalog-source";
-import {priceServiceOrder,serviceOrderTransitionDraftSchema,serviceOrderTransitionSchema,serviceOrderStateSchema,validateServiceOrderTransition,ServiceOrderAccessError,ServiceOrderConflictError,ServiceOrderSourceUnavailableError} from "../domain/service-order";
+import {priceServiceOrder,serviceOrderTransitionDraftSchema,serviceOrderTransitionSchema,serviceOrderStateSchema,validateServiceOrderTransition,ServiceOrderAccessError,ServiceOrderConflictError,ServiceOrderValidationError,ServiceOrderSourceUnavailableError} from "../domain/service-order";
 import {serviceOrderPolicyKey,serviceOrderPolicySchema} from "@/platform/config/service-order-policy";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {inspectOriginalServiceOrder} from "./service-order-original";
@@ -25,6 +25,7 @@ const actions:Partial<Record<Draft["state"],Action>>={QUOTED:"edit",CONFIRMED:"a
 async function prepareTransition(actor:AccountActorContext,tx:TenantTransaction,draft:Draft){
  const source=await inspectOriginalServiceOrder(actor,tx,draft.orderId);if(source.root.version!==draft.expectedVersion)throw new ServiceOrderConflictError();
  if(draft.taskPlan)validateChefMenuTask(source.entry,draft.taskPlan.type);
+ if(draft.taskPlan&&source.entry.order_terms?.grocery_order&&draft.taskPlan.type!==source.entry.order_terms.grocery_order.task_type)throw new ServiceOrderValidationError();
  const work=await nativeServiceOrderWork(actor,tx,source.root,source.authority.stored,source.authority.now),total=validateServiceOrderTransition({from:serviceOrderStateSchema.parse(source.root.state),to:draft.state,pricingModel:source.entry.pricing_model,total:source.total,quote:draft.quote,currency:source.root.currency,currencyPrecision:source.currency.minorUnit,hasActualTaskStart:work.started,hasActualTaskCompletion:work.completed}),
   action=actions[draft.state];if(!action)throw new ServiceOrderConflictError();const actionCheck=source.actionCheck(action,total?.toJSON().amount);
  assertAccountAuthorization(actor,source.authority.stored,source.authority.now,[...source.checks,...work.checks,actionCheck],new ServiceOrderAccessError());

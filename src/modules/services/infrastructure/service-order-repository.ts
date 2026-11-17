@@ -54,8 +54,8 @@ export class ServiceOrderRepository{
   const result=await this.tx.serviceOrder.updateMany({where:{organizationId:this.organizationId,id,version:expectedVersion},data:input});return result.count===1;
  }
  event(input:Omit<Prisma.ServiceOrderEventUncheckedCreateInput,"organizationId">){return this.tx.serviceOrderEvent.create({data:{...input,organizationId:this.organizationId}});}
- page(input:{propertyId:string;reservationId?:string;state?:ServiceOrderState;after?:string}){
-  return this.tx.serviceOrder.findMany({where:{organizationId:this.organizationId,propertyId:input.propertyId,...input.reservationId?{reservationId:input.reservationId}:{},...input.state?{state:input.state}:{},...input.after?{id:{gt:input.after}}:{}},orderBy:{id:"asc"},take:21,select:orderHead});
+ page(input:{propertyId:string;reservationId?:string;state?:ServiceOrderState;after?:string;kind?:"GROCERY"}){
+  return this.tx.serviceOrder.findMany({where:{organizationId:this.organizationId,propertyId:input.propertyId,...input.kind?{catalogSnapshot:{path:["order_terms","grocery_order","schemaVersion"],equals:1}}:{},...input.reservationId?{reservationId:input.reservationId}:{},...input.state?{state:input.state}:{},...input.after?{id:{gt:input.after}}:{}},orderBy:{id:"asc"},take:21,select:orderHead});
  }
  historyHeads(orderId:string,beforeVersion?:number){return this.tx.serviceOrderEvent.findMany({where:{organizationId:this.organizationId,orderId,...beforeVersion?{version:{lt:beforeVersion}}:{}},orderBy:{version:"desc"},take:21,select:{id:true,orderId:true,version:true,fromState:true,toState:true,createdBy:true,createdAt:true}});}
  historyOriginal(id:string,orderId:string){return this.tx.serviceOrderEvent.findFirst({where:{organizationId:this.organizationId,id,orderId}});}

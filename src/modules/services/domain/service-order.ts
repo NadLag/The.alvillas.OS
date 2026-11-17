@@ -32,7 +32,7 @@ export const serviceOrderTransitionSchema=z.object({...transitionFields,
  reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:z.uuid()
 }).strict().superRefine(refineTransition);
 export const serviceOrderRecoverSchema=z.object({propertyId:z.uuid(),reservationId:z.uuid().optional(),idempotencyKey:z.uuid()}).strict();
-export const serviceOrderPageSchema=z.object({propertyId:z.uuid(),reservationId:z.uuid().optional(),state:serviceOrderStateSchema.optional(),after:z.uuid().optional()}).strict();
+export const serviceOrderPageSchema=z.object({propertyId:z.uuid(),kind:z.literal("GROCERY").optional(),reservationId:z.uuid().optional(),state:serviceOrderStateSchema.optional(),after:z.uuid().optional()}).strict();
 
 export type ServiceOrderReservationSource={
  id:string;propertyId:string;status:string;source:string;checkIn:Date;checkOut:Date;adultCount:number;childCount:number;
@@ -53,7 +53,7 @@ export function serviceOrderDimensions(raw:unknown,reservation:ServiceOrderReser
 /** Existing public-field availability and exact catalog pricing are shared
  * with native authoring. CUSTOM always awaits an explicit reviewed quote. */
 export function priceServiceOrder(raw:unknown,entry:ServiceCatalogEntry,reservation:ServiceOrderReservationSource,property:ServiceOrderPropertySource,rawPolicy:ServiceOrderPolicy){
- const request=serviceOrderRequestSchema.parse(raw),dimensions=serviceOrderDimensions(request,reservation,property),policy=serviceOrderPolicySchema.parse(rawPolicy);
+ const request=serviceOrderRequestSchema.parse(raw);if(Boolean(request.groceryItems)!==Boolean(entry.order_terms?.grocery_order))throw new ServiceOrderValidationError();const dimensions=serviceOrderDimensions(request,reservation,property),policy=serviceOrderPolicySchema.parse(rawPolicy);
  if(entry.key!==request.serviceKey||entry.available!==true||!entry.name||!entry.order_terms||!entry.currency)throw new ServiceOrderConfigurationError();
  if(dimensions.quantity>policy.max_quantity||dimensions.days>policy.max_service_days)throw new ServiceOrderValidationError();
  const fields={request:{...dimensions,date:request.serviceDate},reservation:{status:reservation.status,source:reservation.source,checkInDate:reservation.checkIn.toISOString().slice(0,10),checkOutDate:reservation.checkOut.toISOString().slice(0,10)},property};

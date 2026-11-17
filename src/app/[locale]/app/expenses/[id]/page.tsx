@@ -1,4 +1,7 @@
 import Link from "next/link";
+import {z} from "zod";
+import {GroceryExpenseBinding} from "@/modules/services/ui/grocery-expense-binding";
+import {ExpensePersonalSettlement} from "@/modules/finance/ui/expense-personal-settlement";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
@@ -11,9 +14,10 @@ import { ExpenseSubmissionForm,ExpensePostingForm,ExpenseVoidForm } from "@/modu
 import { ExpenseCorrectionForm } from "@/modules/finance/ui/expense-correction-form";
 
 export const dynamic = "force-dynamic";
-export default async function ExpensePage({ params }: { params: Promise<{ locale: string; id: string }> }) {
+export default async function ExpensePage({ params,searchParams }: { params: Promise<{ locale: string; id: string }>;searchParams:Promise<{groceryOrder?:string}> }) {
   const input = await params, locale = safeLocale(input.locale); setRequestLocale(locale);
   const actor = await financeActorContextFromSession(await auth()); if (!actor) redirect(`/${locale}/login`);
+  const initial=z.uuid().safeParse((await searchParams).groceryOrder),initialOrderId=initial.success?initial.data:undefined,scope=actor.organizationId+"."+actor.actorId;
   const t = await getTranslations("Expenses"); let expense;
   try { expense = await getExpense(actor, input.id); }
   catch (error) { if (error instanceof ExpenseAccessError || error instanceof Error && error.name === "ZodError") notFound(); throw error; }
@@ -35,5 +39,7 @@ export default async function ExpensePage({ params }: { params: Promise<{ locale
       {expense.canSubmit ? <ExpenseSubmissionForm expense={expense} /> :expense.canPost?<ExpensePostingForm expense={expense}/>:expense.canVoid?<ExpenseVoidForm expense={expense}/>:<p>{t(expense.state==="VOIDED"?"voidedGuidance":"submittedGuidance")}</p>}
       {expense.canCorrect?<ExpenseCorrectionForm expense={expense}/>:null}
     </section>
+    {expense.purchase&&expense.state!=="DRAFT"&&expense.state!=="PENDING_APPROVAL"&&expense.state!=="APPROVED"?<GroceryExpenseBinding key={scope+expense.id} locale={locale} scope={scope} expenseId={expense.id} propertyId={expense.propertyId} initialOrderId={initialOrderId}/>:null}
+    {expense.purchase?.fundingKind==="PERSONAL"&&["POSTED","VOIDED"].includes(expense.state)?<ExpensePersonalSettlement key={scope+expense.id+".personal"} scope={scope} expenseId={expense.id} propertyId={expense.propertyId}/>:null}
   </AdminShell>;
 }

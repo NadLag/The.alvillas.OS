@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {groceryItemsSchema} from "@/platform/config/grocery-order-policy";
 import {configSlugSchema} from "@/platform/config/identifiers";
 
 export const serviceOrderStates=["REQUESTED","QUOTED","CONFIRMED","IN_PROGRESS","FULFILLED","REJECTED","CANCELLED"]as const;
@@ -13,6 +14,6 @@ export const serviceOrderReasonSchema=z.string().trim().min(6).max(500);
 export const serviceOrderRequestSchema=z.object({
  propertyId:z.uuid(),reservationId:z.uuid(),serviceKey:configSlugSchema,
  serviceDate:z.iso.date(),lastServiceDate:z.iso.date(),quantity:serviceOrderPositiveInteger,guests:serviceOrderPositiveInteger,
- reason:serviceOrderReasonSchema
+ reason:serviceOrderReasonSchema,groceryItems:groceryItemsSchema.optional()
 }).strict().refine(value=>value.lastServiceDate>=value.serviceDate,{path:["lastServiceDate"],message:"service_order_invalid_dates"});
 export type ServiceOrderRequest=z.infer<typeof serviceOrderRequestSchema>;

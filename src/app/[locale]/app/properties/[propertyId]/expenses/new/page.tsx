@@ -1,4 +1,6 @@
 import Link from "next/link";
+import {z} from "zod";
+import {readServiceOrderOriginal} from "@/modules/services/application/service-order-workspace";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
@@ -10,10 +12,12 @@ import { ExpenseDraftForm } from "@/modules/finance/ui/expense-form";
 import {authorizeOrganizationSource} from "@/platform/authz/organization-authority";
 
 export const dynamic = "force-dynamic";
-export default async function NewExpensePage({ params, searchParams }: { params: Promise<{ locale: string; propertyId: string }>; searchParams: Promise<{ fundingAccountId?: string }> }) {
+export default async function NewExpensePage({ params, searchParams }: { params: Promise<{ locale: string; propertyId: string }>; searchParams: Promise<{ fundingAccountId?: string;groceryOrder?:string }> }) {
   const input = await params, locale = safeLocale(input.locale); setRequestLocale(locale);
   const actor = await financeActorContextFromSession(await auth()); if (!actor) redirect(`/${locale}/login`);
-  const { fundingAccountId } = await searchParams;
+  const { fundingAccountId,groceryOrder } = await searchParams;
+  let groceryOrderId:string|undefined;
+  if(groceryOrder){const id=z.uuid().safeParse(groceryOrder);if(!id.success)notFound();const source=await readServiceOrderOriginal(actor,{orderId:id.data},{requestId:crypto.randomUUID()});if(source.order.propertyId!==input.propertyId||!source.catalog.orderTerms?.grocery_order)notFound();groceryOrderId=id.data;}
   const t = await getTranslations("Expenses"),recurring=await getTranslations("RecurringExpenses"); let editor;
   try { editor = await getExpenseEditor(actor, input.propertyId, {}, fundingAccountId); }
   catch (error) { if (error instanceof ExpenseAccessError || error instanceof Error && error.name === "ZodError") notFound(); throw error; }
@@ -21,5 +25,5 @@ export default async function NewExpensePage({ params, searchParams }: { params:
   return <AdminShell className="resource-page expense-page" testId="expense-new-page"><ShellHeader eyebrow={editor.property.name} title={t("new")} subtitle={t("description")}
     actions={<div className="form-actions">{editor.canConfigureAccounts ? <Link className="secondary-button" data-testid="expense-manage-accounts" href={`/${locale}/app/finance/accounts?propertyId=${editor.property.id}`}>{t("manageAccounts")}</Link> : null}
       {canSchedule?<Link className="secondary-button" data-testid="expense-recurring-schedules" href={`/${locale}/app/properties/${editor.property.id}/expenses/recurring`}>{recurring("title")}</Link>:null}
-      <Link className="secondary-button" href={`/${locale}/app/properties/${editor.property.id}`}>{t("back")}</Link></div>} /><ExpenseDraftForm editor={editor} fundingAccountId={fundingAccountId} /></AdminShell>;
+      <Link className="secondary-button" href={`/${locale}/app/properties/${editor.property.id}`}>{t("back")}</Link></div>} /><ExpenseDraftForm editor={editor} fundingAccountId={fundingAccountId} groceryOrderId={groceryOrderId} /></AdminShell>;
 }

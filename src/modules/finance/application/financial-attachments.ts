@@ -45,6 +45,9 @@ async function context(ctx: FinanceActorContext, tx: TenantTransaction, transact
   const policySnapshot = { id: rule.id, version: rule.version, value: parsed.data };
   return { repository, now, native, policy: parsed.data, policySnapshot, policyIdentity: commandFingerprint(policySnapshot), recheck };
 }
+/** Native compositions use the original source/attachment authorization;
+ * callers cannot substitute a generic transaction grant for its ancestry. */
+export {context as inspectFinancialAttachmentContext};
 function identity(ctx: FinanceActorContext, row: Pick<Admission, "transactionId" | "id" | "contentType" | "fileSize" | "sha256">) { return { organizationId: ctx.organizationId, transactionId: row.transactionId,
   id: row.id, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256 }; }
 function presentAttachment(ctx: FinanceActorContext, current: Awaited<ReturnType<typeof context>>, row: Attached) {

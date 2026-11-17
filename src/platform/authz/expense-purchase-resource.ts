@@ -1,0 +1,8 @@
+import type {Resource,DataClass} from "./authorize";
+import {expenseResource} from "./expense-resource";
+export type PurchaseDisclosureSource={id:string;rootExpenseId:string;fundingKind:string;propertyId:string;reservationId:string|null;cityId:string|null;regionId:string|null;amount:string;createdBy:string;occurredOn:Date;timezone:string;transactionId:string|null;transactionAt:Date|null;state:string;purchaserId:string;supplierId:string;documentId:string;documentCreatedBy:string;privacy:readonly string[]};
+/** Actual original expense time and actual journal time remain independent. */
+export function expensePurchaseDisclosureSources(organizationId:string,purchase:PurchaseDisclosureSource):Resource[]{
+ const source=expenseResource(organizationId,{id:purchase.propertyId,cityId:purchase.cityId,regionId:purchase.regionId,timezone:purchase.timezone},purchase);
+ return[source,...purchase.fundingKind==="PERSONAL"?[{...source,type:"employee_payable",id:purchase.rootExpenseId,assignedPersonId:purchase.purchaserId}]:[],...purchase.transactionId&&purchase.transactionAt?[{...source,type:"financial_transaction",id:purchase.transactionId,financialRecordId:purchase.transactionId,occurredAt:purchase.transactionAt}]:[],{...source,type:"property_finance",id:purchase.propertyId},...purchase.privacy.map(dataClass=>({...source,type:"document",id:purchase.documentId,documentId:purchase.documentId,assignedUserAccountId:purchase.documentCreatedBy,dataClass:dataClass as DataClass})),{type:"team_member",organizationId,id:purchase.purchaserId,assignedPersonId:purchase.purchaserId,dataClass:"personal"},{type:"supplier",organizationId,id:purchase.supplierId,dataClass:"personal"}];
+}

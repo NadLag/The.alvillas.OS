@@ -25,17 +25,18 @@ export function employeeClaimPostings(input:{claimId:string;personId:string;runI
   if(!total.equals(input.amount))throw Error("Employee source costs must conserve the complete claim");assertFinancePostingsBalanced(postings);return postings;
 }
 
-type Settlement={claimId:string;personId:string;settlementId:string;liabilityAccountId:string;amount:Money;outstanding:Money};
+type Settlement={claimId:string;personId:string;settlementId:string;liabilityAccountId:string;amount:Money;outstanding:Money;claimKind?:"COMPENSATION"|"EXPENSE";expenseId?:string;propertyId?:string;reservationId?:string|null};
 function requireOutstanding(input:Settlement){
+  if(input.claimKind==="EXPENSE"&&!input.propertyId)throw Error("Personal expense settlement requires its actual property");
   if(!input.personId||input.amount.currency!==input.outstanding.currency||!input.amount.amount.gt(0)||!input.outstanding.amount.gt(0)||input.amount.amount.gt(input.outstanding.amount))throw Error("Employee settlement requires positive outstanding money in one currency");
 }
 /** Payment settles an existing earned claim without recognizing its cost again. */
 export function employeePaymentPostings(input:Settlement&{funding:Parameters<typeof isExpenseFundingAccount>[0]&{id:string}}):FinancePostingDraft[]{
   requireOutstanding(input);
   if(!isExpenseFundingAccount(input.funding)||input.funding.id===input.liabilityAccountId||input.funding.teamWallet?.personId===input.personId)throw Error("Employee payment requires a distinct physical source; the beneficiary wallet requires explicit offset");
-  const dimensions={employee_person_id:input.personId,employee_compensation_claim_id:input.claimId,employee_compensation_payment_id:input.settlementId,source:"EMPLOYEE_PAYMENT"};
-  const postings:FinancePostingDraft[]=[{ledgerAccountId:input.liabilityAccountId,side:"DEBIT",amount:input.amount,bucket:"EMPLOYEE_PAYMENT",dimensions},
-    {ledgerAccountId:input.funding.id,side:"CREDIT",amount:input.amount,bucket:"EMPLOYEE_PAYMENT",dimensions}];
+  const expense=input.claimKind==="EXPENSE",bucket=expense?"PERSONAL_EXPENSE_PAYMENT":"EMPLOYEE_PAYMENT",dimensions=expense?{employee_person_id:input.personId,employee_expense_claim_id:input.claimId,personal_expense_source_id:input.expenseId??input.claimId,employee_expense_settlement_id:input.settlementId,property_id:input.propertyId,...input.reservationId?{reservation_id:input.reservationId}:{},source:"EMPLOYEE_EXPENSE_PAYMENT"}:{employee_person_id:input.personId,employee_compensation_claim_id:input.claimId,employee_compensation_payment_id:input.settlementId,source:"EMPLOYEE_PAYMENT"};
+  const postings:FinancePostingDraft[]=[{ledgerAccountId:input.liabilityAccountId,side:"DEBIT",amount:input.amount,bucket,dimensions},
+    {ledgerAccountId:input.funding.id,side:"CREDIT",amount:input.amount,bucket,dimensions}];
   assertFinancePostingsBalanced(postings);return postings;
 }
 
@@ -45,9 +46,8 @@ export function employeeWalletOffsetPostings(input:Settlement&{wallet:Parameters
   if(input.available.currency!==input.amount.currency||!input.available.amount.gt(0)||input.amount.amount.gt(input.available.amount)||
     !isExpenseFundingAccount(input.wallet)||input.wallet.accountType!=="STAFF_WALLET"||input.wallet.teamWallet?.personId!==input.personId||input.wallet.id===input.liabilityAccountId)
     throw Error("Employee offset requires their actual available wallet balance");
-  const dimensions={employee_person_id:input.personId,employee_compensation_claim_id:input.claimId,employee_compensation_offset_id:input.settlementId,
-    wallet_person_id:input.personId,source:"EMPLOYEE_COMPENSATION_OFFSET"};
-  const postings:FinancePostingDraft[]=[{ledgerAccountId:input.liabilityAccountId,side:"DEBIT",amount:input.amount,bucket:"COMPENSATION_OFFSET",dimensions},
-    {ledgerAccountId:input.wallet.id,side:"CREDIT",amount:input.amount,bucket:"COMPENSATION_OFFSET",dimensions}];
+  const expense=input.claimKind==="EXPENSE",bucket=expense?"PERSONAL_EXPENSE_OFFSET":"COMPENSATION_OFFSET",dimensions=expense?{employee_person_id:input.personId,employee_expense_claim_id:input.claimId,personal_expense_source_id:input.expenseId??input.claimId,employee_expense_settlement_id:input.settlementId,property_id:input.propertyId,...input.reservationId?{reservation_id:input.reservationId}:{},wallet_person_id:input.personId,source:"EMPLOYEE_EXPENSE_OFFSET"}:{employee_person_id:input.personId,employee_compensation_claim_id:input.claimId,employee_compensation_offset_id:input.settlementId,wallet_person_id:input.personId,source:"EMPLOYEE_COMPENSATION_OFFSET"};
+  const postings:FinancePostingDraft[]=[{ledgerAccountId:input.liabilityAccountId,side:"DEBIT",amount:input.amount,bucket,dimensions},
+    {ledgerAccountId:input.wallet.id,side:"CREDIT",amount:input.amount,bucket,dimensions}];
   assertFinancePostingsBalanced(postings);return postings;
 }

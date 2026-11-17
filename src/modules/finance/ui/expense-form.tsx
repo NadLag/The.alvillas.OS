@@ -1,39 +1,46 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback,useEffect, useRef, useState, useTransition } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
+import {ExpensePurchaseFields,type PurchaseFields} from "./expense-purchase-fields";
+import {purchaseExpenseDraftSchema} from "../domain/expense-input";
 import { expenseDraftSchema } from "../domain/expense";
-import { createExpenseDraftAction,updateExpenseDraftAction, submitExpenseAction,postExpenseAction,voidExpenseAction } from "../application/expense-actions";
+import { createPurchaseExpenseDraftAction,createExpenseDraftAction,updateExpenseDraftAction, submitExpenseAction,postExpenseAction,voidExpenseAction } from "../application/expense-actions";
 import type { getExpenseEditor,getExpenseDraftEditor, getExpense } from "../application/expense-service";
 
 import { PaymentAccountPicker } from "./payment-account-picker";
 import {normalizeAmountInput} from "@/platform/money/amount-input";
 
 type ErrorCode = "forbidden" | "conflict" | "configuration" | "validation" | "periodClosed" | "error";
-export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Awaited<ReturnType<typeof getExpenseEditor>>;draft?:Awaited<ReturnType<typeof getExpenseDraftEditor>>["draft"];fundingAccountId?:string }) {
+export function ExpenseDraftForm({ editor,draft,fundingAccountId,groceryOrderId }: { editor: Awaited<ReturnType<typeof getExpenseEditor>>;draft?:Awaited<ReturnType<typeof getExpenseDraftEditor>>["draft"];fundingAccountId?:string;groceryOrderId?:string }) {
   const t = useTranslations("Expenses"), locale = useLocale(), router = useRouter(), key = useRef<string | null>(null);
-  const correction=Boolean(draft?.correctsExpenseId);
+  const [selectedReservation,setSelectedReservation]=useState(draft?.reservationId??"");
+  const correction=Boolean(draft?.correctsExpenseId),lockedFunding=correction||Boolean(draft?.purchase);
+  const [purchase,setPurchase]=useState<PurchaseFields>({fundingKind:"COMPANY",purchaserId:"",supplierId:"",receiptVersionId:""});
+  const changePurchase=useCallback((field:keyof PurchaseFields,value:string)=>setPurchase(previous=>({...previous,[field]:value})),[]);
+  const personal=draft?.purchase?.fundingKind==="PERSONAL"||Boolean(groceryOrderId)&&purchase.fundingKind==="PERSONAL";
   const [ready, setReady] = useState(false), [pending, startTransition] = useTransition(), [error, setError] = useState<ErrorCode | null>(null);
   useEffect(() => { queueMicrotask(() => { key.current = draft?.idempotencyKey??crypto.randomUUID(); setReady(true); }); }, [draft?.idempotencyKey]);
   return <form className="resource-form" data-testid="expense-draft-form" aria-busy={pending} onSubmit={event => {
     event.preventDefault(); if (!key.current || pending) return;
     const form = new FormData(event.currentTarget); setError(null);
     const reservation = form.get("reservationId"), amount = form.get("amount");
-    const input = expenseDraftSchema.safeParse({ propertyId: editor.property.id, reservationId: typeof reservation === "string" ? reservation.trim() || undefined : reservation,
+    const input = (groceryOrderId&&!draft?purchaseExpenseDraftSchema:expenseDraftSchema).safeParse({ propertyId: editor.property.id, reservationId: typeof reservation === "string" ? reservation.trim() || undefined : reservation,
       amount: typeof amount === "string" ? normalizeAmountInput(amount) : amount, currency: form.get("currency"), category: form.get("category"), purpose: form.get("purpose"),
-      occurredOn: form.get("occurredOn"), fundingAccountId: form.get("fundingAccountId"), emergency: form.get("emergency") === "on", idempotencyKey: key.current, reason: form.get("reason") });
+      occurredOn: form.get("occurredOn"),purchase:draft?.purchase??(groceryOrderId?purchase:undefined),fundingAccountId:personal&&!draft?undefined:form.get("fundingAccountId"), emergency: form.get("emergency") === "on", idempotencyKey: key.current, reason: form.get("reason") });
     if (!input.success) { setError("validation"); return; }
     startTransition(async () => {
-      try { const result = draft?await updateExpenseDraftAction({id:draft.id,expectedVersion:draft.version,draft:input.data}):await createExpenseDraftAction(input.data); if (!result.ok) setError(result.code); else router.push(`/${locale}/app/expenses/${result.data.id}`); }
+      try { const result = draft?await updateExpenseDraftAction({id:draft.id,expectedVersion:draft.version,draft:input.data}):groceryOrderId?await createPurchaseExpenseDraftAction(input.data):await createExpenseDraftAction(input.data); if (!result.ok) setError(result.code); else router.push(`/${locale}/app/expenses/${result.data.id}${groceryOrderId?"?groceryOrder="+groceryOrderId:""}`); }
       catch { setError("error"); }
     });
   }}>
     {correction?<><input type="hidden" name="currency" value={draft!.currency}/><input type="hidden" name="fundingAccountId" value={draft!.fundingAccountId}/>
       <input type="hidden" name="reservationId" value={draft!.reservationId??""}/><p>{t("correctionDraftGuidance")}</p></>:null}
     {error ? <p role="alert" data-testid="expense-error">{t(error)}</p> : null}
-    {!editor.accounts.length ? <p role="status">{t("noAccounts")}</p> : null}
+    {!personal&&!editor.accounts.length ? <p role="status">{t("noAccounts")}</p> : null}
     <fieldset className="resource-form" disabled={!ready || pending}><legend>{t(draft?"editDraft":"new")}</legend>
+      {groceryOrderId&&!draft?<ExpensePurchaseFields propertyId={editor.property.id} reservationId={selectedReservation||undefined} value={purchase} onChange={changePurchase}/>:null}
       <div className="form-grid two">
         <label className="field"><span>{t("amount")}</span><input name="amount" data-testid="expense-amount" defaultValue={draft?.amount} type="text" inputMode="decimal" dir="ltr" maxLength={19} required /></label>
         <label className="field"><span>{t("currency")}</span><select name="currency" data-testid="expense-currency" defaultValue={draft?.currency??editor.baseCurrency} disabled={correction} required>{editor.currencies.map(currency => <option key={currency.code} value={currency.code}>{currency.code}</option>)}</select></label>
@@ -41,9 +48,10 @@ export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Aw
         <label className="field"><span>{t("occurredOn")}</span><input name="occurredOn" data-testid="expense-occurred-on" type="date" defaultValue={draft?.occurredOn??editor.today} readOnly={correction} required /></label>
       </div>
       <label className="field"><span>{t("purpose")}</span><textarea name="purpose" data-testid="expense-purpose" defaultValue={draft?.purpose} readOnly={correction} minLength={3} maxLength={1000} required /></label>
-      {correction?<label className="field"><span>{t("fundingAccount")}</span><select data-testid="expense-funding-account" value={draft!.fundingAccountId} disabled><option value={draft!.fundingAccountId}>{editor.accounts.find(account=>account.id===draft!.fundingAccountId)?.name??t("unavailableFunding")}</option></select></label>:
+      {lockedFunding?<><input type="hidden" name="fundingAccountId" value={draft!.fundingAccountId}/><label className="field"><span>{t("fundingAccount")}</span><select data-testid="expense-funding-account" value={draft!.fundingAccountId} disabled><option value={draft!.fundingAccountId}>{personal?t("personalFunds"):editor.accounts.find(account=>account.id===draft!.fundingAccountId)?.name??t("unavailableFunding")}</option></select></label></>:personal?<p>{t("personalFunds")}</p>:
         <PaymentAccountPicker source={{kind:"expense",propertyId:editor.property.id,...draft?{expenseId:draft.id}:{}}} testId="expense-funding-account" name="fundingAccountId" label={t("fundingAccount")} initialValue={draft?.fundingAccountId??fundingAccountId??""}/>}
-      <label className="field"><span>{t("reservation")}</span><select name="reservationId" data-testid="expense-reservation" defaultValue={draft?.reservationId??""} disabled={correction}><option value="">{t("noReservation")}</option>
+      {lockedFunding&&!correction?<input type="hidden" name="reservationId" value={draft!.reservationId??""}/>:null}
+      <label className="field"><span>{t("reservation")}</span><select name="reservationId" data-testid="expense-reservation" value={selectedReservation} onChange={event=>setSelectedReservation(event.target.value)} disabled={lockedFunding}><option value="">{t("noReservation")}</option>
         {draft?.reservationId&&!editor.reservations.some(row=>row.id===draft.reservationId)?<option value={draft.reservationId}>{t("retainedReservation")}</option>:null}
         {editor.reservations.map(reservation => <option key={reservation.id} value={reservation.id}>{reservation.reference}</option>)}</select></label>
       <label className="checkbox-field"><input name="emergency" data-testid="expense-emergency" defaultChecked={draft?.emergency} disabled={correction} type="checkbox" /><span>{t("emergency")}</span></label>
@@ -86,7 +94,7 @@ export function ExpensePostingForm({expense}:{expense:Awaited<ReturnType<typeof 
       {expense.sourcePeriodClosed?<p data-testid="expense-source-period-closed">{t("sourcePeriodClosed")}</p>:null}
       {expense.canPostInCurrentPeriod?<label className="checkbox-field"><input type="checkbox" name="currentPeriod" data-testid="expense-current-period" required={!expense.canPostOriginalDate}/>
         <span className="field"><span>{t("currentPeriodChoice")}</span><small>{t("currentPeriodGuidance")}</small></span></label>:null}
-      <div className="form-actions"><button type="submit" className="primary-button" data-testid="expense-post">{t(pending?"saving":"recordPayment")}</button></div>
+      <div className="form-actions"><button type="submit" className="primary-button" data-testid="expense-post">{t(pending?"saving":expense.purchase?.fundingKind==="PERSONAL"?"recordPersonalPurchase":"recordPayment")}</button></div>
     </fieldset>
   </form>;
 }
