@@ -1,0 +1,11 @@
+import {z} from "zod";
+import {inventoryLocationEntrySchema,inventoryLocationChangeSchema,inventoryLocationReceiptSchema} from "./location-catalog";
+import {inventoryItemCapabilitiesSchema} from "./item-view";
+export const inventoryLocationViewSchema=inventoryLocationEntrySchema.safeExtend({id:z.uuid(),createdAt:z.iso.datetime(),archivedAt:z.iso.datetime().nullable(),fingerprint:z.string().regex(/^[a-f0-9]{64}$/u),propertyName:z.string().nullable(),propertyArchived:z.boolean()});
+export const inventoryLocationPageSchema=z.object({items:z.array(inventoryLocationViewSchema).max(50),next:z.uuid().nullable(),capabilities:inventoryItemCapabilitiesSchema}).strict();
+export const inventoryLocationPreviewSchema=z.object({draft:inventoryLocationChangeSchema,reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),existing:inventoryLocationViewSchema.nullable(),property:z.object({id:z.uuid(),name:z.string()}).strict().nullable()}).strict();
+export const inventoryLocationPublishSchema=inventoryLocationReceiptSchema.extend({replayed:z.boolean()}).strict();
+export const inventoryLocationRecoverySchema=z.object({recorded:z.boolean(),receipt:inventoryLocationReceiptSchema.nullable()}).strict().refine(value=>value.recorded===(value.receipt!==null));
+export const inventoryLocationPropertiesSchema=z.object({items:z.array(z.object({id:z.uuid(),name:z.string()}).strict()).max(50),next:z.uuid().nullable()}).strict();
+export type InventoryLocationView=z.infer<typeof inventoryLocationViewSchema>;
+export type InventoryLocationPreview=z.infer<typeof inventoryLocationPreviewSchema>;

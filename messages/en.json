@@ -7241,5 +7241,69 @@
       "stock_held": "Stock remains at one or more locations. Reconcile its actual movements before retiring the item.",
       "uncertain": "The result is uncertain. Recover the original request before submitting another change."
     }
+  },
+  "InventoryLocations": {
+    "back": "Back to workspace",
+    "searchAction": "Search",
+    "retired": "Show retired items",
+    "refresh": "Refresh",
+    "retry": "Try again",
+    "firstPage": "First page",
+    "nextPage": "Next page",
+    "review": "Review change",
+    "publish": "Record change",
+    "saving": "Recording…",
+    "changeReview": "Edit this change",
+    "close": "Close",
+    "saved": "The original change was recorded.",
+    "unconfirmed": "The result is uncertain. Refresh to recover the original request before creating another change.",
+    "notRecorded": "The original request was not recorded. It has been closed safely; you can review a new change.",
+    "eyebrow": "Inventory",
+    "title": "Inventory locations",
+    "subtitle": "Keep property, store, laundry and in-transit stock in their original physical locations.",
+    "kind": "Location type",
+    "allKinds": "All types",
+    "kinds": {
+      "PROPERTY": "Property",
+      "STORE": "Store",
+      "LAUNDRY": "Laundry",
+      "IN_TRANSIT": "In transit"
+    },
+    "fields": {
+      "label": "Location name",
+      "property": "Original property",
+      "reason": "Reason"
+    },
+    "operations": {
+      "CREATE": "Add location",
+      "RENAME": "Rename location",
+      "ARCHIVE": "Retire location",
+      "RESTORE": "Restore location"
+    },
+    "search": "Search locations",
+    "empty": "No locations match these filters.",
+    "identityHelp": "The original type and property binding remain fixed. Renaming a location never moves its stock or changes its history.",
+    "retireHelp": "Retire this location only after every item has no remaining stock here. Its original movements and history remain available.",
+    "restoreHelp": "Restore this original physical location and its existing stock history.",
+    "reviewTitle": "Review the original location change",
+    "reviewHelp": "Confirm the physical location, original property and reason before recording this change.",
+    "privateHidden": "Private location information is hidden while this page is inactive.",
+    "chooseProperty": "Choose an authorized property",
+    "propertySearch": "Search authorized properties",
+    "propertyRequired": "Choose the actual property",
+    "noProperties": "No active properties are available under your current independent property access.",
+    "openProperty": "Open property",
+    "propertyArchived": "The original property is archived. Restore it before changing this location.",
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading locations…",
+      "offline": "Reconnect to view or change private inventory locations.",
+      "forbidden": "Your current location or property access does not allow this action.",
+      "unavailable": "Inventory locations are unavailable. Try again.",
+      "validation": "Check the location name, type, original property and reason.",
+      "conflict": "This location or its property access changed. Refresh and review the original location again.",
+      "stock_held": "Stock remains for one or more items here. Reconcile its actual movements before retiring the location.",
+      "uncertain": "The result is uncertain. Recover the original request before submitting another change."
+    }
   }
 }

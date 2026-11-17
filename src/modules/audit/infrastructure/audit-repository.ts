@@ -11,6 +11,7 @@ import { externalPaymentSourceSchema } from "@/platform/ledger/external-payment-
 import { Money } from "@/platform/money/money";
 import { externalPaymentFinancialSources, type ExternalPaymentFinancialSources } from "@/platform/authz/external-payment-resource";
 import { expenseResource } from "@/platform/authz/expense-resource";
+import {nativeInventoryLocationResources} from "@/platform/inventory/location-resource";
 
 export type FinancialAuditResource = NativeFinancialResource & { attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
 
@@ -74,6 +75,7 @@ function whereFor(organizationId: string, filters: AuditHistoryFilters): Prisma.
 }
 
 export class AuditRepository {
+  inventoryLocationResources(ids:string[]){return nativeInventoryLocationResources(this.tx,this.organizationId,ids);}
   constructor(
     private readonly tx: TenantTransaction,
     private readonly organizationId: string

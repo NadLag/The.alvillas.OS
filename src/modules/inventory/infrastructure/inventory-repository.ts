@@ -1,15 +1,58 @@
 import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { StockPosition } from "../domain/stocktake";
+import type {Scope} from "@/platform/authz/authorize";
 export type InventoryItemHead={id:string;key:string;category:string;unit:string|null;labels:unknown;sourceConfigRuleId:string|null;createdAt:Date;archivedAt:Date|null;xmin:string;tuple:string};
+export type InventoryLocationHead={id:string;kind:string;propertyId:string|null;label:string;createdAt:Date;archivedAt:Date|null;xmin:string;tuple:string;propertyName:string|null;propertyCity:string|null;propertyRegion:string|null;propertyArchivedAt:Date|null;propertyXmin:string|null;propertyTuple:string|null};
+export type InventoryLocationProperty={id:string;name:string;city:string|null;region:string|null;archivedAt:Date|null;xmin:string;tuple:string};
 
 export class InventoryRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
+  lockLocationCommand(key:string){return this.lock("location-command:"+key,false);}
+  lockLocationMetadata(value:{id?:string;propertyId:string|null}){const key=value.propertyId??value.id;return key?this.lock("location:"+key,false):Promise.resolve();}
+  async locationCatalogById(id:string):Promise<InventoryLocationHead|null>{return(await this.locationHeads(Prisma.sql`l.id=${id}::uuid`,1))[0]??null;}
+  async locationCatalogByProperty(propertyId:string):Promise<InventoryLocationHead|null>{return(await this.locationHeads(Prisma.sql`l.property_id=${propertyId}::uuid`,1))[0]??null;}
+  locationCatalogAuditSources(ids:string[]){return ids.length?this.locationHeads(Prisma.sql`l.id IN(${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})`,ids.length):Promise.resolve([]);}
+  private propertyScopeSelection(scopes:readonly Scope[]){
+    const clauses=scopes.flatMap(scope=>{const kind=scope.scopeType??scope.resourceType,id=scope.scopeId??scope.resourceId;if(kind==="organization")return[Prisma.sql`TRUE`];if(!id)return[];
+      if(kind==="property")return[Prisma.sql`p.id::text=${id}`];if(kind==="city")return[Prisma.sql`COALESCE(p.city_id::text,p.city)=${id}`];if(kind==="region")return[Prisma.sql`COALESCE(p.region_id::text,p.region)=${id}`];return[];});
+    return clauses.length?Prisma.sql`(${Prisma.join(clauses," OR ")})`:Prisma.sql`FALSE`;
+  }
+  locationCatalogPage(input:{query:string;kind?:string;propertyId?:string;archived:boolean;after?:string},held:readonly Scope[],current:readonly Scope[]){
+    const pattern="%"+input.query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
+    return this.locationHeads(Prisma.sql`(${input.archived}::boolean=(l.archived_at IS NOT NULL))
+      ${input.kind?Prisma.sql`AND l.kind=${input.kind}`:Prisma.empty}
+      ${input.propertyId?Prisma.sql`AND l.property_id=${input.propertyId}::uuid`:Prisma.empty}
+      ${input.after?Prisma.sql`AND l.id>${input.after}::uuid`:Prisma.empty}
+      AND(l.label ILIKE ${pattern} OR p.name ILIKE ${pattern})
+      AND(l.property_id IS NULL OR(p.id IS NOT NULL AND ${this.propertyScopeSelection(held)} AND ${this.propertyScopeSelection(current)}))`,51);
+  }
+  private locationHeads(where:Prisma.Sql,take:number){
+    return this.tx.$queryRaw<InventoryLocationHead[]>(Prisma.sql`SELECT l.id,l.kind,l.property_id AS "propertyId",l.label,l.created_at AS "createdAt",l.archived_at AS "archivedAt",l.xmin::text,l.ctid::text AS tuple,p.name AS "propertyName",COALESCE(p.city_id::text,p.city) AS "propertyCity",COALESCE(p.region_id::text,p.region) AS "propertyRegion",p.archived_at AS "propertyArchivedAt",p.xmin::text AS "propertyXmin",p.ctid::text AS "propertyTuple"
+      FROM inventory_location l LEFT JOIN property p ON p.organization_id=l.organization_id AND p.id=l.property_id WHERE l.organization_id=${this.organizationId}::uuid AND ${where} ORDER BY l.id LIMIT ${take}`);
+  }
+  private propertyHeads(where:Prisma.Sql,take:number){
+    return this.tx.$queryRaw<InventoryLocationProperty[]>(Prisma.sql`SELECT p.id,p.name,COALESCE(p.city_id::text,p.city) AS city,COALESCE(p.region_id::text,p.region) AS region,p.archived_at AS "archivedAt",p.xmin::text,p.ctid::text AS tuple FROM property p WHERE p.organization_id=${this.organizationId}::uuid AND ${where} ORDER BY p.id LIMIT ${take}`);
+  }
+  async locationCatalogProperty(id:string):Promise<InventoryLocationProperty|null>{return(await this.propertyHeads(Prisma.sql`p.id=${id}::uuid`,1))[0]??null;}
+  locationPropertyChoices(input:{query:string;after?:string},held:readonly Scope[],current:readonly Scope[]){
+    const pattern="%"+input.query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
+    return this.propertyHeads(Prisma.sql`p.archived_at IS NULL AND p.name ILIKE ${pattern} ${input.after?Prisma.sql`AND p.id>${input.after}::uuid`:Prisma.empty} AND ${this.propertyScopeSelection(held)} AND ${this.propertyScopeSelection(current)}`,51);
+  }
+  async locationCatalogCreate(input:{kind:string;propertyId:string|null;label:string}){
+    const row=await this.tx.inventoryLocation.create({data:{organizationId:this.organizationId,...input}});return(await this.locationCatalogById(row.id))!;
+  }
+  locationCatalogUpdate(row:InventoryLocationHead,input:{label:string;archivedAt:Date|null}){
+    return this.tx.$executeRaw(Prisma.sql`UPDATE inventory_location SET label=${input.label},archived_at=${input.archivedAt} WHERE organization_id=${this.organizationId}::uuid AND id=${row.id}::uuid AND xmin::text=${row.xmin} AND ctid::text=${row.tuple}`);
+  }
+  locationCatalogStocks(locationId:string){
+    return this.tx.$queryRaw<Array<{itemId:string;quantity:string}>>(Prisma.sql`SELECT item_id AS "itemId",sum(quantity_delta)::text AS quantity FROM inventory_movement WHERE organization_id=${this.organizationId}::uuid AND location_id=${locationId}::uuid GROUP BY item_id ORDER BY item_id`);
+  }
   async catalogClock(){return(await this.tx.$queryRaw<Array<{now:Date}>>(Prisma.sql`SELECT clock_timestamp() AS now`))[0].now;}
   lockCatalogCommand(key:string){return this.lock("catalog-command:"+key,false);}
   lockCatalogItem(key:string){return this.lock("catalog:"+key,false);}
-  async catalogItemById(id:string){return(await this.catalogHeads(Prisma.sql`i.id=${id}::uuid`,1))[0]??null;}
-  async catalogItemByKey(key:string){return(await this.catalogHeads(Prisma.sql`i.key=${key}`,1))[0]??null;}
+  async catalogItemById(id:string):Promise<InventoryItemHead|null>{return(await this.catalogHeads(Prisma.sql`i.id=${id}::uuid`,1))[0]??null;}
+  async catalogItemByKey(key:string):Promise<InventoryItemHead|null>{return(await this.catalogHeads(Prisma.sql`i.key=${key}`,1))[0]??null;}
   catalogPage(input:{query:string;category?:string;archived:boolean;after?:string}){
     const pattern="%"+input.query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
     return this.catalogHeads(Prisma.sql`(${input.archived}::boolean=(i.archived_at IS NOT NULL))

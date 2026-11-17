@@ -7,7 +7,8 @@ import {readBoundedJsonRequest} from "@/platform/http/read-exact-response";
 import {captureException} from "@/platform/observability/sentry";
 import {InventoryItemAccessError,InventoryItemConflictError,InventoryItemDefinitionError,InventoryItemStockHeldError} from "../domain/item-catalog";
 export const inventoryPrivateHeaders={"Cache-Control":"private, no-store","Referrer-Policy":"no-referrer",Vary:"Cookie, Origin"};
-export async function inventoryItemHttp(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>){
+export const inventoryItemHttp=(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>)=>inventoryCatalogHttp(request,work);
+export async function inventoryCatalogHttp(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>,feature="F-INV-01"){
  const requestId=crypto.randomUUID(),failure=(error:string,status:number)=>NextResponse.json({error},{status,headers:inventoryPrivateHeaders});
  try{
   const actor=await accountActorContextFromSession(await auth());if(!actor)return failure("unauthorized",401);
@@ -19,7 +20,7 @@ export async function inventoryItemHttp(request:NextRequest,work:(actor:AccountA
   if(error instanceof InventoryItemConflictError)return failure("conflict",409);
   if(error instanceof InventoryItemStockHeldError)return failure("stock_held",409);
   if(error instanceof InventoryItemDefinitionError||error instanceof ZodError)return failure("validation",400);
-  try{await captureException(new Error("Private inventory item request unavailable"),{source:"api",requestId,tags:{feature:"F-INV-01"}});}catch{/* Preserve the private failure response if telemetry is unavailable. */}
+  try{await captureException(new Error("Private inventory catalog request unavailable"),{source:"api",requestId,tags:{feature}});}catch{/* Preserve the private failure response if telemetry is unavailable. */}
   return failure("unavailable",503);
  }
 }
