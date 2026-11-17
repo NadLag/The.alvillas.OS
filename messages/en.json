@@ -7605,5 +7605,53 @@
       "stock_held": "Original physical stock or commitments prevent this operation.",
       "uncertain": "The result is unconfirmed. Resolve the original request."
     }
+  },
+  "InventoryStayConsumption": {
+    "eyebrow": "Inventory",
+    "title": "Consumption by stay",
+    "subtitle": "Compare the configured requirement for one stay with its recorded consumption.",
+    "back": "Back to workspace",
+    "chooseStay": "Choose a stay",
+    "refresh": "Refresh",
+    "search": "Find an item",
+    "apply": "Apply",
+    "unspecified": "Not configured",
+    "unspecifiedUnit": "Unit not specified",
+    "privateHidden": "Private stay information is hidden. Reopen this view to check current access.",
+    "planningHelp": "Expected quantities apply once per stay, in each item’s original unit. This forecast does not reserve or deduct stock.",
+    "actualHelp": "Actual quantities include recorded consumption linked to this stay and its original reversals. Other movements and unassigned consumption are excluded.",
+    "notApplicable": "This stay or property is archived, cancelled or marked as no-show. An expected requirement is unavailable; recorded history remains visible.",
+    "policyVersion": "Arrival policy · version {version}",
+    "noPolicy": "No inventory policy was effective at arrival. Recorded consumption remains visible without an assumed requirement.",
+    "viewStay": "Open the stay",
+    "item": "Item",
+    "unit": "Unit",
+    "expected": "Expected per stay",
+    "actual": "Recorded consumption",
+    "variance": "Recorded minus expected",
+    "movements": "Recorded entries",
+    "empty": "No configured items or recorded consumption match this search.",
+    "firstPage": "First page",
+    "nextPage": "Next page",
+    "movementHistory": "Movement history",
+    "settings": "Inventory configuration",
+    "applyHelp": "Apply the search to load current information.",
+    "chooseHelp": "Choose a stay to see its requirement and recorded consumption.",
+    "conditions": {
+      "MISSING": "Item has not been added to the catalog",
+      "RETIRED": "Retired item",
+      "INCOMPATIBLE": "Configured category or unit differs from the original item"
+    },
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading…",
+      "offline": "Reconnect to view current stock levels.",
+      "forbidden": "Your current access no longer permits these stock levels.",
+      "unavailable": "Stock levels are unavailable. Try again.",
+      "validation": "Check the original item or location and filters.",
+      "conflict": "Stock or source access changed. Refresh the current quantities.",
+      "stock_held": "Original stock commitments must remain intact.",
+      "uncertain": "The result is unconfirmed. Refresh the current stock."
+    }
   }
 }
