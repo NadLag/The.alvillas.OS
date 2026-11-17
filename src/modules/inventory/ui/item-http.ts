@@ -8,12 +8,12 @@ import {captureException} from "@/platform/observability/sentry";
 import {InventoryItemAccessError,InventoryItemConflictError,InventoryItemDefinitionError,InventoryItemStockHeldError} from "../domain/item-catalog";
 export const inventoryPrivateHeaders={"Cache-Control":"private, no-store","Referrer-Policy":"no-referrer",Vary:"Cookie, Origin"};
 export const inventoryItemHttp=(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>)=>inventoryCatalogHttp(request,work);
-export async function inventoryCatalogHttp(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>,feature="F-INV-01"){
+export async function inventoryCatalogHttp(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>,feature="F-INV-01",maximumRequestBytes=32768){
  const requestId=crypto.randomUUID(),failure=(error:string,status:number)=>NextResponse.json({error},{status,headers:inventoryPrivateHeaders});
  try{
   const actor=await accountActorContextFromSession(await auth());if(!actor)return failure("unauthorized",401);
   if(!isSameOriginContentType(request,"application/json")||request.headers.get("x-alvillas-inventory-scope")!==actor.organizationId+"."+actor.actorId)return failure("forbidden",403);
-  if(request.nextUrl.search)return failure("validation",400);let input:unknown;try{input=await readBoundedJsonRequest(request,32768);}catch{return failure("validation",400);}
+  if(request.nextUrl.search)return failure("validation",400);let input:unknown;try{input=await readBoundedJsonRequest(request,maximumRequestBytes);}catch{return failure("validation",400);}
   return NextResponse.json(await work(actor,input,requestId),{headers:inventoryPrivateHeaders});
  }catch(error){
   if(error instanceof InventoryItemAccessError)return failure("forbidden",403);

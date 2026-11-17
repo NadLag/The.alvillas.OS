@@ -7,7 +7,7 @@ import {inventoryItemPageSchema} from "../domain/item-view";
 import {inventoryLocationPageSchema} from "../domain/location-view";
 import {inventoryMovementReservationChoicesSchema} from "../domain/movement-view";
 import {inventoryCatalogRequest,InventoryBrowserError,type InventoryBrowserState} from "./item-browser";
-export type InventoryMovementChoice={id:string;label:string;unit?:string|null};
+export type InventoryMovementChoice={id:string;label:string;unit?:string|null;key?:string};
 type Props={scope:string;locale:AppLocale;kind:"items"|"locations"|"reservations";activeReservation:boolean;allowRetired?:boolean;category?:"LINEN";onSelect:(value:InventoryMovementChoice)=>void;onClose:()=>void;onDenied:()=>void};
 export function InventoryMovementSourcePicker({scope,locale,kind,activeReservation,allowRetired=false,category,onSelect,onClose,onDenied}:Props){
  const t=useTranslations("InventoryMovements"),id=useId(),[query,setQuery]=useState(""),[archived,setArchived]=useState(false),[page,setPage]=useState<{items:InventoryMovementChoice[];next:string|null}|null>(null),[state,setState]=useState<InventoryBrowserState>("loading"),controller=useRef<AbortController|null>(null),epoch=useRef(0);
@@ -16,7 +16,7 @@ export function InventoryMovementSourcePicker({scope,locale,kind,activeReservati
   controller.current?.abort();const own=++epoch.current,abort=new AbortController();controller.current=abort;setPage(null);setState("loading");
   try{
    let value:{items:InventoryMovementChoice[];next:string|null};
-   if(kind==="items"){const result=inventoryItemPageSchema.parse(await inventoryCatalogRequest("items","page",{query:search,archived,...category?{category}:{},...after?{after}:{}},abort.signal,scope));value={items:result.items.map(row=>({id:row.id,label:localizedText(row.name,locale)+" · "+row.key,unit:row.unit})),next:result.next};}
+   if(kind==="items"){const result=inventoryItemPageSchema.parse(await inventoryCatalogRequest("items","page",{query:search,archived,...category?{category}:{},...after?{after}:{}},abort.signal,scope));value={items:result.items.map(row=>({id:row.id,key:row.key,label:localizedText(row.name,locale)+" · "+row.key,unit:row.unit})),next:result.next};}
    else if(kind==="locations"){const result=inventoryLocationPageSchema.parse(await inventoryCatalogRequest("locations","page",{query:search,archived,...after?{after}:{}},abort.signal,scope));value={items:result.items.filter(row=>allowRetired||!row.propertyArchived).map(row=>({id:row.id,label:row.label})),next:result.next};}
    else value=inventoryMovementReservationChoicesSchema.parse(await inventoryCatalogRequest("movements","reservations",{query:search,active:activeReservation,...after?{after}:{}},abort.signal,scope));
    if(abort.signal.aborted||own!==epoch.current)return;setPage(value);setState("ready");
