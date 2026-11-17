@@ -2951,3 +2951,8 @@ textarea:disabled {
 .inventory-stock-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: var(--space-4); margin: 0; }
 .inventory-stock-totals dt { color: var(--text-secondary); }
 .inventory-stock-totals dd { margin: 0; padding-block-start: var(--space-2); overflow-wrap: anywhere; }
+
+.inventory-location-page { overflow-wrap: anywhere; }
+.inventory-location-page :is(fieldset, .resource-form, .field, .form-grid, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
+.inventory-location-page .resource-form { grid-template-columns: minmax(0, 1fr); }
+.inventory-location-page :is(button, input, select) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
