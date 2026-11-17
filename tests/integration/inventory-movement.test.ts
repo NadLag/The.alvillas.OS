@@ -33,7 +33,7 @@ async function fixture(){
  const ctx={...f.ctx,authContext:{...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id}},deps={db,requestId:randomUUID()};return{...f,...setup,grants,ctx,deps,propertyLocation:setup.locations[0],store:setup.locations[1],laundry:setup.locations[2]};
 }
 type Fixture=Awaited<ReturnType<typeof fixture>>;
-async function command(f:Fixture,draft:unknown){return{draft,reviewFingerprint:(await previewInventoryMovement(f.ctx,draft,f.deps)).reviewFingerprint,idempotencyKey:randomUUID()};}
+async function command(f:Fixture,draft:unknown){const reviewed=await previewInventoryMovement(f.ctx,draft,f.deps);return{draft:reviewed.draft,reviewFingerprint:reviewed.reviewFingerprint,idempotencyKey:randomUUID()};}
 async function post(f:Fixture,draft:unknown){return publishInventoryMovement(f.ctx,await command(f,draft),f.deps);}
 const base=(f:Fixture,quantity="3")=>({itemId:f.item.id,locationId:f.propertyLocation.id,quantity,reason:"Record the actual original physical stock movement"});
 const position=(f:Fixture,locationId=f.propertyLocation.id)=>withTenant(db,f.organizationId,tx=>new InventoryMovementRepository(tx,f.organizationId).position(locationId,f.item.id));
