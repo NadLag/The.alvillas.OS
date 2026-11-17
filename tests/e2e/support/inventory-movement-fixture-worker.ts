@@ -1,5 +1,5 @@
-import {writeFile} from "node:fs/promises";
-import {resolve,sep} from "node:path";
+import {mkdir,writeFile} from "node:fs/promises";
+import {dirname,resolve,sep} from "node:path";
 import {randomUUID} from "node:crypto";
 import {PrismaClient} from "@prisma/client";
 import {z} from "zod";
@@ -10,7 +10,7 @@ const input=z.object({organizationId:z.uuid(),accountId:z.uuid(),personId:z.uuid
 if(process.env.VERCEL||process.env.VERCEL_ENV||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os")||!resolve(input.output).startsWith(resolve(process.cwd())+sep))throw Error("Owned inventory movement browser fixture required");
 const db=new PrismaClient();try{
  const f=await nativeGuestHubFixture(db,db,{},input),result=await withTenant(db,f.organizationId,async tx=>{
-  const item=await tx.inventoryItem.create({data:{organizationId:f.organizationId,key:"original.browser.stock."+randomUUID(),category:"LINEN",unit:"piece",labels:{en:"Original browser linen "+randomUUID(),fr:"Linge original du navigateur "+randomUUID(),ar:"كتان أصلي للمتصفح "+randomUUID()}}}),source=await tx.inventoryLocation.create({data:{organizationId:f.organizationId,kind:"PROPERTY",propertyId:f.property.id,label:"Actual original source "+randomUUID()}}),destination=await tx.inventoryLocation.create({data:{organizationId:f.organizationId,kind:"STORE",label:"Actual original destination "+randomUUID()}});return{itemId:item.id,itemKey:item.key,itemName:item.labels,sourceId:source.id,sourceLabel:source.label,destinationId:destination.id,destinationLabel:destination.label,reservationId:f.reservation.id,reservationReference:f.reservation.reference,financialCount:await tx.financialTransaction.count()};
+  const item=await tx.inventoryItem.create({data:{organizationId:f.organizationId,key:"original.browser.stock."+randomUUID(),category:"LINEN",unit:"piece",labels:{en:"Original browser linen "+randomUUID(),fr:"Linge original du navigateur "+randomUUID(),ar:"كتان أصلي للمتصفح "+randomUUID()}}}),source=await tx.inventoryLocation.create({data:{organizationId:f.organizationId,kind:"PROPERTY",propertyId:f.property.id,label:"Actual original source "+randomUUID()}}),destination=await tx.inventoryLocation.create({data:{organizationId:f.organizationId,kind:"STORE",label:"Actual original destination "+randomUUID()}});return{itemId:item.id,itemKey:item.key,itemName:item.labels,sourceId:source.id,sourceLabel:source.label,destinationId:destination.id,destinationLabel:destination.label,reservationId:f.reservation.id,reservationReference:f.reservation.reference,financialCount:await tx.financialTransaction.count({where:{organizationId:f.organizationId}})};
  });
  if(input.stock||input.reorder)for(const change of[{kind:"PURCHASE",quantity:"20"},{kind:"TRANSFER",quantity:"4",destinationLocationId:result.destinationId},{kind:"DAMAGE",quantity:"2"}]){const draft={itemId:result.itemId,locationId:result.sourceId,reason:"Actual original movements for private derived stock acceptance",...change},review=await previewInventoryMovement(f.ctx,draft,{db});await publishInventoryMovement(f.ctx,{draft,reviewFingerprint:review.reviewFingerprint,idempotencyKey:randomUUID()},{db});}
  if(input.reorder){
@@ -22,5 +22,6 @@ const db=new PrismaClient();try{
   for(const id of runs){const run=await withTenant(db,f.organizationId,tx=>tx.automationRun.findUniqueOrThrow({where:{id}}));if(run.configRuleId===automation.id){if(await executeAutomationRun(f.organizationId,id,deps)!=="SUCCEEDED")throw Error("Actual original reorder browser effect failed");executed=true;}}
   if(!executed)throw Error("Actual original reorder automation was not admitted");
  }
+ await mkdir(dirname(resolve(input.output)),{recursive:true,mode:0o700});
  await writeFile(input.output,JSON.stringify(result),{flag:"wx",mode:0o600});
 }finally{await db.$disconnect();}
