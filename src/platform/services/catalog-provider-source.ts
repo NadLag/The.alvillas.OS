@@ -19,13 +19,13 @@ export async function nativeServiceCatalogActor(actor:AccountActorContext,tx:Ten
 }
 /** Page only identities first. Labels follow independent source authorization;
  * a catalog property's scope never substitutes for an actual team membership. */
-export async function nativeServiceCatalogProviderChoices(actor:AccountActorContext,tx:TenantTransaction,input:{kind:"SUPPLIER"|"PERSON";query:string;after?:string},stored:AuthContext,now:Date){
- const suppliers=new SupplierRepository(tx,actor.organizationId),team=new TeamRepository(tx,actor.organizationId),page=input.kind==="SUPPLIER"?await suppliers.catalogChoiceHeads(input.query,input.after,now):await team.onboardingTeamPersonChoices(input.query,input.after,now),selected=page.slice(0,50),ids=selected.map(row=>row.id),people=input.kind==="PERSON"?await team.onboardingTeamPersonHeads(ids):[],scopes=input.kind==="PERSON"?await team.onboardingTeamPersonScopes(ids,now):[];
+export async function nativeServiceCatalogProviderChoices(actor:AccountActorContext,tx:TenantTransaction,input:{kind:"SUPPLIER"|"PERSON";query:string;after?:string;includeArchivedSuppliers?:boolean},stored:AuthContext,now:Date){
+ const suppliers=new SupplierRepository(tx,actor.organizationId),team=new TeamRepository(tx,actor.organizationId),page=input.kind==="SUPPLIER"?await suppliers.catalogChoiceHeads(input.query,input.after,now,input.includeArchivedSuppliers):await team.onboardingTeamPersonChoices(input.query,input.after,now),selected=page.slice(0,50),ids=selected.map(row=>row.id),people=input.kind==="PERSON"?await team.onboardingTeamPersonHeads(ids):[],scopes=input.kind==="PERSON"?await team.onboardingTeamPersonScopes(ids,now):[];
  const allowed=selected.filter(row=>{
   if(input.kind==="SUPPLIER"){const source={type:"supplier",organizationId:actor.organizationId,id:row.id,dataClass:"personal"as const,occurredAt:"createdAt"in row?row.createdAt as Date:undefined};try{assertAccountAuthorization(actor,stored,now,[{action:"view",organizationOnly:true,resource:source}],new ServiceCatalogAccessError());return true;}catch(error){if(error instanceof ServiceCatalogAccessError)return false;throw error;}}
   const head=people.find(person=>person.id===row.id);if(!head||head.archivedAt)return false;const base:Resource={type:"team_member",organizationId:actor.organizationId,id:row.id,assignedPersonId:row.id,dataClass:"personal"},candidates=[base,...scopes.filter(scope=>scope.personId===row.id).map(scope=>({...base,propertyId:scope.propertyId,city:scope.city,region:scope.region,jobId:scope.jobId}))];return candidates.some(resource=>[actor.authContext,stored].every(context=>authorize(context,"view",resource,now)));
  });
- const sources=await nativeServiceCatalogProviders(actor,tx,allowed.map(row=>({kind:input.kind,component_key:"selected_provider",id:row.id})),stored,now);
+ const sources=await nativeServiceCatalogProviders(actor,tx,allowed.map(row=>({kind:input.kind,component_key:"selected_provider",id:row.id})),stored,now,{allowArchived:input.kind==="SUPPLIER"&&input.includeArchivedSuppliers});
  return{items:sources.items.map(row=>({id:row.id,label:row.label,kind:row.kind})),next:page.length>50?selected.at(-1)!.id:null,fingerprint:commandFingerprint({page,people,scopes,selected:sources.fingerprint})};
 }
 /** Cross-module provider reads retain the canonical tenant repositories and

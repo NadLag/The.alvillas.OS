@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  supplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceOrganization")
   laundryBatches LaundryBatch[] @relation("LaundryBatchOrganization")
   laundryBatchLines LaundryBatchLine[] @relation("LaundryLineOrganization")
   laundryBatchEvents LaundryBatchEvent[] @relation("LaundryEventOrganization")
@@ -851,6 +852,7 @@ model Person {
 }
 
 model UserAccount {
+  createdSupplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceCreator")
   createdLaundryBatches LaundryBatch[] @relation("LaundryBatchCreator")
   createdLaundryEvents LaundryBatchEvent[] @relation("LaundryEventCreator")
   serviceOrders ServiceOrder[] @relation("ServiceOrderCreator")
@@ -2372,6 +2374,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  supplierPriceListVersions SupplierPriceListVersion[]
   serviceOrders ServiceOrder[]
   externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentRefundIntents ExternalPaymentRefundIntent[]
@@ -2424,6 +2427,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  supplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceConfig")
   serviceOrders ServiceOrder[] @relation("ServiceOrderCatalog")
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkPolicy")
   leadConversions LeadConversion[] @relation("LeadConversionPolicy")
@@ -3516,6 +3520,7 @@ model ApprovalStageRecipient {
 }
 
 model Supplier {
+  priceListVersions SupplierPriceListVersion[] @relation("SupplierPriceSupplier")
   laundryBatches LaundryBatch[] @relation("LaundryBatchSupplier")
   documents Document[] @relation("DocumentSupplier")
   documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientSupplier")
@@ -6714,4 +6719,23 @@ model LaundryBatchChange {
   @@unique([organizationId,movementGroupId],map:"laundry_change_movement_key")
   @@index([organizationId,lineId,eventId],map:"laundry_change_history_idx")
   @@map("laundry_batch_change")
+}
+
+model SupplierPriceListVersion {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  supplierId String @map("supplier_id") @db.Uuid
+  configRuleId String @map("config_rule_id") @db.Uuid
+  currency String @db.Char(3)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation("SupplierPriceOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  supplier Supplier @relation("SupplierPriceSupplier",fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  configRule ConfigRule @relation("SupplierPriceConfig",fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("SupplierPriceCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  currencyDefinition Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"supplier_price_version_org_id")
+  @@unique([organizationId,configRuleId],map:"supplier_price_version_config_key")
+  @@index([organizationId,supplierId,createdAt,id],map:"supplier_price_version_supplier_idx")
+  @@map("supplier_price_list_version")
 }

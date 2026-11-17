@@ -12,9 +12,11 @@ import {serviceAllocationPolicyKey} from "./service-allocation-policy";
 import {guestDepositPolicyKey} from "./guest-deposit-policy";
 import {accountantExportPolicyKey} from "@/modules/finance/domain/accountant-export-policy";
 import {propertyFinanceFinancialSources} from "@/platform/authz/property-finance-resource";
+import {laundryPricingPolicyKey,laundryPricingSupplierId,protectedLaundryPricingKey} from "./laundry-pricing-policy";
 export {recurringExpensePolicyKey,recurringCompanyExpensePolicyKey,serviceAllocationPolicyKey};
 
 const sourceGroups:Readonly<Record<string,readonly string[]>>={
+ [laundryPricingPolicyKey]:["supplier_invoice"],
  [ledgerIntegrityPolicyKey]:[...propertyFinanceFinancialSources,"bank_statement","company_expense","receivable","financial_attachment"],
  [ledgerIntegrityRoutingKey]:[...propertyFinanceFinancialSources,"bank_statement","company_expense","receivable","financial_attachment"],
  "finance.commission":["financial_transaction","company_ledger"],
@@ -37,6 +39,7 @@ const sourceGroups:Readonly<Record<string,readonly string[]>>={
  "finance.tax":["financial_transaction","company_ledger"]
 };
 function financialSources(key: string): readonly string[] | undefined {
+ if(protectedLaundryPricingKey(key))return["supplier_invoice"];
  if (Object.hasOwn(sourceGroups,key)) return sourceGroups[key];
  if (key === "finance.receivables" || key.startsWith("finance.receivable_")) return ["receivable","financial_transaction","staff_compensation"];
  if (key==="staff.compensation"||key.startsWith("staff.compensation_")) return ["staff_compensation","employee_payable","financial_transaction"];
@@ -46,7 +49,7 @@ function financialSources(key: string): readonly string[] | undefined {
 }
 export const protectedFinancialRuleKey=(key:string|undefined):key is string=>Boolean(key&&financialSources(key));
 export function financialRuleSourceChecks(organizationId:string,key:string,action:"view"|"export"="view"):CurrentAuthorityCheck[]{
- const sources=financialSources(key);if(!sources)return[];return sources.flatMap(type=>[{action:"view"as const,resource:{type,organizationId,dataClass:"financial"as const},organizationOnly:true},...action==="export"?[{action:"export"as const,resource:{type,organizationId,dataClass:"financial"as const},organizationOnly:true}]:[]]);
+ const sources=financialSources(key);if(!sources)return[];const checks:CurrentAuthorityCheck[]=sources.flatMap(type=>[{action:"view"as const,resource:{type,organizationId,dataClass:"financial"as const},organizationOnly:true},...action==="export"?[{action:"export"as const,resource:{type,organizationId,dataClass:"financial"as const},organizationOnly:true}]:[]]);const supplierId=laundryPricingSupplierId(key);if(supplierId)for(const permission of action==="export"?["view","export"]as const:["view"]as const)checks.push({action:permission,resource:{type:"supplier",organizationId,id:supplierId,dataClass:"personal"},organizationOnly:true});return checks;
 }
 export function financialRuleAccess(auth:AuthContext,action:"view"|"export"="view",now=new Date(),key:string=recurringExpensePolicyKey){
  return protectedFinancialRuleKey(key)&&financialRuleSourceChecks(auth.organizationId,key,action).every(check=>authorizeOrganizationSource(auth,check.action,check.resource,now));

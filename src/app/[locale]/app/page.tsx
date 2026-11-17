@@ -89,6 +89,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="linen-pool-link" prefetch={false} href={`/${appLocale}/app/inventory/linen`}>{(await getTranslations("LinenPool"))("title")}</Link> : null}
           {reservationContext && ["inventory_movement","inventory_item","inventory_location"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
             <Link className="secondary-button" data-testid="laundry-batches-link" prefetch={false} href={`/${appLocale}/app/inventory/laundry`}>{(await getTranslations("LaundryBatches"))("title")}</Link> : null}
+          {reservationContext && authorizeCollection(reservationContext.authContext,"view","config_rule") && [{type:"inventory_item",dataClass:"operational"as const},{type:"supplier",dataClass:"personal"as const},{type:"supplier_invoice",dataClass:"financial"as const}].every(source=>authorizeOrganizationSource(reservationContext.authContext,"view",{...source,organizationId:session.user.organizationId},new Date())) ?
+            <Link className="secondary-button" data-testid="supplier-prices-link" prefetch={false} href={`/${appLocale}/app/inventory/supplier-prices`}>{(await getTranslations("SupplierPrices"))("title")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/security`}>
             {t("security")}
           </Link>

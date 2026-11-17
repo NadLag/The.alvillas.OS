@@ -1,0 +1,14 @@
+import {z} from "zod";
+import {localizedTextSchema} from "@/i18n/content";
+import {laundrySupplierPricePolicySchema} from "@/platform/config/laundry-pricing-policy";
+import {supplierPriceDraftSchema,supplierPriceScopeSchema} from "./supplier-price-command";
+const id=z.uuid(),instant=z.iso.datetime(),hash=z.string().regex(/^[a-f0-9]{64}$/u);
+const item=z.object({id,key:z.string(),name:localizedTextSchema,unit:z.string(),retired:z.boolean()}).strict();
+export const supplierPriceCapabilitiesSchema=z.object({createDraft:z.boolean(),configure:z.boolean()}).strict();
+function originalUnits(value:{policy:{prices:readonly{item:string;unit:string}[]};items:readonly{key:string;unit:string}[]},context:z.RefinementCtx){if(value.policy.prices.length!==value.items.length||new Set(value.items.map(row=>row.key)).size!==value.items.length||value.policy.prices.some(price=>!value.items.some(item=>item.key===price.item&&item.unit===price.unit)))context.addIssue({code:"custom",path:["items"],message:"Price disclosure must retain its original distinct catalog units"});}
+export const supplierPriceVersionViewSchema=z.object({id,supplier:z.object({id,label:z.string()}).strict(),scope:supplierPriceScopeSchema,property:z.object({id,name:z.string()}).strict().nullable(),version:z.number().int().positive(),lifecycle:z.enum(["DRAFT","ACTIVE","RETIRED"]),effectiveFrom:instant,effectiveTo:instant.nullable(),createdAt:instant,reason:z.string(),policy:laundrySupplierPricePolicySchema,items:z.array(item).min(1).max(500),capabilities:supplierPriceCapabilitiesSchema}).strict().superRefine(originalUnits);
+export const supplierPricePageSchema=z.object({supplier:z.object({id,label:z.string()}).strict(),scope:supplierPriceScopeSchema,property:z.object({id,name:z.string()}).strict().nullable(),capabilities:supplierPriceCapabilitiesSchema,items:z.array(z.object({id,version:z.number().int().positive(),lifecycle:z.enum(["DRAFT","ACTIVE","RETIRED"]),currency:z.string(),effectiveFrom:instant,effectiveTo:instant.nullable(),createdAt:instant,reason:z.string(),priceCount:z.number().int().positive()}).strict()).max(20),next:id.nullable()}).strict();
+export type SupplierPricePage=z.infer<typeof supplierPricePageSchema>;
+export const supplierPriceReviewSchema=z.object({draft:supplierPriceDraftSchema,reviewFingerprint:hash,supplier:z.object({id,label:z.string()}).strict(),scope:supplierPriceScopeSchema,property:z.object({id,name:z.string()}).strict().nullable(),policy:laundrySupplierPricePolicySchema,items:z.array(item).max(500),previous:z.object({id,version:z.number().int().positive(),lifecycle:z.enum(["DRAFT","ACTIVE","RETIRED"])}).strict().nullable()}).strict().superRefine(originalUnits);
+export type SupplierPriceReview=z.infer<typeof supplierPriceReviewSchema>;
+export type SupplierPriceVersionView=z.infer<typeof supplierPriceVersionViewSchema>;
