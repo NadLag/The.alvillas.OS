@@ -8,8 +8,8 @@ export class InventoryRepository {
   async catalogClock(){return(await this.tx.$queryRaw<Array<{now:Date}>>(Prisma.sql`SELECT clock_timestamp() AS now`))[0].now;}
   lockCatalogCommand(key:string){return this.lock("catalog-command:"+key,false);}
   lockCatalogItem(key:string){return this.lock("catalog:"+key,false);}
-  async catalogItemById(id:string){return(await this.catalogHeads(Prisma.sql`i.id=${id}::uuid`,1))[0]??null;}
-  async catalogItemByKey(key:string){return(await this.catalogHeads(Prisma.sql`i.key=${key}`,1))[0]??null;}
+  async catalogItemById(id:string):Promise<InventoryItemHead|null>{return(await this.catalogHeads(Prisma.sql`i.id=${id}::uuid`,1))[0]??null;}
+  async catalogItemByKey(key:string):Promise<InventoryItemHead|null>{return(await this.catalogHeads(Prisma.sql`i.key=${key}`,1))[0]??null;}
   catalogPage(input:{query:string;category?:string;archived:boolean;after?:string}){
     const pattern="%"+input.query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
     return this.catalogHeads(Prisma.sql`(${input.archived}::boolean=(i.archived_at IS NOT NULL))
