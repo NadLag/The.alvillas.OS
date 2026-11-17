@@ -229,3 +229,4 @@ prisma/migrations/20261117193000_native_inventory_purchase_receipts/migration.sq
 prisma/migrations/20261117194500_inventory_purchase_receipt_movement_alias/migration.sql text eol=lf
 prisma/migrations/20261117195500_inventory_purchase_receipt_leg_json/migration.sql text eol=lf
 prisma/migrations/20261117202500_inventory_purchase_original_attachment_id/migration.sql text eol=lf
+prisma/migrations/20261117210000_native_laundry_batch_custody/migration.sql text eol=lf
