@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {inventoryMovementReceiptSchema} from "./movement-command";
 import {stockQuantitySchema} from "./stocktake";
 import {inventoryItemReasonSchema} from "./item-catalog";
 import {InventoryCatalogConflictError,InventoryCatalogDefinitionError} from "./catalog-errors";
@@ -6,7 +7,8 @@ const id=z.uuid().transform(value=>value.toLowerCase());
 export const laundryQuantitySchema=stockQuantitySchema.pipe(z.string().refine(value=>BigInt(value)>0n));
 export const laundryBucketSchema=z.enum(["ORIGIN","OUTBOUND","OUTBOUND_DAMAGED","LAUNDRY_PENDING","CLEAN_READY","REJECTED","DAMAGED_READY","INBOUND_CLEAN","INBOUND_DAMAGED","RETURNED_CLEAN","RETURNED_DAMAGED","MISSING_OUTBOUND","MISSING_OUTBOUND_DAMAGED","MISSING_LAUNDRY_PENDING","MISSING_CLEAN_READY","MISSING_REJECTED","MISSING_DAMAGED_READY","MISSING_INBOUND_CLEAN","MISSING_INBOUND_DAMAGED","LOST_OUTBOUND","LOST_LAUNDRY","LOST_INBOUND"]);
 export type LaundryBucket=z.infer<typeof laundryBucketSchema>;
-export const laundryBatchDefinitionSchema=z.object({sourceLocationId:id,outboundTransitId:id,laundryLocationId:id,inboundTransitId:id,returnLocationId:id,supplierId:id.nullable(),reservationId:id.nullable(),lines:z.array(z.object({itemId:id,condition:z.enum(["USABLE","DAMAGED"]),quantity:laundryQuantitySchema}).strict()).min(1).max(50),reason:inventoryItemReasonSchema}).strict().superRefine((value,context)=>{if(new Set(value.lines.map(line=>line.itemId+":"+line.condition)).size!==value.lines.length)context.addIssue({code:"custom",path:["lines"],message:"Each original item and physical condition appears once"});if([value.sourceLocationId,value.returnLocationId,value.outboundTransitId,value.inboundTransitId].includes(value.laundryLocationId)||[value.outboundTransitId,value.inboundTransitId].some(transit=>transit===value.sourceLocationId||transit===value.returnLocationId))context.addIssue({code:"custom",message:"Original physical custody locations must remain distinct"});});
+export const laundryBatchMaximumLines=50;
+export const laundryBatchDefinitionSchema=z.object({sourceLocationId:id,outboundTransitId:id,laundryLocationId:id,inboundTransitId:id,returnLocationId:id,supplierId:id.nullable(),reservationId:id.nullable(),lines:z.array(z.object({itemId:id,condition:z.enum(["USABLE","DAMAGED"]),quantity:laundryQuantitySchema}).strict()).min(1).max(laundryBatchMaximumLines),reason:inventoryItemReasonSchema}).strict().superRefine((value,context)=>{if(new Set(value.lines.map(line=>line.itemId+":"+line.condition)).size!==value.lines.length)context.addIssue({code:"custom",path:["lines"],message:"Each original item and physical condition appears once"});if([value.sourceLocationId,value.returnLocationId,value.outboundTransitId,value.inboundTransitId].includes(value.laundryLocationId)||[value.outboundTransitId,value.inboundTransitId].some(transit=>transit===value.sourceLocationId||transit===value.returnLocationId))context.addIssue({code:"custom",message:"Original physical custody locations must remain distinct"});});
 export const laundryBatchTransitionSchema=z.object({kind:z.enum(["SEND","RECEIVE_LAUNDRY","WASH_COMPLETE","REJECT","REWASH","DAMAGE","DISPATCH_RETURN","RECEIVE_RETURN","MARK_MISSING","FIND_MISSING","CONFIRM_LOSS"]),from:laundryBucketSchema,quantity:laundryQuantitySchema,reason:inventoryItemReasonSchema}).strict();
 export type LaundryBatchTransition=z.infer<typeof laundryBatchTransitionSchema>;
 export type LaundryLocationRole="origin"|"outbound"|"laundry"|"inbound"|"returned";
@@ -34,3 +36,21 @@ export function planLaundryBatchTransition(raw:unknown,initialCondition:"USABLE"
  const next=new Map(positions);next.set(from,(BigInt(next.get(from)??"0")-quantity).toString());next.set(to,(BigInt(next.get(to)??"0")+quantity).toString());return{draft,from,to,quantity:quantity.toString(),next,movement,requiresOverride:draft.kind==="CONFIRM_LOSS"};
 }
 export function laundryBatchLineComplete(positions:ReadonlyMap<LaundryBucket,string>){return[...positions].every(([bucket,quantity])=>BigInt(stockQuantitySchema.parse(quantity))===0n||["RETURNED_CLEAN","RETURNED_DAMAGED","LOST_OUTBOUND","LOST_LAUNDRY","LOST_INBOUND"].includes(bucket));}
+const fingerprint=z.string().regex(/^[a-f0-9]{64}$/u);
+export const laundryBatchCreateCommandSchema=z.object({draft:laundryBatchDefinitionSchema,reviewFingerprint:fingerprint,idempotencyKey:id}).strict();
+export const laundryBatchLineReceiptSchema=z.object({id,itemId:id,condition:z.enum(["USABLE","DAMAGED"]),quantity:laundryQuantitySchema}).strict();
+export const laundryBatchCreateReceiptSchema=z.object({schemaVersion:z.literal(1),organizationId:id,actorId:id,batchId:id,idempotencyKey:id,requestHash:fingerprint,reviewFingerprint:fingerprint,draft:laundryBatchDefinitionSchema,lines:z.array(laundryBatchLineReceiptSchema).min(1).max(50),createdAt:z.iso.datetime()}).strict();
+const operation=laundryBatchTransitionSchema.shape.kind.or(z.enum(["REVERSE","CLOSE","CANCEL"]));
+export const laundryBatchEventDraftSchema=z.object({batchId:id,expectedSequence:z.number().int().nonnegative(),operation,reversesEventId:id.nullable(),observedAt:z.iso.datetime().nullable(),changes:z.array(z.object({lineId:id,from:laundryBucketSchema,quantity:laundryQuantitySchema}).strict()).max(100),reason:inventoryItemReasonSchema}).strict().superRefine((value,context)=>{
+ if(value.operation==="REVERSE"?value.reversesEventId===null:value.reversesEventId!==null)context.addIssue({code:"custom",message:"Original event reversal reference must match the operation"});
+ if(["REVERSE","CLOSE","CANCEL"].includes(value.operation)?value.changes.length!==0:value.changes.length===0)context.addIssue({code:"custom",message:"Original disposition changes must match the operation"});
+ if(new Set(value.changes.map(change=>change.lineId+":"+change.from)).size!==value.changes.length)context.addIssue({code:"custom",message:"Each original line disposition appears once"});
+});
+export const laundryBatchEventCommandSchema=z.object({draft:laundryBatchEventDraftSchema,reviewFingerprint:fingerprint,idempotencyKey:id}).strict();
+export const laundryBatchChangeReceiptSchema=z.object({id,lineId:id,from:laundryBucketSchema,to:laundryBucketSchema,quantity:laundryQuantitySchema,reversesChangeId:id.nullable(),movementGroupId:id.nullable(),movementReceipt:inventoryMovementReceiptSchema.nullable()}).strict();
+export const laundryBatchEventReceiptSchema=z.object({schemaVersion:z.literal(1),organizationId:id,actorId:id,batchId:id,eventId:id,sequence:z.number().int().positive(),operation,idempotencyKey:id,requestHash:fingerprint,reviewFingerprint:fingerprint,draft:laundryBatchEventDraftSchema,changes:z.array(laundryBatchChangeReceiptSchema).max(100),createdAt:z.iso.datetime()}).strict();
+export const laundryBatchCancellationSchema=z.object({schemaVersion:z.literal(1),organizationId:id,actorId:id,idempotencyKey:id,purpose:z.enum(["CREATE","EVENT"])}).strict();
+export type LaundryBatchDefinition=z.infer<typeof laundryBatchDefinitionSchema>;
+export type LaundryBatchEventDraft=z.infer<typeof laundryBatchEventDraftSchema>;
+export type LaundryBatchCreateReceipt=z.infer<typeof laundryBatchCreateReceiptSchema>;
+export type LaundryBatchEventReceipt=z.infer<typeof laundryBatchEventReceiptSchema>;

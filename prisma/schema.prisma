@@ -6709,7 +6709,7 @@ model LaundryBatchChange {
   reverses LaundryBatchChange? @relation("LaundryChangeReversal",fields:[organizationId,reversesChangeId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_change_reverses_fk")
   reversal LaundryBatchChange[] @relation("LaundryChangeReversal")
   @@unique([organizationId,id],map:"laundry_change_org_id_key")
-  @@unique([organizationId,eventId,lineId],map:"laundry_change_event_line_key")
+  @@unique([organizationId,eventId,lineId,fromBucket,toBucket],map:"laundry_change_event_line_key")
   @@unique([organizationId,reversesChangeId],map:"laundry_change_reversal_key")
   @@unique([organizationId,movementGroupId],map:"laundry_change_movement_key")
   @@index([organizationId,lineId,eventId],map:"laundry_change_history_idx")
