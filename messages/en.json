@@ -7402,6 +7402,75 @@
       "conflict": "Stock or access changed. Review the current quantities again.",
       "stock_held": "Original physical stock or commitments prevent this operation.",
       "uncertain": "The result is unconfirmed. Resolve the original request."
+    },
+    "browseRetired": "Browse retired catalog records"
+  },
+  "InventoryStockLevels": {
+    "eyebrow": "INVENTORY",
+    "title": "Stock levels",
+    "subtitle": "Current physical, reserved, damaged and available quantities in original item units.",
+    "back": "Workspace",
+    "view": "View stock by",
+    "modes": {
+      "LOCATION": "Location",
+      "ITEM": "Item across locations"
+    },
+    "chooseLocation": "Choose location",
+    "chooseItem": "Choose item",
+    "chooseHelp": "Choose an original item or physical location to view its stock.",
+    "applyHelp": "Apply the filters to view current stock.",
+    "refresh": "Refresh stock",
+    "search": "Search matching records",
+    "category": "Item category",
+    "kind": "Location type",
+    "all": "All",
+    "includeRetired": "Include retired results",
+    "apply": "Apply filters",
+    "privateHidden": "Private stock levels are hidden. Choose a source when you return.",
+    "unspecifiedUnit": "Original counting unit",
+    "retired": "Retired record",
+    "observedAt": "Stock observed at",
+    "separateUnits": "Each item keeps its own counting unit. Different items are never added together.",
+    "totalsHelp": "Totals cover all matching locations you can access, including later pages. Shortages remain separate for each location.",
+    "item": "Item",
+    "location": "Location",
+    "unit": "Unit",
+    "lastCount": "Last physical count",
+    "empty": "No accessible stock matches these filters.",
+    "firstPage": "First page",
+    "nextPage": "Next page",
+    "history": "Movement history",
+    "recordMovement": "Record or review movements",
+    "dimensions": {
+      "quantity": "Physical",
+      "reserved": "Reserved",
+      "damaged": "Damaged",
+      "available": "Available",
+      "shortage": "Location shortages",
+      "conditionShortage": "Condition shortages",
+      "locationCount": "Matching locations"
+    },
+    "categories": {
+      "CONSUMABLE": "Consumables",
+      "LINEN": "Linen",
+      "EQUIPMENT": "Assets"
+    },
+    "kinds": {
+      "PROPERTY": "Property",
+      "STORE": "Store",
+      "LAUNDRY": "Laundry",
+      "IN_TRANSIT": "In transit"
+    },
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading…",
+      "offline": "Reconnect to view current stock levels.",
+      "forbidden": "Your current access no longer permits these stock levels.",
+      "unavailable": "Stock levels are unavailable. Try again.",
+      "validation": "Check the original item or location and filters.",
+      "conflict": "Stock or source access changed. Refresh the current quantities.",
+      "stock_held": "Original stock commitments must remain intact.",
+      "uncertain": "The result is unconfirmed. Refresh the current stock."
     }
   }
 }

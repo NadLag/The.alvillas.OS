@@ -34,6 +34,7 @@ async function authority(actor:AccountActorContext,tx:TenantTransaction,actions:
  return{inventory,movements:new InventoryMovementRepository(tx,actor.organizationId),stored,now,checks,cap:jsonbFingerprint({held:captureAuthorizationCap(actor.authContext),current:captureAuthorizationCap(stored)})};
 }
 type Authority=Awaited<ReturnType<typeof authority>>;
+export const inventoryMovementReadAuthorityInTransaction=(actor:AccountActorContext,tx:TenantTransaction)=>authority(actor,tx);
 async function sources(actor:AccountActorContext,context:Authority,itemId:string,locationIds:readonly string[],reservationIds:readonly string[],writing=false){
  const item=await context.inventory.catalogItemById(itemId),locations=await Promise.all([...new Set(locationIds)].sort().map(id=>context.inventory.locationCatalogById(id))),reservations=await Promise.all([...new Set(reservationIds)].sort().map(id=>context.movements.reservation(id)));
  if(!item||locations.some(row=>!row)||reservations.some(row=>!row))throw new InventoryCatalogAccessError();
