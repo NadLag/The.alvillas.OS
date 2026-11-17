@@ -1,4 +1,5 @@
 import {taskTypeSchema} from "./task-type";
+import {laundryPricingPolicyKey,legacyLaundryPricingSchema,laundrySupplierPricePolicySchema,laundryPricingSupplierId} from "./laundry-pricing-policy";
 export {taskTypeSchema} from "./task-type";
 import { ledgerIntegrityPolicyKey, ledgerIntegrityPolicySchema, ledgerIntegrityRoutingKey, ledgerIntegrityRoutingSchema } from "@/modules/finance/domain/ledger-integrity";
 import { paymentMethodPolicyKey, paymentMethodPolicySchema } from "@/modules/finance/domain/payment-method";
@@ -255,19 +256,6 @@ const staffCompensationSchema = z
   })
   .passthrough();
 
-const laundryPricingSchema = z
-  .object({
-    prices: z.array(
-      z
-        .object({
-          item: configSlugSchema,
-          amount: moneyAmountSchema,
-          currency: currencySchema
-        })
-        .passthrough()
-    )
-  })
-  .passthrough();
 
 
 export const taxRuleSchema = z
@@ -384,7 +372,7 @@ export const configRuleSchemas = {
   [documentExpiryRoutingKey]: explicitNotificationRoutingSchema,
   [accountantExportPolicyKey]:accountantExportPolicySchema,
   [receivableReminderPolicyKey]:receivableReminderPolicySchema,
-  "operations.laundry_pricing": laundryPricingSchema,
+  [laundryPricingPolicyKey]: legacyLaundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
   "ops.workflows": workflowCatalogSchema,
   "ops.task_policy": operationPolicySchema,
@@ -399,7 +387,7 @@ export const configRuleSchemas = {
   "feature_flag": featureFlagConfigSchema
 } as const satisfies Record<string, z.ZodType>;
 
-export type ConfigRuleKey = keyof typeof configRuleSchemas | `feature_flag.${string}` | `automation.rule.${string}`;
+export type ConfigRuleKey = keyof typeof configRuleSchemas | `feature_flag.${string}` | `automation.rule.${string}` | `operations.laundry_pricing.supplier.${string}`;
 export type CommissionRuleValue = z.infer<typeof commissionRuleValueSchema>;
 export type AgreementNoticeConfig = z.infer<typeof agreementNoticeConfigSchema>;
 export type AgreementResponsibilitiesConfig = z.infer<typeof agreementResponsibilitiesConfigSchema>;
@@ -410,6 +398,7 @@ export type FeatureFlagConfig = z.infer<typeof featureFlagConfigSchema>;
 export type PayoutScheduleConfig = z.infer<typeof payoutScheduleConfigSchema>;
 
 export function schemaForConfigKey(key: string): z.ZodType | null {
+  if(laundryPricingSupplierId(key))return laundrySupplierPricePolicySchema;
   if (/^automation\.rule\.[a-z][a-z0-9_.-]{0,99}$/u.test(key)) return automationRuleSchema;
   if (key.startsWith("feature_flag.")) {
     return featureFlagConfigSchema;
