@@ -7402,6 +7402,75 @@
       "conflict": "Le stock ou l’accès a changé. Vérifiez à nouveau les quantités actuelles.",
       "stock_held": "Le stock physique ou les réservations empêchent cette opération.",
       "uncertain": "Le résultat reste incertain. Résolvez la demande d’origine."
+    },
+    "browseRetired": "Parcourir les données retirées du catalogue"
+  },
+  "InventoryStockLevels": {
+    "eyebrow": "INVENTAIRE",
+    "title": "Niveaux de stock",
+    "subtitle": "Quantités physiques, réservées, endommagées et disponibles dans les unités d’origine.",
+    "back": "Espace de travail",
+    "view": "Afficher le stock par",
+    "modes": {
+      "LOCATION": "Emplacement",
+      "ITEM": "Article dans les emplacements"
+    },
+    "chooseLocation": "Choisir un emplacement",
+    "chooseItem": "Choisir un article",
+    "chooseHelp": "Choisissez un article d’origine ou un emplacement physique pour consulter son stock.",
+    "applyHelp": "Appliquez les filtres pour consulter le stock actuel.",
+    "refresh": "Actualiser le stock",
+    "search": "Rechercher les données correspondantes",
+    "category": "Catégorie d’article",
+    "kind": "Type d’emplacement",
+    "all": "Tous",
+    "includeRetired": "Inclure les données retirées",
+    "apply": "Appliquer les filtres",
+    "privateHidden": "Les niveaux de stock privés sont masqués. Choisissez une source à votre retour.",
+    "unspecifiedUnit": "Unité de comptage d’origine",
+    "retired": "Donnée retirée",
+    "observedAt": "Stock observé le",
+    "separateUnits": "Chaque article conserve son unité de comptage. Les articles différents ne sont jamais additionnés.",
+    "totalsHelp": "Les totaux couvrent tous les emplacements correspondants accessibles, y compris les pages suivantes. Les manques restent distincts par emplacement.",
+    "item": "Article",
+    "location": "Emplacement",
+    "unit": "Unité",
+    "lastCount": "Dernier comptage physique",
+    "empty": "Aucun stock accessible ne correspond aux filtres.",
+    "firstPage": "Première page",
+    "nextPage": "Page suivante",
+    "history": "Historique des mouvements",
+    "recordMovement": "Enregistrer ou consulter les mouvements",
+    "dimensions": {
+      "quantity": "Physique",
+      "reserved": "Réservé",
+      "damaged": "Endommagé",
+      "available": "Disponible",
+      "shortage": "Manques par emplacement",
+      "conditionShortage": "Écarts de condition",
+      "locationCount": "Emplacements correspondants"
+    },
+    "categories": {
+      "CONSUMABLE": "Consommables",
+      "LINEN": "Linge",
+      "EQUIPMENT": "Actifs"
+    },
+    "kinds": {
+      "PROPERTY": "Propriété",
+      "STORE": "Magasin",
+      "LAUNDRY": "Blanchisserie",
+      "IN_TRANSIT": "En transit"
+    },
+    "states": {
+      "ready": "Prêt",
+      "loading": "Chargement…",
+      "offline": "Reconnectez-vous pour consulter les niveaux de stock actuels.",
+      "forbidden": "Votre accès actuel ne permet plus de consulter ces stocks.",
+      "unavailable": "Les niveaux de stock sont indisponibles. Réessayez.",
+      "validation": "Vérifiez l’article ou l’emplacement d’origine et les filtres.",
+      "conflict": "Le stock ou l’accès a changé. Actualisez les quantités actuelles.",
+      "stock_held": "Les réservations de stock d’origine doivent être conservées.",
+      "uncertain": "Le résultat reste incertain. Actualisez le stock actuel."
     }
   }
 }
