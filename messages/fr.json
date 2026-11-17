@@ -1848,7 +1848,16 @@
     "automationHelp": "Incluez des définitions réutilisables d’événements, de conditions et d’actions. Ces paramètres utilisent la configuration de processus de l’application.",
     "automationInvalid": "Vérifiez les références, événements, conditions et actions de cette définition.",
     "inventoryPropertyTypes": "Types de logement concernés",
-    "inventoryPropertyTypesHelp": "Saisissez chaque type exact sur une ligne distincte. Laissez vide pour tous les types. Les adaptations propres au logement sont conservées lors de l’application d’une nouvelle version."
+    "inventoryPropertyTypesHelp": "Saisissez chaque type exact sur une ligne distincte. Laissez vide pour tous les types. Les adaptations propres au logement sont conservées lors de l’application d’une nouvelle version.",
+    "linenSets": "Parures de linge",
+    "linenSetsHelp": "Référencez les articles LINEN d’origine et le nombre d’unités dans chaque parure complète. Une définition ne crée ni ne déplace de stock.",
+    "linenSetNumber": "Parure {number}",
+    "linenComponent": "Référence de l’article de linge d’origine",
+    "linenComponentQuantity": "Unités dans une parure",
+    "addLinenComponent": "Ajouter un élément de linge",
+    "removeLinenComponent": "Retirer l’élément",
+    "addLinenSet": "Ajouter une parure",
+    "removeLinenSet": "Retirer la parure"
   },
   "Team": {
     "inviteAccount": "Inviter à se connecter",
@@ -7709,5 +7718,18 @@
       "stock_held": "Les réservations de stock d’origine doivent être conservées.",
       "uncertain": "Le résultat reste incertain. Actualisez le stock actuel."
     }
+  },
+  "LinenPool": {
+    "eyebrow": "Blanchisserie et linge",
+    "title": "Parc de linge en circulation",
+    "subtitle": "Suivez les unités d’origine entre logements, dépôts, blanchisserie et transport.",
+    "back": "Retour à l’espace de travail",
+    "sets": "Parures complètes",
+    "help": "Le nombre disponible dépend de l’élément d’origine le plus limité, après réservations et unités endommagées. Consulter une parure ne réserve ni ne consomme de stock.",
+    "availableSets": "Parures complètes disponibles",
+    "needsReview": "Vérifier les éléments d’origine",
+    "componentCount": "{number} types d’éléments d’origine",
+    "noSets": "Aucune composition de parure n’est configurée pour cet emplacement.",
+    "editSets": "Vérifier les modèles de parures"
   }
 }

@@ -10,12 +10,12 @@ import {OnboardingPropertyRecord} from "./onboarding-property-record";
 type Settings=NonNullable<OnboardingInventorySnapshot["settings"]>;
 type Review=z.infer<typeof onboardingInventoryReviewSchema>;
 export function InventorySettings({settings}:{settings:Settings|null}){
- const t=useTranslations("OnboardingWizard"),locale=safeLocale(useLocale());
+ const t=useTranslations("OnboardingWizard"),linen=useTranslations("Templates"),locale=safeLocale(useLocale());
  if(!settings)return <p>{t("inventory.noConfiguration")}</p>;
- if(!settings.minimums.length)return <p>{t("inventory.noItems")}</p>;
- return <ul className="onboarding-list">{settings.minimums.map(row=><li key={row.item}><h4 dir="auto">{row.name?localizedText(row.name,locale):row.item}</h4><dl className="onboarding-values">
+ if(!settings.minimums.length&&!settings.linen_sets?.length)return <p>{t("inventory.noItems")}</p>;
+ return <><ul className="onboarding-list">{settings.minimums.map(row=><li key={row.item}><h4 dir="auto">{row.name?localizedText(row.name,locale):row.item}</h4><dl className="onboarding-values">
   <div><dt>{t("inventory.fields.item")}</dt><dd dir="ltr">{row.item}</dd></div><div><dt>{t("inventory.fields.quantity")}</dt><dd dir="ltr">{formatNumber(locale,String(row.quantity))}</dd></div><div><dt>{t("inventory.fields.unit")}</dt><dd dir="auto">{row.unit??t("property.noValue")}</dd></div><div><dt>{t("inventory.fields.category")}</dt><dd>{row.category?t("inventory.categories."+row.category):t("property.noValue")}</dd></div><div><dt>{t("inventory.fields.perStay")}</dt><dd>{row.expected_per_stay===null?t("inventory.perStay.UNSPECIFIED"):formatNumber(locale,String(row.expected_per_stay))}</dd></div>
- </dl></li>)}</ul>;
+ </dl></li>)}</ul>{settings.linen_sets?.length?<section><h4>{linen("linenSets")}</h4><ul className="onboarding-list">{settings.linen_sets.map(set=><li key={set.key}><p dir="auto">{localizedText(set.name,locale)}</p><ul>{set.components.map(component=><li key={component.item}><bdi>{component.item}</bdi> · <bdi>{formatNumber(locale,String(component.quantity))}</bdi></li>)}</ul></li>)}</ul></section>:null}</>;
 }
 export function OnboardingInventoryRecord({review,reason}:{review:Pick<Review,"draft"|"owner"|"property"|"previousInventory">&Partial<Pick<Review,"proposedInventory"|"selectedTemplate">>&{inventory?:OnboardingInventorySnapshot};reason:string}){
  const t=useTranslations("OnboardingWizard"),locale=safeLocale(useLocale()),template=review.inventory?.template??review.selectedTemplate??(review.draft.target.mode==="CUSTOM"?review.previousInventory.template:null),settings=review.inventory?.settings??review.proposedInventory??null;

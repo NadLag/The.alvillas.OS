@@ -1848,7 +1848,16 @@
     "automationHelp": "Include reusable event, condition and action definitions. These settings use the same workflow configuration as the rest of the application.",
     "automationInvalid": "Check the workflow references, event, conditions and actions in this definition.",
     "inventoryPropertyTypes": "Applicable property types",
-    "inventoryPropertyTypesHelp": "Enter each exact property type on a separate line. Leave blank for every property type. Existing property overrides remain in place when applying a new version."
+    "inventoryPropertyTypesHelp": "Enter each exact property type on a separate line. Leave blank for every property type. Existing property overrides remain in place when applying a new version.",
+    "linenSets": "Linen sets",
+    "linenSetsHelp": "Reference the original LINEN item keys and the number of original units in each complete set. A set definition never creates or moves stock.",
+    "linenSetNumber": "Linen set {number}",
+    "linenComponent": "Original linen item reference",
+    "linenComponentQuantity": "Units in one set",
+    "addLinenComponent": "Add a linen component",
+    "removeLinenComponent": "Remove component",
+    "addLinenSet": "Add a linen set",
+    "removeLinenSet": "Remove linen set"
   },
   "Team": {
     "inviteAccount": "Invite a login",
@@ -7709,5 +7718,18 @@
       "stock_held": "Original stock commitments must remain intact.",
       "uncertain": "The result is unconfirmed. Refresh the current stock."
     }
+  },
+  "LinenPool": {
+    "eyebrow": "Laundry and linen",
+    "title": "Circulating linen pool",
+    "subtitle": "Follow original linen units across properties, stores, laundry and transit.",
+    "back": "Back to workspace",
+    "sets": "Complete linen sets",
+    "help": "Available sets are limited by the scarcest original component after reservations and damaged units. Viewing a set does not reserve or consume it.",
+    "availableSets": "Complete sets available",
+    "needsReview": "Review original components",
+    "componentCount": "{number} original component types",
+    "noSets": "No linen set composition is configured for this location.",
+    "editSets": "Review linen set templates"
   }
 }
