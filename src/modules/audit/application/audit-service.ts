@@ -93,10 +93,10 @@ export function presentAuditHistoryRow(
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
   if(row.resourceType==="inventory_location"||row.resourceType==="inventory_location_command"){
-    const now=new Date(),source={type:"inventory_location",organizationId:ctx.organizationId,dataClass:"operational"as const},location=row.resourceType==="inventory_location"?financialResource:undefined;
+    const now=new Date(),source={type:"inventory_location",organizationId:ctx.organizationId,dataClass:"operational"as const},location=row.resourceType==="inventory_location"?financialResource:undefined,propertyId=location?.propertyId??undefined;
     const allowed=authorizeOrganizationSource(ctx.authContext,"view",source,now)&&authorizeOrganizationSource(ctx.authContext,action,source,now)&&
       (row.resourceType==="inventory_location_command"||location?.type==="inventory_location"&&location.id===row.resourceId&&location.organizationId===ctx.organizationId&&(location.propertyId??null)===row.propertyScopeId&&
-       (!location.propertyId||(["view",action]as const).every(permission=>authorizeUnconditionalSource(ctx.authContext,permission,{...location,type:"property",id:location.propertyId},now))));
+       (!propertyId||(["view",action]as const).every(permission=>authorizeUnconditionalSource(ctx.authContext,permission,{...location,type:"property",id:propertyId},now))));
     return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["operational"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"operational"},after:{dataClass:"operational"},reason:{dataClass:"operational"}})as AuditHistoryRow;
   }
   if(row.resourceType==="inventory_item"||row.resourceType==="inventory_item_command"){
