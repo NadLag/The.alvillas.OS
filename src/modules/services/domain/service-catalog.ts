@@ -2,6 +2,7 @@ import {z} from "zod";
 import {Money} from "@/platform/money/money";
 import {servicePricingSchema,serviceCatalogOrderTermsSchema} from "@/platform/config/service-catalog-policy";
 import {localizedTextSchema} from "@/i18n/content";
+import {chefMenuTextSchema} from "@/platform/config/chef-menu-policy";
 
 export class ServiceCatalogAccessError extends Error{}
 export class ServiceCatalogConfigurationError extends Error{}
@@ -21,12 +22,17 @@ export const serviceCatalogPublishEntrySchema=originalEntry.extend({
 }).strict().superRefine((value,context)=>{
  if(value.pricing_model!=="CUSTOM"&&(value.amount===null||value.currency===null)||value.amount!==null&&value.currency===null)context.addIssue({code:"custom",message:"service_catalog_explicit_price_required"});
  if(value.order_terms&&(value.currency===null||value.currency!==value.order_terms.internal_cost.currency))context.addIssue({code:"custom",message:"service_catalog_cost_currency_must_match"});
+ if(value.order_terms?.chef_menu&&(!chefMenuTextSchema.safeParse(value.name).success||!chefMenuTextSchema.safeParse(value.description).success||value.amount===null||value.currency===null))context.addIssue({code:"custom",message:"chef_menu_complete_multilingual_price_required"});
 });
 export type ServiceCatalogEntry=z.infer<typeof originalEntry>;
 export type ServiceCatalogPublishEntry=z.infer<typeof serviceCatalogPublishEntrySchema>;
-export function serviceCatalogSelection(items:readonly ServiceCatalogEntry[],input:{after?:string;query:string}){
- const needle=input.query.toLocaleLowerCase(),matching=items.filter(row=>(!input.after||row.key>input.after)&&(!needle||[row.key,...Object.values(row.name??{})].some(text=>text.toLocaleLowerCase().includes(needle)))).sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:0),selected=matching.slice(0,20);
- return{selected,next:matching.length>20?selected.at(-1)!.key:null};
+export function serviceCatalogSelection(items:readonly ServiceCatalogEntry[],input:{after?:string;query:string;kind?:"ALL"|"CHEF_MENU"}){
+ const needle=input.query.toLocaleLowerCase(),matching=items.filter(row=>(input.kind!=="CHEF_MENU"||Boolean(row.order_terms?.chef_menu))&&(!input.after||row.key>input.after)&&(!needle||[row.key,...Object.values(row.name??{})].some(text=>text.toLocaleLowerCase().includes(needle)))).sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:0),selected:ServiceCatalogEntry[]=[];
+ // Bound recipe bytes as well as row count so rich multilingual menus fit the
+ // existing private response protocol. A cursor never drops an unselected row.
+ let bytes=0;const encoder=new TextEncoder();
+ for(const entry of matching){const size=encoder.encode(JSON.stringify(entry)).byteLength;if(selected.length===20||selected.length>0&&bytes+size>524288)break;selected.push(entry);bytes+=size;}
+ return{selected,next:matching.length>selected.length?selected.at(-1)!.key:null};
 }
 
 /** Preserve optional legacy fields and exact unknown canonical extensions when

@@ -6986,5 +6986,67 @@
       "manage": "Ouvrir l’espace financier",
       "closeWorkspace": "Fermer l’espace financier"
     }
+  },
+  "ChefMenu": {
+    "title": "Carte du chef",
+    "configure": "Ce service est un plat de la carte du chef",
+    "canonicalHelp": "Utilisez le prix de vente, le coût interne, les règles financières et la disponibilité de la propriété ci-dessus. Les noms, descriptions et instructions doivent être renseignés en anglais, français et arabe.",
+    "details": "Menu, ingrédients et préparation",
+    "servings": "Portions par unité facturée",
+    "servingsHelp": "Une unité facturée fournit ce nombre de portions. Le mode de tarification du service détermine le nombre d’unités facturées.",
+    "assignedChef": "Chef affecté",
+    "chooseChef": "Choisir la composante du chef",
+    "chefHelp": "Choisissez une composante de type personne dans la répartition financière vérifiée, puis sélectionnez le chef réel dans le sélecteur de prestataire ci-dessus.",
+    "chefUnavailable": "Référence du chef indisponible",
+    "ingredients": "Ingrédients",
+    "ingredientNumber": "Ingrédient {number}",
+    "ingredientKey": "Référence de l’ingrédient",
+    "ingredientQuantity": "Quantité par unité facturée",
+    "unitKey": "Référence de l’unité",
+    "addIngredient": "Ajouter un ingrédient",
+    "removeIngredient": "Retirer l’ingrédient",
+    "preparationTitle": "Préparation",
+    "allergens": "Allergènes déclarés",
+    "allergenHelp": "Renseignez les allergènes déclarés pour ce plat. Une liste vide indique qu’aucun allergène n’a été déclaré.",
+    "noAllergens": "Aucun allergène déclaré",
+    "allergenNumber": "Allergène {number}",
+    "allergenKey": "Référence de l’allergène",
+    "addAllergen": "Ajouter un allergène",
+    "removeAllergen": "Retirer l’allergène",
+    "taskRecipe": "Instructions de cuisine originales",
+    "readRecipe": "Lire la recette originale",
+    "refreshRecipe": "Actualiser la recette",
+    "menuOnly": "Carte du chef uniquement",
+    "showAll": "Tous les services",
+    "ingredientName": {
+      "en": "Nom de l’ingrédient en anglais",
+      "fr": "Nom de l’ingrédient en français",
+      "ar": "Nom de l’ingrédient en arabe"
+    },
+    "unitName": {
+      "en": "Nom de l’unité en anglais",
+      "fr": "Nom de l’unité en français",
+      "ar": "Nom de l’unité en arabe"
+    },
+    "allergenName": {
+      "en": "Nom de l’allergène en anglais",
+      "fr": "Nom de l’allergène en français",
+      "ar": "Nom de l’allergène en arabe"
+    },
+    "preparation": {
+      "en": "Préparation en anglais",
+      "fr": "Préparation en français",
+      "ar": "Préparation en arabe"
+    },
+    "menuName": {
+      "en": "Nom du plat en anglais",
+      "fr": "Nom du plat en français",
+      "ar": "Nom du plat en arabe"
+    },
+    "menuDescription": {
+      "en": "Description du plat en anglais",
+      "fr": "Description du plat en français",
+      "ar": "Description du plat en arabe"
+    }
   }
 }

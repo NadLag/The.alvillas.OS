@@ -16,6 +16,7 @@ import {inspectOriginalServiceOrder} from "./service-order-original";
 import {ServiceOrderRepository} from "../infrastructure/service-order-repository";
 import {appendServiceOrderHistory,serviceOrderMetadata} from "./service-order-service";
 import {serviceOrderAuthority} from "./service-order-source";
+import {validateChefMenuTask,validateChefMenuPerformer} from "../domain/chef-menu";
 
 type Dependencies={db?:TenantTransactionRunner;requestId:string;ipAddress?:string|null};
 type Draft=z.infer<typeof serviceOrderTransitionDraftSchema>;
@@ -23,9 +24,11 @@ const actions:Partial<Record<Draft["state"],Action>>={QUOTED:"edit",CONFIRMED:"a
 
 async function prepareTransition(actor:AccountActorContext,tx:TenantTransaction,draft:Draft){
  const source=await inspectOriginalServiceOrder(actor,tx,draft.orderId);if(source.root.version!==draft.expectedVersion)throw new ServiceOrderConflictError();
+ if(draft.taskPlan)validateChefMenuTask(source.entry,draft.taskPlan.type);
  const work=await nativeServiceOrderWork(actor,tx,source.root,source.authority.stored,source.authority.now),total=validateServiceOrderTransition({from:serviceOrderStateSchema.parse(source.root.state),to:draft.state,pricingModel:source.entry.pricing_model,total:source.total,quote:draft.quote,currency:source.root.currency,currencyPrecision:source.currency.minorUnit,hasActualTaskStart:work.started,hasActualTaskCompletion:work.completed}),
   action=actions[draft.state];if(!action)throw new ServiceOrderConflictError();const actionCheck=source.actionCheck(action,total?.toJSON().amount);
  assertAccountAuthorization(actor,source.authority.stored,source.authority.now,[...source.checks,...work.checks,actionCheck],new ServiceOrderAccessError());
+ if(draft.state==="FULFILLED")validateChefMenuPerformer(source.entry,work.performedPersonId);
  let currentCatalogFingerprint:string|null=null,recheckCurrentSources:(()=>Promise<void>)|null=null;const currentChecks:CurrentAuthorityCheck[]=[];
  if(draft.state==="QUOTED"||draft.state==="CONFIRMED"){
   const current=await readNativeServiceCatalog(actor,tx,{propertyId:source.root.propertyId,source:source.authority.reservation.source});

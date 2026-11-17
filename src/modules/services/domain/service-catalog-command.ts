@@ -5,7 +5,7 @@ import {configSlugSchema} from "@/platform/config/identifiers";
 export const serviceCatalogScopeSchema=z.object({propertyId:z.uuid(),ownerId:z.uuid().optional()}).strict();
 export const serviceCatalogDraftSchema=z.object({scope:serviceCatalogScopeSchema,entry:serviceCatalogPublishEntrySchema,reason:z.string().trim().min(6).max(500)}).strict();
 export const serviceCatalogCommandSchema=z.object({draft:serviceCatalogDraftSchema,reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:z.uuid()}).strict();
-export const serviceCatalogPageSchema=z.object({scope:serviceCatalogScopeSchema,after:configSlugSchema.optional(),query:z.string().trim().max(100).default("")}).strict();
+export const serviceCatalogPageSchema=z.object({scope:serviceCatalogScopeSchema,after:configSlugSchema.optional(),query:z.string().trim().max(100).default(""),kind:z.enum(["ALL","CHEF_MENU"]).default("ALL")}).strict();
 export const serviceCatalogHistorySchema=z.object({scope:serviceCatalogScopeSchema,afterVersion:z.number().int().positive().optional()}).strict();
 export const serviceCatalogVersionSchema=z.object({scope:serviceCatalogScopeSchema,ruleId:z.uuid(),after:configSlugSchema.optional(),query:z.string().trim().max(100).default("")}).strict();
 export const serviceCatalogRecoverSchema=z.object({scope:serviceCatalogScopeSchema,idempotencyKey:z.uuid()}).strict();
