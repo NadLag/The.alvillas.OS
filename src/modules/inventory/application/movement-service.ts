@@ -21,6 +21,7 @@ import {inventoryCategorySchema} from "@/platform/config/inventory-policy";
 import {inventoryLocationKindSchema} from "../domain/location-catalog";
 import {inventoryMovementPreviewSchema,inventoryMovementHistorySchema} from "../domain/movement-view";
 import {inventorySourceScopes} from "./property-scopes";
+import {appendInventoryReorderSignal} from "@/platform/inventory/reorder-events";
 type Dependencies={db?:TenantTransactionRunner;requestId?:string};
 const resource=(organizationId:string,type="inventory_movement",id?:string):Resource=>({type,organizationId,id,dataClass:"operational"});
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value))as Prisma.InputJsonObject;
@@ -93,7 +94,9 @@ export async function publishInventoryMovement(actor:AccountActorContext,raw:unk
   const snapshots=lines.map(line=>{const location=prepared.source.locations.find(row=>row.id===line.locationId)!;return{request:command.draft,before:prepared.positions.get(line.locationId),item:{id:prepared.source.item.id,key:prepared.source.item.key,category:prepared.source.item.category,unit:prepared.source.item.unit},location:{id:location.id,kind:location.kind,propertyId:location.propertyId}};});
   await prepared.movements.record({groupId:value.groupId,actorId:actor.actorId,kind:value.kind,lines:value.lines,sources:snapshots,at:now});
   await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:inventoryMovementRecorded,resourceType:"inventory_movement",resourceId:value.groupId,propertyScopeId:prepared.source.locations.length===1?prepared.source.locations[0].propertyId:null,after:value,reason:command.draft.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:now});
-  await new OutboxRepository(tx,actor.organizationId).append(inventoryMovementRecorded,json(value),"inventory-movement:"+value.groupId,now);await verifySources(actor,tx,prepared);return{...value,replayed:false};
+  await new OutboxRepository(tx,actor.organizationId).append(inventoryMovementRecorded,json(value),"inventory-movement:"+value.groupId,now);
+  for(const line of value.lines)await appendInventoryReorderSignal(tx,actor,{locationId:line.locationId,itemId:line.itemId,revision:line.revision,source:{kind:"MOVEMENT",id:value.groupId}},now);
+  await verifySources(actor,tx,prepared);return{...value,replayed:false};
  });
 }
 export async function recoverInventoryMovement(actor:AccountActorContext,raw:unknown,deps:Dependencies={}){

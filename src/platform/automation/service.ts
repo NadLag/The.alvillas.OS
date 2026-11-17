@@ -47,6 +47,12 @@ import {
 import { AutomationRepository, json } from "./repository";
 import { logger } from "@/platform/observability/logger";
 import { captureException } from "@/platform/observability/sentry";
+import {inventoryReorderAuthorityInTransaction,lockInventoryReorderSourceInTransaction} from "@/modules/inventory/application/reorder-access";
+import {inventoryReorderSignalSchema} from "@/modules/inventory/domain/reorder-event";
+import {InventoryReorderRepository} from "@/modules/inventory/infrastructure/reorder-repository";
+import {InventoryCatalogAccessError} from "@/modules/inventory/domain/catalog-errors";
+import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
+import {inventoryReorderConfigChecks} from "@/platform/inventory/reorder-config-authority";
 
 export type AutomationActor = ReservationActorContext;
 type Deps = { db?: TenantTransactionRunner; now?: Date; requestId?: string };
@@ -141,6 +147,13 @@ async function audit(
   reason: string,
   requestId: string,
 ) {
+  const metadata=z.object({eventId:z.uuid().optional(),key:z.string().optional()}).passthrough().safeParse(after);
+  let nativeRun=await repo.run(resourceId);
+  const actionRun=metadata.success?metadata.data.key?.split(":")[0]:undefined;
+  if(!nativeRun&&actionRun&&z.uuid().safeParse(actionRun).success)nativeRun=await repo.run(actionRun);
+  const event=await repo.event(nativeRun?.eventId??(metadata.success?metadata.data.eventId:undefined)??resourceId);
+  let source: {eventId:string;configRuleId:string}|undefined;
+  if(event?.type==="InventoryBelowMinimum"&&(event.payload as Record<string,unknown>).inventorySource){const ruleId=nativeRun?.configRuleId??(await repo.rule(resourceId))?.id;if(!ruleId)throw Error("inventory_automation_audit_original_rule_required");source={eventId:event.id,configRuleId:ruleId};}
   await writeAuditEvent(repo.tx, {
     organizationId: actor.organizationId,
     actorId: actor.actorId,
@@ -148,7 +161,7 @@ async function audit(
     resourceType: "automation",
     resourceId,
     propertyScopeId: propertyId,
-    after,
+    after:source?{...z.record(z.string(),z.unknown()).parse(after),inventorySource:source}:after,
     reason,
     requestId,
     occurredAt: new Date(),
@@ -265,6 +278,12 @@ async function actionPlan(
       );
     }
   } else if (action.type === "reorder_suggestion") {
+    if(ctx.inventorySource){
+      const target={...resource(actor,p,"issue"),dataClass:"operational"as const};
+      allowed(actor,"create",target);
+      await recheckAccountAuthorization(actor,repo.tx,new Date(),[{action:"create",resource:target,...p?{unconditional:true}:{organizationOnly:true}}],new AutomationAccessError());
+      return{type:action.type,item:ctx.inventorySource.item.key,quantity:ctx.inventorySource.suggestedQuantity};
+    }
     if (!p) throw new Error("automation_property_required");
     allowed(actor, "create", resource(actor, p, "issue"));
     const item = text(field(ctx.evaluation.fields, "inventory.item"));
@@ -398,6 +417,11 @@ async function perform(
       ).id,
     ];
   } else if (action.type === "reorder_suggestion") {
+    if(ctx.inventorySource){
+      const signal=ctx.inventorySource,row=await repo.nativeInventorySuggestion({eventId:ctx.event.id,signal,outcomeKey:key,title:action.title,createdBy:actor.actorId});
+      producedIds=[row.id];
+      await writeAuditEvent(repo.tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"inventory.reorder.suggested",resourceType:"inventory_reorder",resourceId:row.id,propertyScopeId:signal.location.propertyId,after:{eventId:ctx.event.id,locationId:signal.location.id,itemId:signal.item.id,quantity:signal.suggestedQuantity,minimumRuleId:signal.minimumRule.id},reason:"Configured native inventory reorder suggestion",requestId});
+    }else{
     producedIds = [
       (
         await repo.suggestion({
@@ -410,6 +434,7 @@ async function perform(
         })
       ).id,
     ];
+    }
   } else if (action.type === "notify") {
     await new NotificationRepository(repo.tx, repo.organizationId).publish(
       {
@@ -455,22 +480,29 @@ async function perform(
     });
     producedIds = [row.id];
   }
-  if (ctx.invoice) await authorizeEvaluation(actor, ctx, repo.tx);
+  if (ctx.invoice||ctx.inventorySource) await authorizeEvaluation(actor, ctx, repo.tx);
   await audit(
     repo,
     actor,
     "automation.action.executed",
     ctx.event.id,
     ctx.property?.id ?? null,
-    { action: action.type, key, producedIds, plan },
+    { action: action.type, key, producedIds, ...ctx.inventorySource?{}:{plan} },
     "Configured automation action",
     requestId,
   );
-  if (ctx.invoice) await authorizeEvaluation(actor, ctx, repo.tx);
+  if (ctx.invoice||ctx.inventorySource) await authorizeEvaluation(actor, ctx, repo.tx);
   return { key: action.key, ...plan, producedIds };
 }
 
 async function authorizeEvaluation(actor: AutomationActor, ctx: Context, tx: TenantTransaction) {
+  if(ctx.inventorySource){
+    try{
+      const source=await inventoryReorderAuthorityInTransaction(actor,tx,ctx.inventorySource);
+      await recheckAccountAuthorization(actor,tx,source.now,[{action:"configure",resource:{...resource(actor,ctx.property),dataClass:"operational"},...ctx.property?{unconditional:true}:{organizationOnly:true}}],new AutomationAccessError());
+      await recheckAccountAuthorization(actor,tx,source.now,inventoryReorderConfigChecks(actor.organizationId,ctx.property,ctx.evaluation.configs),new AutomationAccessError());
+    }catch(error){if(error instanceof InventoryCatalogAccessError)throw new AutomationAccessError();throw error;}
+  }
   if (ctx.invoice) {
     const checks: Array<{ action: Action; resource: Resource; organizationOnly: boolean }> =
       ctx.invoice.authority.map(check => ({ ...check, action: "view" as const }));
@@ -638,10 +670,11 @@ export async function previewAutomation(
     allowed(actor, "configure", resource(actor, ctx.property));
     const { rule, metadata } = await repo.resolve(source.value, ctx);
     await authorizeEvaluation(actor, ctx, repo.tx);
+    const inventoryCurrent=!ctx.inventorySource||(await inventoryReorderAuthorityInTransaction(actor,repo.tx,ctx.inventorySource)).fresh;
     const matched =
-        matches(rule, ctx) && evaluate(rule.conditions, ctx.evaluation),
+        inventoryCurrent&&matches(rule, ctx) && evaluate(rule.conditions, ctx.evaluation),
       plans = [];
-    for (const action of rule.actions)
+    for (const action of inventoryCurrent?rule.actions:[])
       plans.push(await actionPlan(repo, actor, action, ctx));
     // Dry-run audit is the only write: it never reserves outcomes or enqueues work.
     await audit(
@@ -654,7 +687,7 @@ export async function previewAutomation(
       "Administrator dry run",
       deps.requestId ?? randomUUID(),
     );
-    if (ctx.invoice) await authorizeEvaluation(actor, ctx, repo.tx);
+    if (ctx.invoice||ctx.inventorySource) await authorizeEvaluation(actor, ctx, repo.tx);
     return { matched, plans, configVersions: metadata };
   });
 }
@@ -688,7 +721,7 @@ export async function enqueueAutomationEvent(
       let admissionActor: AutomationActor | undefined;
       let admissionDenied = false;
       ctx.evaluation.configs = {};
-      if (ctx.invoice) {
+      if (ctx.invoice||ctx.inventorySource) {
         try {
           admissionActor = await principal(repo, source.createdBy);
           await authorizeEvaluation(admissionActor, ctx, repo.tx);
@@ -775,7 +808,7 @@ export async function executeAutomationRun(
       const actor = await principal(repo, run.actorId),
         ctx = await repo.context(run.eventId, run.propertyId);
       allowed(actor, "configure", resource(actor, ctx.property));
-      if (ctx.invoice) await authorizeEvaluation(actor, ctx, repo.tx);
+      if (ctx.invoice||ctx.inventorySource) await authorizeEvaluation(actor, ctx, repo.tx);
       // Lock candidate scopes in a stable order, including inherited rules:
       // a newly paused property override must stop a queued organization rule.
       for (const scope of [...ctx.scopes].sort((a, b) =>
@@ -801,7 +834,7 @@ export async function executeAutomationRun(
       };
       let metadata: unknown;
       if (frozen.fields && frozen.configs) {
-        if (ctx.invoice && !isDeepStrictEqual(frozen.fields, ctx.evaluation.fields)) throw new Error("automation_source_snapshot_mismatch");
+        if ((ctx.invoice||ctx.inventorySource) && !isDeepStrictEqual(frozen.fields, ctx.evaluation.fields)) throw new Error("automation_source_snapshot_mismatch");
         ctx.evaluation = { fields: frozen.fields, configs: frozen.configs };
         metadata = frozen.configVersions;
       } else {
@@ -813,7 +846,12 @@ export async function executeAutomationRun(
         configVersions: metadata,
         ruleVersion: source.version,
       };
-      const matched = evaluate(rule.conditions, ctx.evaluation),
+      let inventoryCurrent=true;
+      if(ctx.inventorySource){
+        for(const scope of [...ctx.scopes].sort((a,b)=>`${a.scopeType}:${a.scopeId??""}`.localeCompare(`${b.scopeType}:${b.scopeId??""}`)))await config.lockVersion("inventory.minimums",scope.scopeType,scope.scopeId);
+        inventoryCurrent=(await lockInventoryReorderSourceInTransaction(actor,tx,ctx.inventorySource)).fresh;
+      }
+      const matched = inventoryCurrent&&evaluate(rule.conditions, ctx.evaluation),
         outputs = [];
       if (matched) {
         outcomeKey(rule, ctx);
@@ -831,7 +869,7 @@ export async function executeAutomationRun(
           );
       }
       const status = matched ? "SUCCEEDED" : "SKIPPED";
-      if (ctx.invoice) await authorizeEvaluation(actor, ctx, repo.tx);
+      if (ctx.invoice||ctx.inventorySource) await authorizeEvaluation(actor, ctx, repo.tx);
       await repo.update(run.id, {
         status,
         attemptCount: { increment: 1 },
@@ -862,7 +900,7 @@ export async function executeAutomationRun(
         "Automation evaluation completed",
         requestId,
       );
-      if (ctx.invoice) await authorizeEvaluation(actor, ctx, repo.tx);
+      if (ctx.invoice||ctx.inventorySource) await authorizeEvaluation(actor, ctx, repo.tx);
       await repo.release();
       return status;
     } catch (error) {
@@ -1082,6 +1120,8 @@ export async function automationAdmin(
         repo.suggestions(ids),
       ]);
     const safeRuns = await Promise.all(runs.map(async (run) => {
+      const nativeEvent=await repo.event(run.eventId),native=Boolean(nativeEvent?.type==="InventoryBelowMinimum"&&(nativeEvent.payload as Record<string,unknown>).inventorySource);let nativeAllowed=false;
+      if(native){try{const ctx=await repo.context(run.eventId,run.propertyId),source=await repo.rule(run.configRuleId),frozen=z.object({configs:z.record(z.string(),z.unknown()).optional()}).passthrough().parse(run.inputs);ctx.evaluation.configs=frozen.configs??{};await recheckAccountAuthorization(actor,tx,new Date(),inventoryReorderConfigChecks(actor.organizationId,ctx.property,ctx.evaluation.configs,source?.value),new AutomationAccessError());await authorizeEvaluation(actor,ctx,tx);nativeAllowed=true;}catch(error){if(!(error instanceof AutomationAccessError))throw error;}}
       const property = properties.find((p) => p.id === run.propertyId) ?? null;
       let financial = authorize(actor.authContext, "view", {
         ...resource(actor, property, "financial_transaction"),
@@ -1090,7 +1130,7 @@ export async function automationAdmin(
       if (!run.propertyId) {
         try {
           const ctx = await repo.context(run.eventId, null), source = await repo.rule(run.configRuleId);
-          if (!ctx.invoice || !source) throw new AutomationAccessError();
+          if ((!ctx.invoice&&!ctx.inventorySource) || !source) throw new AutomationAccessError();
           await repo.resolve(source.value, ctx);
           await authorizeEvaluation(actor, ctx, tx);
           financial = true;
@@ -1102,7 +1142,7 @@ export async function automationAdmin(
       return present(
         {
           ...actor.authContext,
-          visibleDataClasses: new Set(financial ? ["financial" as const] : []),
+          visibleDataClasses: new Set(native?nativeAllowed?["operational" as const]:[]:financial ? ["financial" as const] : []),
         },
         "view",
         {
@@ -1121,25 +1161,28 @@ export async function automationAdmin(
           },
         },
         {
-          inputs: { dataClass: "financial" },
-          outputs: { dataClass: "financial" },
-          eventKey: { dataClass: "financial" },
-          ...(!run.propertyId ? Object.fromEntries(["eventId", "status", "attempts", "attemptCount", "completedAt", "errorCode"]
-            .map(key => [key, { dataClass: "financial" as const, mask: "omit" as const }])) : {}),
+          inputs: { dataClass: native?"operational":"financial" },
+          outputs: { dataClass: native?"operational":"financial" },
+          eventKey: { dataClass: native?"operational":"financial" },
+          ...(!run.propertyId||native ? Object.fromEntries(["eventId", "status", "attempts", "attemptCount", "completedAt", "errorCode"]
+            .map(key => [key, { dataClass: native?"operational" as const:"financial" as const, mask: "omit" as const }])) : {}),
         },
       );
     }));
     const safeSources = [];
     for (const source of sources) {
-      if (["SupplierInvoiceSubmitted", "ApprovalRequested", "ApprovalDecided"].includes(source.type)) {
+      if (["SupplierInvoiceSubmitted", "ApprovalRequested", "ApprovalDecided", "InventoryBelowMinimum"].includes(source.type)) {
         const ctx = await repo.context(source.id);
-        if (ctx.invoice) {
+        if (ctx.invoice||ctx.inventorySource) {
           try { await authorizeEvaluation(actor, ctx, tx); }
           catch (error) { if (error instanceof AutomationAccessError) continue; throw error; }
         }
       }
       safeSources.push(source);
     }
+    const originalSuggestions=new Map((await new InventoryReorderRepository(tx,actor.organizationId).suggestionsByIds(suggestions.map(row=>row.id))).map(row=>[row.id,row]));
+    const safeSuggestions=[];
+    for(const row of suggestions){const native=originalSuggestions.get(row.id);if(native){const signal=inventoryReorderSignalSchema.parse(native.nativeSource.signal);try{const source=await inventoryReorderAuthorityInTransaction(actor,tx,signal);if(!source.fresh||!native.automation)continue;await recheckAccountAuthorization(actor,tx,source.now,inventoryReorderConfigChecks(actor.organizationId,source.location.propertyId?{id:source.location.propertyId,cityId:source.location.propertyCity,regionId:source.location.propertyRegion}:null,native.automation.configs,native.automation.rule),new InventoryCatalogAccessError());}catch(error){if(error instanceof InventoryCatalogAccessError)continue;throw error;}}safeSuggestions.push(row);}
     return {
       effectiveDefault: (deps.now ?? new Date()).toISOString().slice(0, 16),
       properties,
@@ -1155,7 +1198,7 @@ export async function automationAdmin(
         ...s,
         occurredAt: s.occurredAt.toISOString(),
       })),
-      suggestions: suggestions
+      suggestions: safeSuggestions
         .filter((s) => {
           const property = properties.find((p) => p.id === s.propertyId);
           return (
@@ -1167,7 +1210,7 @@ export async function automationAdmin(
           );
         })
         .map((s) => ({
-          ...s,
+          id:s.id,organizationId:s.organizationId,propertyId:s.propertyId,outcomeKey:s.outcomeKey,itemKey:s.itemKey,title:s.title,status:s.status,createdBy:s.createdBy,
           quantity: s.quantity.toFixed(2),
           createdAt: s.createdAt.toISOString(),
         })),

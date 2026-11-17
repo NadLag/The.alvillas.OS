@@ -117,7 +117,7 @@ export class InventoryRepository {
       this.tx.inventoryItem.findMany({ where: { organizationId: this.organizationId, key: { in: itemKeys } },
         select: { key: true, category: true, unit: true, labels:true, archivedAt: true } }),
       this.tx.inventoryLocation.findMany({ where: { organizationId: this.organizationId, propertyId: { in: propertyIds } },
-        select: { propertyId: true, archivedAt: true } })
+          select: { id:true, propertyId: true, archivedAt: true } })
     ]);
     return { items: new Map(items.map(item => [item.key, item])), locations: new Map(locations.map(location => [location.propertyId, location])) };
   }

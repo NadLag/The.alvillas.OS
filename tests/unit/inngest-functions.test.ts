@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { NonRetriableError } from "inngest";
 import { createHmac } from "node:crypto";
-import { cleanupUploadParts, consumeAutomations, dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent, recognizeSupplierInvoices, failSupplierInvoiceRecognitions, generateDocuments, failDocumentGenerations, prepareSignatures, distributeSignatures, admitGuestAgreementSignatures, observeSignatureWebhooks, recoverSignatureIdentities, archiveSignedDocuments,advanceNativeOnboarding } from "@/platform/events/inngest-functions";
+import { cleanupUploadParts, consumeAutomations, dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent, recognizeSupplierInvoices, failSupplierInvoiceRecognitions, generateDocuments, failDocumentGenerations, prepareSignatures, distributeSignatures, admitGuestAgreementSignatures, observeSignatureWebhooks, recoverSignatureIdentities, archiveSignedDocuments,advanceNativeOnboarding,reconcileInventoryMinimums } from "@/platform/events/inngest-functions";
 import type { OutboxDatabase } from "@/platform/events/outbox-repository";
 
 const organizationId = "018f0a0b-0000-7000-9000-000000000001";
@@ -17,12 +17,13 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("Inngest signed outbox dispatcher", () => {
   it("registers the dispatcher and durable automation consumer", () => {
-    expect(inngestFunctions).toHaveLength(18);
+    expect(inngestFunctions).toHaveLength(19);
     expect(inngestFunctions).toContain(admitGuestAgreementSignatures);
     expect(admitGuestAgreementSignatures.opts.id).toBe("native-guest-agreement-signature-admission");
     expect(admitGuestAgreementSignatures.opts.triggers).toEqual([{event:"guest_hub.agreement_signature_requested"}]);
     expect(admitGuestAgreementSignatures.opts.concurrency).toEqual({limit:1});
     expect(admitGuestAgreementSignatures.opts.retries).toBe(3);
+    expect(inngestFunctions).toContain(reconcileInventoryMinimums);expect(reconcileInventoryMinimums.opts.triggers).toEqual([{event:"inventory.reorder.configuration.requested"}]);expect(reconcileInventoryMinimums.opts.concurrency).toEqual({limit:1});expect(reconcileInventoryMinimums.opts.retries).toBe(3);
     expect(inngestFunctions).toContain(advanceNativeOnboarding);expect(advanceNativeOnboarding.opts.triggers).toEqual([{event:"onboarding.activation_requested"},{event:"onboarding.activation_continue_requested"}]);expect(advanceNativeOnboarding.opts.concurrency).toEqual({limit:1});expect(advanceNativeOnboarding.opts.retries).toBe(3);
     expect(inngestFunctions).toContain(archiveSignedDocuments);expect(archiveSignedDocuments.opts.triggers).toEqual([{event:"documents.signature.signed_archive_requested"}]);expect(archiveSignedDocuments.opts.concurrency).toEqual({limit:1});expect(archiveSignedDocuments.opts.retries).toBe(3);
     expect(inngestFunctions).toContain(recoverSignatureIdentities);expect(recoverSignatureIdentities.opts.triggers).toEqual([{event:"documents.signature.identity_recovery_requested"}]);expect(recoverSignatureIdentities.opts.concurrency).toEqual({limit:1});expect(recoverSignatureIdentities.opts.retries).toBe(3);
@@ -60,7 +61,8 @@ describe("Inngest signed outbox dispatcher", () => {
     expect(response.status).toBe(200);
     const registration = await response.json() as { functions: Array<{ id: string; triggers: Array<{event?: string}>; idempotency?: string; rateLimit?: unknown; concurrency?: { limit: number } | Array<{ limit: number }>; steps: { step: { retries: { attempts: number } } } }> };
     // The terminal-failure consumer has its own explicit concurrency limit.
-    expect(registration.functions).toHaveLength(18);
+    expect(registration.functions).toHaveLength(19);
+    expect(registration.functions.find(fn=>fn.id==="alvillas-os-native-inventory-minimum-reconciliation")).toMatchObject({triggers:[{event:"inventory.reorder.configuration.requested"}],concurrency:{limit:1},steps:{step:{retries:{attempts:3}}}});
     expect(registration.functions.find(fn=>fn.id==="alvillas-os-native-guest-agreement-signature-admission")).toMatchObject({
       triggers:[{event:"guest_hub.agreement_signature_requested"}],
       concurrency:{limit:1},steps:{step:{retries:{attempts:3}}}
@@ -105,7 +107,7 @@ describe("Inngest signed outbox dispatcher", () => {
     expect((await GET(new NextRequest("http://localhost:3000/api/inngest"), {})).status).toBe(401);
     const discovery = await GET(new NextRequest("http://localhost:3000/api/inngest", { headers: signature("") }), {});
     expect(discovery.status).toBe(200);
-    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(18);
+    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(19);
     expect(JSON.stringify(body)).not.toContain(process.env.INNGEST_SIGNING_KEY!);
     const execution = await POST(new NextRequest("http://localhost:3000/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { method: "POST", body: "{}" }), {});
     expect(execution.status).toBe(401);

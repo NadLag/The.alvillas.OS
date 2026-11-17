@@ -1,0 +1,12 @@
+import {randomUUID} from "node:crypto";
+import {afterEach,it,expect,vi} from "vitest";
+import {inventoryCatalogRequest,type InventoryBrowserError} from "@/modules/inventory/ui/item-browser";
+import {inventoryReorderPageSchema} from "@/modules/inventory/domain/reorder-view";
+afterEach(()=>vi.unstubAllGlobals());
+it("reads fifty legal full-length multilingual recommendations without truncating the private response",async()=>{
+ const id=randomUUID(),name={en:"界".repeat(240),fr:"界".repeat(240),ar:"界".repeat(240)},location={id,kind:"PROPERTY",label:"界".repeat(240),propertyId:randomUUID(),propertyName:"界".repeat(240),retired:false},position={quantity:"2",reserved:"0",damaged:"0",revision:"1",available:"2",shortage:"0",conditionShortage:"0"},data=inventoryReorderPageSchema.parse({selection:{mode:"LOCATION",locationId:id},source:{mode:"LOCATION",location},items:Array.from({length:50},(_,index)=>({item:{id:randomUUID(),key:"original.unicode."+index,name,category:"LINEN",unit:"piece",retired:false},location,position,lastMovementAt:null,lastCountAt:null,minimum:{ruleId:randomUUID(),version:1,basis:"AVAILABLE",minimum:"10",target:"12",current:"2",suggestedQuantity:"10",belowMinimum:true},latestSuggestion:{id:randomUUID(),title:name,quantity:"10",createdAt:new Date().toISOString()}})),totals:null,next:null,observedAt:new Date().toISOString(),canRecord:false}),body=JSON.stringify(data);
+ expect(new TextEncoder().encode(body).length).toBeGreaterThan(262144);expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(1048576);vi.stubGlobal("navigator",{onLine:true});const fetch=vi.fn(()=>Promise.resolve(new Response(body,{headers:{"Content-Type":"application/json"}})));vi.stubGlobal("fetch",fetch);const actual=inventoryReorderPageSchema.parse(await inventoryCatalogRequest("reorder","page",data.selection,new AbortController().signal,"original.private.scope"));expect(actual).toEqual(data);expect(fetch).toHaveBeenCalledTimes(1);expect(actual.items[49].latestSuggestion?.title.ar).toBe(name.ar);
+});
+it("retains a bounded response and rejects oversized private recommendation reads without retrying",async()=>{
+ vi.stubGlobal("navigator",{onLine:true});const fetch=vi.fn(()=>Promise.resolve(new Response(" ".repeat(1048577))));vi.stubGlobal("fetch",fetch);await expect(inventoryCatalogRequest("reorder","page",{mode:"LOCATION",locationId:randomUUID()},new AbortController().signal,"original.private.scope")).rejects.toMatchObject<Partial<InventoryBrowserError>>({state:"unavailable"});expect(fetch).toHaveBeenCalledTimes(1);
+});

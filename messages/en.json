@@ -7472,5 +7472,27 @@
       "stock_held": "Original stock commitments must remain intact.",
       "uncertain": "The result is unconfirmed. Refresh the current stock."
     }
+  },
+  "InventoryReorder": {
+    "eyebrow": "Inventory",
+    "title": "Minimums and reorder recommendations",
+    "subtitle": "Review effective minimums and recommendations for each item and location.",
+    "back": "Back to workspace",
+    "help": "Quantities use each item’s counting unit. Review suggestions, then record quantities actually received in stock movements.",
+    "minimumRules": "Minimum rules",
+    "automationRules": "Automation rules and history",
+    "current": "Current quantity for this rule",
+    "minimum": "Minimum",
+    "target": "Target stock",
+    "suggestedQuantity": "Quantity to consider",
+    "basis": {
+      "PHYSICAL": "Compare physical stock",
+      "AVAILABLE": "Compare stock after reservations and damage"
+    },
+    "belowMinimum": "Below the effective minimum",
+    "sufficient": "Minimum satisfied",
+    "noMinimum": "No effective minimum applies to this item and location.",
+    "latestRecorded": "Latest available recorded recommendation",
+    "awaitingAutomation": "No recorded recommendation is available for this stock revision. Review the configured automation and its history."
   }
 }

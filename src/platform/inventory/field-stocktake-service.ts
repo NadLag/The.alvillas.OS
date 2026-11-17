@@ -1,4 +1,6 @@
 import {configuredInventoryItem} from "@/modules/inventory/domain/item-definition";
+import {inventoryMinimumsForLocation} from "@/modules/inventory/domain/reorder";
+import {appendInventoryReorderSignal} from "./reorder-events";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { ConfigRuleRepository, type ConfigRuleRecord, type ConfigScopeCandidate, type ResolvedConfigRule } from "@/platform/config/config-rule-repository";
 import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
@@ -57,8 +59,8 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   if (task.archivedAt || terminalTaskStates.some(state => state === task.state) || batch.tasks.get(task.id)?.propertyId !== task.propertyId) throw new ReservationNotFoundError();
   const property = await batch.repository.property(task.propertyId); if (!property) throw new ReservationNotFoundError();
   const rule = batch.rules.get(task.propertyId); if (!rule) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
-  const current = inventoryMinimumsSchema.parse(rule.parsedValue).minimums.find(item => item.item === input.itemKey);
   let item = await batch.repository.item(input.itemKey), location = await batch.repository.propertyLocation(task.propertyId);
+  const current = inventoryMinimumsForLocation(rule.parsedValue,location?.id??"").find(item => item.item === input.itemKey);
   const currentDefinition = current ? configuredInventoryItem(current, item ?? undefined) : null;
   if (!current || !currentDefinition) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
   if (!batch.reportedRules.has(input.catalogRuleId)) batch.reportedRules.set(input.catalogRuleId, await new ConfigRuleRepository(tx, ctx.organizationId).findById(input.catalogRuleId));
@@ -66,7 +68,7 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   if (!reported || reported.key !== inventoryMinimumsKey || reported.version !== input.catalogVersion || reported.lifecycle === "DRAFT" ||
     reported.effectiveFrom > batch.now || !(batch.scopes.get(task.propertyId) ?? []).some(scope => scope.scopeType === reported.scopeType && scope.scopeId === reported.scopeId))
     throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
-  const prior = inventoryMinimumsSchema.parse(reported.value).minimums.find(item => item.item === input.itemKey);
+  const prior = inventoryMinimumsForLocation(reported.value,location?.id??"").find(item => item.item === input.itemKey);
   const priorDefinition=prior?configuredInventoryItem(prior,item??undefined):null;
   if (!priorDefinition || priorDefinition.category !== currentDefinition.category) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
   if (currentDefinition.unit !== input.unit || priorDefinition.unit !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
@@ -110,6 +112,8 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   const payload = { propertyId: task.propertyId, taskId: task.id, inventory: { item: input.itemKey, quantity: decision.quantity }, stocktake, configuration: source };
   const outbox = new OutboxRepository(tx, ctx.organizationId);
   if (decision.variance) await outbox.append("StocktakeVariance", payload, `inventory:${recorded.observation.id}:variance`, batch.now);
-  if (decision.belowMinimum) await outbox.append("InventoryBelowMinimum", payload, `inventory:${recorded.observation.id}:below-minimum`, batch.now);
+  const policy=inventoryMinimumsSchema.parse(rule.parsedValue);
+  if(current.reorder||policy.location_overrides?.some(value=>value.location_id===location.id))await appendInventoryReorderSignal(tx,ctx,{locationId:location.id,itemId:item.id,revision:recorded.position.revision,source:{kind:"STOCKTAKE",id:recorded.observation.id}},batch.now);
+  else if (decision.belowMinimum) await outbox.append("InventoryBelowMinimum", payload, `inventory:${recorded.observation.id}:below-minimum`, batch.now);
   return { stocktakeId: recorded.observation.id, serverVersion: recorded.position.revision };
 }
