@@ -18,8 +18,8 @@ export class VarianceCenterRepository {
       WHERE b.organization_id=${org}::uuid AND b.action='MATCH'` : provider === "INVENTORY" ? Prisma.sql`
       SELECT s.id,s.received_at AS source_time,i.key AS reference
       FROM inventory_stocktake s JOIN inventory_item i ON i.organization_id=s.organization_id AND i.id=s.item_id
-      JOIN operation_task t ON t.organization_id=s.organization_id AND t.id=s.task_id AND t.property_id=s.property_id
-      WHERE s.organization_id=${org}::uuid` : Prisma.sql`
+      LEFT JOIN operation_task t ON t.organization_id=s.organization_id AND t.id=s.task_id AND t.property_id=s.property_id
+      WHERE s.organization_id=${org}::uuid AND(t.id IS NOT NULL OR(s.task_id IS NULL AND s.device_id='inventory-workspace:'||s.actor_id::text AND s.config_snapshot->>'origin'='INVENTORY_WORKSPACE'))` : Prisma.sql`
       SELECT c.id,MIN(t.created_at) AS source_time,r.purpose AS reference
       FROM employee_compensation_claim c JOIN employee_compensation_submission s ON s.organization_id=c.organization_id AND s.id=c.submission_id
       JOIN employee_compensation_run r ON r.organization_id=c.organization_id AND r.id=s.run_id

@@ -136,8 +136,8 @@ export class InventoryRepository {
   }
 
   async record(input: {
-    propertyId: string; taskId: string; locationId: string; itemId: string; actorId: string;
-    configRuleId: string; expected: StockPosition; countedQuantity: string; delta: string;
+    propertyId: string | null; taskId: string | null; locationId: string; itemId: string; actorId: string;
+    configRuleId: string | null; expected: StockPosition; countedQuantity: string; delta: string;
     note: string; deviceId: string; clientOpId: string; clientCreatedAt: Date | null;
     configSnapshot: Prisma.InputJsonValue; receivedAt: Date;
   }) {

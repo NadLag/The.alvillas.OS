@@ -1,0 +1,9 @@
+import {randomUUID} from "node:crypto";
+import {afterEach,it,expect,vi} from "vitest";
+import {inventoryCatalogRequest,type InventoryBrowserError} from "@/modules/inventory/ui/item-browser";
+import {inventoryCountPageSchema} from "@/modules/inventory/domain/stocktake-command";
+afterEach(()=>vi.unstubAllGlobals());
+it("preserves fifty original multilingual count observations including full-length field notes",async()=>{
+ const name={en:"界".repeat(240),fr:"界".repeat(240),ar:"界".repeat(240)},data=inventoryCountPageSchema.parse({items:Array.from({length:50},()=>({id:randomUUID(),item:{id:randomUUID(),key:"original.count",name,unit:"piece"},location:{id:randomUUID(),label:"界".repeat(240),propertyId:randomUUID()},expected:"9007199254740993",actual:"9007199254740992",delta:"-1",revision:"1",reason:"界".repeat(1000),recordedAt:new Date().toISOString(),origin:"FIELD",movementId:randomUUID()})),next:null,canCount:false}),body=JSON.stringify(data);expect(new TextEncoder().encode(body).length).toBeGreaterThan(262144);expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(1048576);vi.stubGlobal("navigator",{onLine:true});const fetch=vi.fn(()=>Promise.resolve(new Response(body,{headers:{"Content-Type":"application/json"}})));vi.stubGlobal("fetch",fetch);expect(inventoryCountPageSchema.parse(await inventoryCatalogRequest("stocktakes","page",{},new AbortController().signal,"original.private.scope"))).toEqual(data);expect(fetch).toHaveBeenCalledTimes(1);
+});
+it("rejects an oversized private count history without truncation or retries",async()=>{vi.stubGlobal("navigator",{onLine:true});const fetch=vi.fn(()=>Promise.resolve(new Response(" ".repeat(1048577))));vi.stubGlobal("fetch",fetch);await expect(inventoryCatalogRequest("stocktakes","page",{},new AbortController().signal,"original.private.scope")).rejects.toMatchObject<Partial<InventoryBrowserError>>({state:"unavailable"});expect(fetch).toHaveBeenCalledTimes(1);});
