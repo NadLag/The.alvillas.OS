@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { withTenant } from "@/platform/db/tenant";
+import { withTenant,type TenantTransaction } from "@/platform/db/tenant";
 import { provisionIntegrationRole } from "./support/database-role";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { prepareFieldStocktakeBatch, recordFieldStocktakeInTransaction } from "@/platform/inventory/field-stocktake-service";
@@ -52,6 +52,15 @@ function record(f: Fixture, input = f.input, ctx = f.ctx, clientCreatedAt: Date 
       tx, batch, { requestId: randomUUID(), ipAddress: null });
   });
 }
+/** Configuration reconciliation is a separate producer from the field operation.
+ * Account for every setup reference, then retain all original field assertions. */
+async function fieldBusinessOutbox(tx:TenantTransaction){
+ const all=await tx.outboxEvent.findMany(),references=all.filter(row=>row.type==="inventory.reorder.configuration.requested"),rules=await tx.configRule.findMany({where:{key:"inventory.minimums",lifecycle:{not:"DRAFT"},createdBy:{not:null}}});
+ const expected=rules.flatMap(rule=>[{rule,phase:"START",at:rule.effectiveFrom},...rule.effectiveTo?[{rule,phase:"END",at:rule.effectiveTo}]:[]]);
+ expect(references.map(row=>row.idempotencyKey).sort()).toEqual(expected.map(({rule,phase})=>`inventory-reorder-config:${rule.id}:${phase}:initial`).sort());
+ for(const source of expected){const reference=references.find(row=>row.idempotencyKey===`inventory-reorder-config:${source.rule.id}:${source.phase}:initial`)!;expect(reference.payload).toEqual({schemaVersion:1,configRuleId:source.rule.id,phase:source.phase});expect(reference.nextAttemptAt).toEqual(source.at);expect(reference.occurredAt).toEqual(source.rule.createdAt);expect(reference.status).toBe("PENDING");}
+ return all.filter(row=>row.type!=="inventory.reorder.configuration.requested");
+}
 async function revise(f: Fixture, value: unknown, effectiveFrom = new Date("2021-01-01"), scopeType = "property", scopeId = f.property.id) {
   return withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "inventory.minimums", scopeType, scopeId,
     value, effectiveFrom, createdBy: f.account.id, reason: "Explicit changed catalog" }));
@@ -60,7 +69,7 @@ async function empty(f: Fixture) {
   await withTenant(db, f.org, async tx => {
     expect(await tx.inventoryItem.count()).toBe(0); expect(await tx.inventoryLocation.count()).toBe(0);
     expect(await tx.inventoryStocktake.count()).toBe(0); expect(await tx.inventoryMovement.count()).toBe(0);
-    expect(await tx.outboxEvent.count()).toBe(0); expect(await tx.auditLog.count()).toBe(0);
+    expect((await fieldBusinessOutbox(tx)).length).toBe(0); expect(await tx.auditLog.count()).toBe(0);
   });
 }
 function syncInput(f: Fixture, payload = f.input, clientOpId: string = randomUUID(), deviceId: string = randomUUID()) {
@@ -111,7 +120,7 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
         item: { key: "bath_towel", unit: "pieces", minimum: "8" } });
       expect((await tx.inventoryMovement.aggregate({ _sum: { quantityDelta: true } }))._sum.quantityDelta?.toFixed(0)).toBe("3");
       expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record", resourceId: row.id, propertyScopeId: f.property.id } })).toBe(1);
-      const events = await tx.outboxEvent.findMany(); expect(events.map(event => event.type).sort()).toEqual(["InventoryBelowMinimum", "StocktakeVariance"]);
+      const events = await fieldBusinessOutbox(tx); expect(events.map(event => event.type).sort()).toEqual(["InventoryBelowMinimum", "StocktakeVariance"]);
       for (const event of events) expect(event.payload).toMatchObject({ propertyId: f.property.id, taskId: f.task.id,
         inventory: { item: "bath_towel", quantity: "3" }, stocktake: { id: row.id, expected: "0", actual: "3", delta: "3", revision: "1" } });
       expect(await tx.operationTask.findUniqueOrThrow({ where: { id: f.task.id } })).toMatchObject({ state: "ASSIGNED", completedAt: null });
@@ -180,7 +189,7 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
     await record(f, { ...f.input, countedQuantity: "0" });
     await withTenant(db, f.org, async tx => {
       expect(await tx.inventoryStocktake.count()).toBe(1); expect(await tx.inventoryMovement.count()).toBe(0);
-      expect(await tx.outboxEvent.count()).toBe(0); expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record" } })).toBe(1);
+      expect((await fieldBusinessOutbox(tx)).length).toBe(0); expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record" } })).toBe(1);
     });
   });
   it.skipIf(!url)("preserves the first observation under simultaneous stale counts and never silently rebases the second", async () => {
@@ -189,7 +198,7 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
     const failed = results.find(result => result.status === "rejected"); expect(failed?.status === "rejected" && failed.reason).toBeInstanceOf(StocktakeConflictError);
     await withTenant(db, f.org, async tx => {
       expect(await tx.inventoryStocktake.count()).toBe(1); expect(await tx.inventoryMovement.count()).toBe(1);
-      expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record" } })).toBe(1); expect(await tx.outboxEvent.count()).toBe(2);
+      expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record" } })).toBe(1); expect((await fieldBusinessOutbox(tx)).length).toBe(2);
     });
   });
   it.skipIf(!url)("acknowledges concurrent duplicate delivery exactly once and rejects changed content under the original operation key", async () => {
@@ -200,7 +209,7 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
     await withTenant(db, f.org, async tx => {
       expect(await tx.inventoryStocktake.count()).toBe(1); expect(await tx.inventoryMovement.count()).toBe(1);
       expect(await tx.syncOp.count()).toBe(1); expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record" } })).toBe(1);
-      expect(await tx.outboxEvent.count()).toBe(2);
+      expect((await fieldBusinessOutbox(tx)).length).toBe(2);
     });
   });
   it.skipIf(!url)("durably returns a stale quantity and revision until an explicit new review submits a new operation key", async () => {
@@ -236,7 +245,7 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
     const removed = syncInput(f);
     expect((await push(f, removed)).results[0]).toMatchObject({ status: "REJECTED", error_code: "STOCKTAKE_ITEM_UNAVAILABLE" });
     await withTenant(db, f.org, async tx => {
-      expect(await tx.inventoryStocktake.count()).toBe(0); expect(await tx.outboxEvent.count()).toBe(0);
+      expect(await tx.inventoryStocktake.count()).toBe(0); expect((await fieldBusinessOutbox(tx)).length).toBe(0);
       expect(await tx.syncOp.findFirst({ where: { clientOpId: removed.ops[0].client_op_id } })).toMatchObject({ status: "REJECTED", payload: removed.ops[0].payload });
     });
   });
@@ -341,7 +350,7 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
     expect((await push(f, input)).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_NOT_ASSIGNED" });
     await withTenant(db, f.org, async tx => {
       expect(await tx.inventoryStocktake.count()).toBe(0); expect(await tx.inventoryItem.count()).toBe(0);
-      expect(await tx.outboxEvent.count()).toBe(0); expect(await tx.syncOp.count({ where: { status: "REJECTED" } })).toBe(1);
+      expect((await fieldBusinessOutbox(tx)).length).toBe(0); expect(await tx.syncOp.count({ where: { status: "REJECTED" } })).toBe(1);
     });
   });
   for (const category of ["CONSUMABLE", "EQUIPMENT"] as const) {
@@ -357,7 +366,7 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
         expect(await tx.inventoryItem.findFirst()).toMatchObject({ key: f.input.itemKey, category, unit: "pieces" });
         expect(await tx.inventoryStocktake.count()).toBe(1); expect(await tx.inventoryMovement.count()).toBe(1); expect(await tx.syncOp.count()).toBe(1);
         expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record" } })).toBe(1);
-        expect((await tx.outboxEvent.findMany()).map(row => row.type).sort()).toEqual(["InventoryBelowMinimum", "StocktakeVariance"]);
+        expect((await fieldBusinessOutbox(tx)).map(row => row.type).sort()).toEqual(["InventoryBelowMinimum", "StocktakeVariance"]);
         expect(await tx.operationTask.findUniqueOrThrow({ where: { id: f.task.id } })).toMatchObject({ state: "ASSIGNED", completedAt: null, version: f.task.version });
         expect(await tx.financialTransaction.count()).toBe(0);
       });

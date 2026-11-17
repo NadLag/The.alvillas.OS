@@ -13,6 +13,7 @@ import { externalPaymentFinancialSources, type ExternalPaymentFinancialSources }
 import { expenseResource } from "@/platform/authz/expense-resource";
 import {nativeInventoryLocationResources} from "@/platform/inventory/location-resource";
 import {nativeInventoryMovementResources} from "@/platform/inventory/movement-resource";
+import {nativeInventoryReorderResources,nativeInventoryAutomationAuditResources} from "@/platform/inventory/reorder-resource";
 
 export type FinancialAuditResource = NativeFinancialResource & { inventorySources?:readonly Resource[]; attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
 
@@ -76,6 +77,8 @@ function whereFor(organizationId: string, filters: AuditHistoryFilters): Prisma.
 }
 
 export class AuditRepository {
+  inventoryAutomationResources(ids:string[]){return nativeInventoryAutomationAuditResources(this.tx,this.organizationId,ids);}
+  inventoryReorderResources(ids:string[]){return nativeInventoryReorderResources(this.tx,this.organizationId,ids);}
   inventoryMovementResources(ids:string[]){return nativeInventoryMovementResources(this.tx,this.organizationId,ids);}
   inventoryLocationResources(ids:string[]){return nativeInventoryLocationResources(this.tx,this.organizationId,ids);}
   constructor(

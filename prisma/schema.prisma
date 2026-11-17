@@ -236,18 +236,24 @@ model AutomationAttempt {
 model AutomationSuggestion {
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
-  propertyId     String       @map("property_id") @db.Uuid
+  propertyId     String?      @map("property_id") @db.Uuid
+  locationId     String?      @map("location_id") @db.Uuid
+  itemId         String?      @map("item_id") @db.Uuid
+  nativeSource   Json?        @map("native_source")
   outcomeKey     String       @map("outcome_key")
   itemKey        String       @map("item_key")
   title          Json
-  quantity       Decimal      @db.Decimal(18, 2)
+  quantity       Decimal      @db.Decimal(65, 2)
   status         String       @default("OPEN")
   createdBy      String       @map("created_by") @db.Uuid
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  location InventoryLocation? @relation("InventoryReorderLocation",fields:[organizationId,locationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"automation_suggestion_inventory_location_fkey")
+  item InventoryItem? @relation("InventoryReorderItem",fields:[organizationId,itemId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"automation_suggestion_inventory_item_fkey")
 
   @@unique([organizationId, outcomeKey])
   @@index([organizationId, propertyId, status, createdAt], map: "automation_suggestion_org_property_status_created_idx")
+  @@index([organizationId,locationId,itemId,createdAt,id],map:"automation_suggestion_inventory_history_idx")
   @@map("automation_suggestion")
 }
 
@@ -3149,6 +3155,7 @@ model ReservationException {
 }
 
 model InventoryItem {
+  reorderSuggestions AutomationSuggestion[] @relation("InventoryReorderItem")
   id                 String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId     String                 @map("organization_id") @db.Uuid
   key                String                 @db.VarChar(120)
@@ -3171,6 +3178,7 @@ model InventoryItem {
 }
 
 model InventoryLocation {
+  reorderSuggestions AutomationSuggestion[] @relation("InventoryReorderLocation")
   id             String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String                 @map("organization_id") @db.Uuid
   kind           String

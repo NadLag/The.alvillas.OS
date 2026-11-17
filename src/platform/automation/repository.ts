@@ -16,6 +16,8 @@ import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { SupplierInvoiceRepository } from "@/modules/finance/infrastructure/supplier-invoice-repository";
 import { invoiceAutomationSource, type InvoiceAutomationSource } from "./invoice-source";
+import {inventoryReorderSignalSchema,inventoryReorderSignalKey,type InventoryReorderSignal} from "@/modules/inventory/domain/reorder-event";
+import {inventoryMinimumsForLocation} from "@/modules/inventory/domain/reorder";
 
 export const json = (v: unknown) =>
   JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -160,10 +162,20 @@ export class AutomationRepository {
     scopes: Awaited<ReturnType<ReservationConfigScopeRepository["scopes"]>>;
     expense?: { resource: Resource; approvalId: string | null; submissionId: string };
     invoice?: InvoiceAutomationSource;
+    inventorySource?: InventoryReorderSignal;
   }> {
     const event = await this.event(eventId);
     if (!event) throw new Error("automation_source_missing");
     const p = event.payload as Record<string, unknown>;
+    if(event.type==="InventoryBelowMinimum"&&Object.hasOwn(p,"inventorySource")){
+      const signal=inventoryReorderSignalSchema.parse(p.inventorySource);
+      if(signal.organizationId!==this.organizationId||event.idempotencyKey!==inventoryReorderSignalKey(signal)||
+        (p.propertyId??null)!==signal.location.propertyId||propertyOverride&&propertyOverride!==signal.location.propertyId||p.reservationId||p.taskId||p.approvalId||p.expenseId)throw Error("automation_source_missing");
+      const property=signal.location.propertyId?await this.property(signal.location.propertyId):null;
+      if(signal.location.propertyId&&!property)throw Error("automation_source_missing");
+      const scopes=property?await new ReservationConfigScopeRepository(this.tx,this.organizationId).scopes({propertyId:property.id,asOf:event.occurredAt}):[{scopeType:"organization",scopeId:null}];
+      return{event,property,scopes,inventorySource:signal,evaluation:{fields:{event:{id:event.id,type:event.type,date:new Intl.DateTimeFormat("en-CA",{timeZone:signal.timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(event.occurredAt),occurred_at:event.occurredAt.toISOString()},...property?{property:{id:property.id,timezone:property.timezone}}:{},inventory:{item:signal.item.key,quantity:signal.current}},configs:{}}};
+    }
     const reservation = uuid.safeParse(p.reservationId).success
       ? await this.tx.reservation.findFirst({
           where: {
@@ -368,7 +380,8 @@ export class AutomationRepository {
         asOf: ctx.event.occurredAt,
       });
       if (!resolved) throw new Error("automation_config_missing");
-      ctx.evaluation.configs[key] = resolved.parsedValue;
+      ctx.evaluation.configs[key] = key==="inventory.minimums"&&ctx.inventorySource?
+        {minimums:inventoryMinimumsForLocation(resolved.parsedValue,ctx.inventorySource.location.id).filter(entry=>entry.item===ctx.inventorySource!.item.key).map(entry=>({item:entry.item,quantity:entry.quantity,...entry.reorder?{reorder:entry.reorder}:{}}))}:resolved.parsedValue;
       metadata.push({ key, id: resolved.id, version: resolved.version });
     }
     return { rule: parsed, metadata };
@@ -504,6 +517,14 @@ export class AutomationRepository {
         title: json(data.title),
       },
     });
+  }
+  async nativeInventorySuggestion(data:{eventId:string;signal:InventoryReorderSignal;outcomeKey:string;title:unknown;createdBy:string}){
+    const signal=data.signal,rows=await this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`INSERT INTO automation_suggestion(id,organization_id,property_id,location_id,item_id,native_source,outcome_key,item_key,title,quantity,status,created_by)
+      VALUES(gen_random_uuid(),${this.organizationId}::uuid,${signal.location.propertyId}::uuid,${signal.location.id}::uuid,${signal.item.id}::uuid,${JSON.stringify({schemaVersion:1,eventId:data.eventId,signal})}::jsonb,${data.outcomeKey},${signal.item.key},${JSON.stringify(data.title)}::jsonb,${signal.suggestedQuantity}::numeric,'OPEN',${data.createdBy}::uuid)
+      ON CONFLICT(organization_id,outcome_key) DO NOTHING RETURNING id`);
+    if(rows[0])return rows[0];
+    const existing=await this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`SELECT id FROM automation_suggestion WHERE organization_id=${this.organizationId}::uuid AND outcome_key=${data.outcomeKey} AND native_source=${JSON.stringify({schemaVersion:1,eventId:data.eventId,signal})}::jsonb AND created_by=${data.createdBy}::uuid AND title=${JSON.stringify(data.title)}::jsonb`);
+    if(!existing[0])throw Error("automation_inventory_effect_conflict");return existing[0];
   }
   suggestions(propertyIds: string[]) {
     return this.tx.automationSuggestion.findMany({

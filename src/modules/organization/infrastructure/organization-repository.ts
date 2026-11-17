@@ -4,6 +4,7 @@ import type {
   OrganizationSettingsSummary
 } from "@/modules/organization/domain/organization-settings";
 import type { TenantTransaction } from "@/platform/db/tenant";
+import {organizationSettingsInputSchema} from "../domain/organization-settings";
 
 const organizationInclude = {
   profile: true
@@ -46,6 +47,7 @@ export class OrganizationRepository {
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
   ) {}
+  async operationalTimezone(){const profile=await this.tx.organizationProfile.findFirst({where:{organizationId:this.organizationId},select:{timezone:true}});return organizationSettingsInputSchema.shape.timezone.parse(profile?.timezone);}
 
   async baseCurrencyLocked(): Promise<boolean> {
     const [ledgerAccounts, transactions, postings, settlements, variances] = await Promise.all([
