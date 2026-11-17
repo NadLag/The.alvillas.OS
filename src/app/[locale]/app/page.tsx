@@ -85,6 +85,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="inventory-stays-link" prefetch={false} href={`/${appLocale}/app/inventory/stays`}>{(await getTranslations("InventoryStayConsumption"))("title")}</Link> : null}
           {reservationContext && ["inventory_movement","inventory_item","inventory_location","config_rule"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
             <Link className="secondary-button" data-testid="inventory-procurement-link" prefetch={false} href={`/${appLocale}/app/inventory/procurement`}>{(await getTranslations("InventoryProcurement"))("title")}</Link> : null}
+          {reservationContext && ["inventory_movement","inventory_item","inventory_location","config_rule"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
+            <Link className="secondary-button" data-testid="linen-pool-link" prefetch={false} href={`/${appLocale}/app/inventory/linen`}>{(await getTranslations("LinenPool"))("title")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/security`}>
             {t("security")}
           </Link>

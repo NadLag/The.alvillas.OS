@@ -1,5 +1,8 @@
 import {z} from "zod";
-import {inventoryLinenSetSchema} from "@/platform/config/inventory-policy";
+import {inventoryLinenSetSchema,inventoryMaximumItems} from "@/platform/config/inventory-policy";
+import {localizedTextSchema} from "@/i18n/content";
+import {configSlugSchema} from "@/platform/config/identifiers";
+import {inventoryStockPageSchema} from "./stock-levels";
 import {stockQuantitySchema} from "./stocktake";
 import {inventoryStockAvailability,type InventoryMovementPosition} from "./movement";
 export type LinenPoolComponent={key:string;category:string;unit:string|null;retired:boolean;position:InventoryMovementPosition};
@@ -11,3 +14,7 @@ export function inventoryLinenSetAvailability(raw:unknown,components:readonly Li
  return{key:set.key,name:set.name,description:set.description??null,availableSets:availableSets?.toString()??null,components:lines};
 }
 export const linenPoolQuantitySchema=z.string().regex(/^(?:0|-?[1-9]\d{0,64})$/u);
+export const inventoryLinenPoolSelectionSchema=z.object({locationId:z.uuid(),query:z.string().trim().max(100).default(""),after:configSlugSchema.optional(),includeRetired:z.boolean().default(false)}).strict();
+const summary=z.object({key:configSlugSchema,name:localizedTextSchema,description:localizedTextSchema.nullable(),availableSets:linenPoolQuantitySchema.nullable(),componentCount:z.number().int().positive()}).strict();
+export const inventoryLinenPoolSchema=z.object({selection:inventoryLinenPoolSelectionSchema,stock:inventoryStockPageSchema,policy:z.object({id:z.uuid(),version:z.number().int().positive()}).strict().nullable(),sets:z.array(summary).max(inventoryMaximumItems)}).strict();
+export type InventoryLinenPool=z.infer<typeof inventoryLinenPoolSchema>;

@@ -6,7 +6,7 @@ import {z} from "zod";
 import {withTenant} from "@/platform/db/tenant";
 import {nativeGuestHubFixture} from "../../integration/support/guest-hub-fixture";
 import {previewInventoryMovement,publishInventoryMovement} from "@/modules/inventory/application/movement-service";
-const input=z.object({organizationId:z.uuid(),accountId:z.uuid(),personId:z.uuid(),guestLocale:z.enum(["en","fr","ar"]),stock:z.boolean().optional(),reorder:z.boolean().optional(),stay:z.boolean().optional(),output:z.string().min(1)}).strict().parse(JSON.parse(process.argv[2]??"null")),target=new URL(process.env.DATABASE_URL??"invalid:");
+const input=z.object({organizationId:z.uuid(),accountId:z.uuid(),personId:z.uuid(),guestLocale:z.enum(["en","fr","ar"]),stock:z.boolean().optional(),reorder:z.boolean().optional(),stay:z.boolean().optional(),linen:z.boolean().optional(),output:z.string().min(1)}).strict().parse(JSON.parse(process.argv[2]??"null")),target=new URL(process.env.DATABASE_URL??"invalid:");
 if(process.env.VERCEL||process.env.VERCEL_ENV||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os")||!resolve(input.output).startsWith(resolve(process.cwd())+sep))throw Error("Owned inventory movement browser fixture required");
 const db=new PrismaClient();try{
  const f=await nativeGuestHubFixture(db,db,{},input),result=await withTenant(db,f.organizationId,async tx=>{
@@ -27,6 +27,12 @@ const db=new PrismaClient();try{
   await createConfigRuleVersion(f.ctx,{key:"inventory.minimums",scopeType:"property",scopeId:f.property.id,lifecycle:"ACTIVE",effectiveFrom:new Date("2020-01-01"),valueJson:JSON.stringify({minimums:[{item:result.itemKey,quantity:0,expected_per_stay:2}]}),reason:"Review the original-unit requirement for actual stay consumption acceptance"},{db,requestId:randomUUID(),ipAddress:null});
   for(const kind of["RESERVATION","CONSUMPTION"]as const){const draft={kind,itemId:result.itemId,locationId:result.sourceId,reservationId:result.reservationId,quantity:"3",reason:"Actual original reserved and consumed stock for the selected stay"},review=await previewInventoryMovement(f.ctx,draft,{db});await publishInventoryMovement(f.ctx,{draft,reviewFingerprint:review.reviewFingerprint,idempotencyKey:randomUUID()},{db});}
  }
+ let linenSetKey:string|undefined;
+ if(input.linen){
+  const {createConfigRuleVersion}=await import("@/modules/config/application/config-service"),pillow=await withTenant(db,f.organizationId,tx=>tx.inventoryItem.create({data:{organizationId:f.organizationId,key:"original.browser.pillow."+randomUUID(),category:"LINEN",unit:"piece",labels:{en:"Actual pillow case",fr:"Taie réelle",ar:"غطاء وسادة أصلي"}}}));linenSetKey="bed."+randomUUID();
+  await createConfigRuleVersion(f.ctx,{key:"inventory.minimums",scopeType:"property",scopeId:f.property.id,lifecycle:"ACTIVE",effectiveFrom:new Date("2020-01-01"),valueJson:JSON.stringify({minimums:[],linen_sets:[{key:linenSetKey,name:{en:"Actual original linen set",fr:"Parure originale réelle",ar:"طقم بياضات أصلي"},components:[{item:result.itemKey,quantity:1},{item:pillow.key,quantity:2}]}]}),reason:"Review the actual original linen composition for native browser acceptance"},{db,requestId:randomUUID(),ipAddress:null});
+  for(const change of[{kind:"PURCHASE",itemId:result.itemId,quantity:"10"},{kind:"PURCHASE",itemId:pillow.id,quantity:"11"},{kind:"DAMAGE",itemId:pillow.id,quantity:"1"},{kind:"RESERVATION",itemId:pillow.id,quantity:"2",reservationId:result.reservationId}]){const draft={locationId:result.sourceId,reason:"Actual original circulating linen and held/condition units",...change},review=await previewInventoryMovement(f.ctx,draft,{db});await publishInventoryMovement(f.ctx,{draft,reviewFingerprint:review.reviewFingerprint,idempotencyKey:randomUUID()},{db});}
+ }
  await mkdir(dirname(resolve(input.output)),{recursive:true,mode:0o700});
- await writeFile(input.output,JSON.stringify(result),{flag:"wx",mode:0o600});
+ await writeFile(input.output,JSON.stringify({...result,...linenSetKey?{linenSetKey}:{}}),{flag:"wx",mode:0o600});
 }finally{await db.$disconnect();}
