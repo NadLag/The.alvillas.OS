@@ -69,6 +69,8 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/team`}>
             {t("team")}
           </Link>
+          {reservationContext && authorizeOrganizationSource(reservationContext.authContext,"view",{type:"inventory_item",organizationId:session.user.organizationId,dataClass:"operational"},new Date()) ?
+            <Link className="secondary-button" data-testid="inventory-items-link" prefetch={false} href={`/${appLocale}/app/inventory/items`}>{(await getTranslations("InventoryItems"))("title")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/security`}>
             {t("security")}
           </Link>

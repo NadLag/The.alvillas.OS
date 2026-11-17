@@ -92,6 +92,10 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  if(row.resourceType==="inventory_item"||row.resourceType==="inventory_item_command"){
+    const now=new Date(),source={type:"inventory_item",organizationId:ctx.organizationId,dataClass:"operational"as const},allowed=authorizeOrganizationSource(ctx.authContext,"view",source,now)&&authorizeOrganizationSource(ctx.authContext,action,source,now);
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["operational"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"operational"},after:{dataClass:"operational"},reason:{dataClass:"operational"}})as AuditHistoryRow;
+  }
   // Order history remains operational; the same atomic mutation has a native
   // expense audit carrying its independently authorized financial evidence.
   if(row.action.startsWith("service.grocery."))return present({...ctx.authContext,visibleDataClasses:new Set()},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;

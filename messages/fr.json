@@ -7179,5 +7179,67 @@
     "cashHelp": "Enregistrez uniquement l’argent réellement reçu dans le formulaire de caisse de la tâche assignée. La garde des fonds, la répartition et la rémunération du chauffeur restent distinctes.",
     "service": "Service de transfert",
     "serviceHelp": "La confirmation crée la tâche Transfert native. Affectez son chauffeur et son horaire dans Opérations ; les espèces utilisent le registre de garde existant."
+  },
+  "InventoryItems": {
+    "eyebrow": "Inventaire",
+    "title": "Articles d’inventaire",
+    "subtitle": "Gérez les consommables, le linge et les actifs dans le catalogue commun.",
+    "back": "Retour à l’espace de travail",
+    "category": "Catégorie",
+    "allCategories": "Toutes les catégories",
+    "categories": {
+      "CONSUMABLE": "Consommables",
+      "LINEN": "Linge",
+      "EQUIPMENT": "Actifs"
+    },
+    "fields": {
+      "key": "Code de l’article",
+      "unit": "Unité de comptage",
+      "en": "Nom en anglais",
+      "fr": "Nom en français",
+      "ar": "Nom en arabe",
+      "reason": "Motif"
+    },
+    "operations": {
+      "CREATE": "Ajouter un article",
+      "RENAME": "Renommer l’article",
+      "ARCHIVE": "Retirer l’article",
+      "RESTORE": "Restaurer l’article"
+    },
+    "search": "Rechercher des articles",
+    "searchAction": "Rechercher",
+    "retired": "Afficher les articles retirés",
+    "refresh": "Actualiser",
+    "retry": "Réessayer",
+    "empty": "Aucun article ne correspond à ces filtres.",
+    "firstPage": "Première page",
+    "nextPage": "Page suivante",
+    "identityHelp": "Le code, la catégorie et l’unité de comptage restent fixes. Créez un autre article si son unité physique ou sa catégorie change.",
+    "retireHelp": "Retirez cet article lorsque tous les emplacements sont sans stock. Ses mouvements et son historique sont conservés.",
+    "restoreHelp": "Restaurez cet article avec son identité et son historique d’origine.",
+    "review": "Vérifier la modification",
+    "reviewTitle": "Vérifier la modification d’origine",
+    "reviewHelp": "Confirmez les noms, l’unité, la catégorie et le motif avant l’enregistrement.",
+    "publish": "Enregistrer la modification",
+    "saving": "Enregistrement…",
+    "changeReview": "Modifier cette demande",
+    "close": "Fermer",
+    "saved": "La modification d’origine a été enregistrée.",
+    "unconfirmed": "Le résultat est incertain. Actualisez pour retrouver la demande d’origine avant toute autre modification.",
+    "notRecorded": "La demande d’origine n’a pas été enregistrée. Elle est clôturée ; vous pouvez vérifier une nouvelle modification.",
+    "privateHidden": "Les informations privées sont masquées lorsque cette page est inactive.",
+    "notProvided": "Non renseigné",
+    "unspecifiedUnit": "Unité d’origine non précisée",
+    "states": {
+      "ready": "Prêt",
+      "loading": "Chargement de l’inventaire…",
+      "offline": "Reconnectez-vous pour consulter ou modifier les articles privés.",
+      "forbidden": "Vos accès actuels ne permettent pas cette action.",
+      "unavailable": "L’inventaire est indisponible. Réessayez.",
+      "validation": "Vérifiez les noms, le code, l’unité et le motif.",
+      "conflict": "L’article ou vos accès ont changé. Actualisez et vérifiez à nouveau l’article d’origine.",
+      "stock_held": "Du stock reste dans au moins un emplacement. Rapprochez les mouvements réels avant de retirer l’article.",
+      "uncertain": "Le résultat est incertain. Retrouvez la demande d’origine avant toute nouvelle modification."
+    }
   }
 }

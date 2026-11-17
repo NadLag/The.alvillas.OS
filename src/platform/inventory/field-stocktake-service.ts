@@ -1,3 +1,4 @@
+import {configuredInventoryItem} from "@/modules/inventory/domain/item-definition";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { ConfigRuleRepository, type ConfigRuleRecord, type ConfigScopeCandidate, type ResolvedConfigRule } from "@/platform/config/config-rule-repository";
 import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
@@ -57,17 +58,19 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   const property = await batch.repository.property(task.propertyId); if (!property) throw new ReservationNotFoundError();
   const rule = batch.rules.get(task.propertyId); if (!rule) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
   const current = inventoryMinimumsSchema.parse(rule.parsedValue).minimums.find(item => item.item === input.itemKey);
-  if (!current?.category) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
+  let item = await batch.repository.item(input.itemKey), location = await batch.repository.propertyLocation(task.propertyId);
+  const currentDefinition = current ? configuredInventoryItem(current, item ?? undefined) : null;
+  if (!current || !currentDefinition) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
   if (!batch.reportedRules.has(input.catalogRuleId)) batch.reportedRules.set(input.catalogRuleId, await new ConfigRuleRepository(tx, ctx.organizationId).findById(input.catalogRuleId));
   const reported = batch.reportedRules.get(input.catalogRuleId);
   if (!reported || reported.key !== inventoryMinimumsKey || reported.version !== input.catalogVersion || reported.lifecycle === "DRAFT" ||
     reported.effectiveFrom > batch.now || !(batch.scopes.get(task.propertyId) ?? []).some(scope => scope.scopeType === reported.scopeType && scope.scopeId === reported.scopeId))
     throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
   const prior = inventoryMinimumsSchema.parse(reported.value).minimums.find(item => item.item === input.itemKey);
-  if (!prior?.category || prior.category !== current.category) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
-  if ((current.unit ?? null) !== input.unit || (prior.unit ?? null) !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
-  let item = await batch.repository.item(input.itemKey), location = await batch.repository.propertyLocation(task.propertyId);
-  if (item?.archivedAt || location?.archivedAt || (item && item.category !== current.category)) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
+  const priorDefinition=prior?configuredInventoryItem(prior,item??undefined):null;
+  if (!priorDefinition || priorDefinition.category !== currentDefinition.category) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
+  if (currentDefinition.unit !== input.unit || priorDefinition.unit !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
+  if (item?.archivedAt || location?.archivedAt || (item && item.category !== currentDefinition.category)) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
   if (item && item.unit !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
   const position = item && location ? await batch.repository.position(location.id, item.id) : { quantity: "0", revision: "0" };
   const decision = decideStocktake({ expected: { quantity: input.expectedQuantity, revision: input.expectedRevision }, current: position,
@@ -75,13 +78,13 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   const appliedCatalog = { id: rule.id, key: rule.key, version: rule.version, scopeType: rule.scopeType, scopeId: rule.scopeId,
     effectiveFrom: rule.effectiveFrom.toISOString(), effectiveTo: rule.effectiveTo?.toISOString() ?? null };
   const source = { appliedCatalog, reportedCatalog: { id: reported.id, version: reported.version }, scopes: batch.scopes.get(task.propertyId) ?? [],
-    item: { key: input.itemKey, category: current.category, unit: input.unit, minimum: String(current.quantity) } };
+    item: { key: input.itemKey, category: currentDefinition.category, unit: input.unit, minimum: String(current.quantity) } };
   const audit = async (action: string, resourceType: string, resourceId: string, after: unknown, before?: unknown) => writeAuditEvent(tx,
     { organizationId: ctx.organizationId, actorId: ctx.actorId, action, resourceType, resourceId, propertyScopeId: task.propertyId,
       before, after, reason: input.note, requestId: meta.requestId, ipAddress: meta.ipAddress ?? null, deviceId: transport.deviceId, occurredAt: batch.now });
   if (!item) {
     const labels = current.name ?? { en: input.itemKey, fr: input.itemKey };
-    item = await batch.repository.createItem({ key: input.itemKey, category: current.category, unit: input.unit,
+    item = await batch.repository.createItem({ key: input.itemKey, category: currentDefinition.category, unit: input.unit,
       labels, sourceConfigRuleId: rule.id });
     await audit("inventory.item.materialized", "inventory_item", item.id, { key: item.key, category: item.category, unit: item.unit, appliedCatalog });
   }

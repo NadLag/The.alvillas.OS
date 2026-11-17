@@ -1,0 +1,11 @@
+import {z} from "zod";
+import {inventoryItemDraftSchema} from "./item-catalog";
+import {inventoryItemChangeSchema,inventoryItemReceiptSchema} from "./item-command";
+export const inventoryItemViewSchema=inventoryItemDraftSchema.extend({id:z.uuid(),createdAt:z.iso.datetime(),archivedAt:z.iso.datetime().nullable(),fingerprint:z.string().regex(/^[a-f0-9]{64}$/u)}).strict();
+export const inventoryItemCapabilitiesSchema=z.object({create:z.boolean(),edit:z.boolean(),retire:z.boolean()}).strict();
+export const inventoryItemPageSchema=z.object({items:z.array(inventoryItemViewSchema).max(50),next:z.string().nullable(),capabilities:inventoryItemCapabilitiesSchema}).strict();
+export const inventoryItemPreviewSchema=z.object({draft:inventoryItemChangeSchema,reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),existing:inventoryItemViewSchema.nullable()}).strict();
+export const inventoryItemPublishSchema=inventoryItemReceiptSchema.extend({replayed:z.boolean()}).strict();
+export const inventoryItemRecoverySchema=z.object({recorded:z.boolean(),receipt:inventoryItemReceiptSchema.nullable()}).strict().refine(value=>value.recorded===(value.receipt!==null));
+export type InventoryItemView=z.infer<typeof inventoryItemViewSchema>;
+export type InventoryItemPreview=z.infer<typeof inventoryItemPreviewSchema>;
