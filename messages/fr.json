@@ -7730,6 +7730,8 @@
     "needsReview": "Vérifier les éléments d’origine",
     "componentCount": "{number} types d’éléments d’origine",
     "noSets": "Aucune composition de parure n’est configurée pour cet emplacement.",
-    "editSets": "Vérifier les modèles de parures"
+    "editSets": "Vérifier les modèles de parures",
+    "stayTitle": "Linge prévu par séjour",
+    "staySubtitle": "Vérifiez les besoins en linge configurés d’origine pour le séjour choisi."
   }
 }
