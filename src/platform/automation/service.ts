@@ -420,7 +420,7 @@ async function perform(
     if(ctx.inventorySource){
       const signal=ctx.inventorySource,row=await repo.nativeInventorySuggestion({eventId:ctx.event.id,signal,outcomeKey:key,title:action.title,createdBy:actor.actorId});
       producedIds=[row.id];
-      await writeAuditEvent(repo.tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"inventory.reorder.suggested",resourceType:"inventory_reorder",resourceId:row.id,propertyScopeId:signal.location.propertyId,after:{eventId:ctx.event.id,locationId:signal.location.id,itemId:signal.item.id,quantity:signal.suggestedQuantity,minimumRuleId:signal.minimumRule.id},reason:"Configured native inventory reorder suggestion",requestId});
+      await writeAuditEvent(repo.tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"inventory.reorder.suggested",resourceType:"inventory_reorder",resourceId:row.id,propertyScopeId:signal.location.propertyId,after:{eventId:ctx.event.id,locationId:signal.location.id,itemId:signal.item.id,quantity:signal.suggestedQuantity,minimumRuleId:signal.minimumRule.id},reason:"Configured native inventory reorder suggestion",requestId,occurredAt:await new FinanceRepository(repo.tx,actor.organizationId).clock()});
     }else{
     producedIds = [
       (
