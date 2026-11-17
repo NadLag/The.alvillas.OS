@@ -7655,5 +7655,59 @@
       "stock_held": "Original stock commitments must remain intact.",
       "uncertain": "The result is unconfirmed. Refresh the current stock."
     }
+  },
+  "InventoryProcurement": {
+    "eyebrow": "Inventory",
+    "title": "Procurement list",
+    "subtitle": "Review current shortages for one stock location before purchasing.",
+    "back": "Back to workspace",
+    "chooseLocation": "Choose a location",
+    "refresh": "Refresh",
+    "search": "Find an item",
+    "apply": "Apply",
+    "location": "Location",
+    "item": "Item",
+    "key": "Item reference",
+    "unit": "Unit",
+    "current": "Current basis quantity",
+    "minimum": "Minimum",
+    "target": "Target",
+    "quantity": "Quantity to purchase",
+    "condition": "Review",
+    "unspecifiedUnit": "Unit not specified",
+    "reviewRequired": "Review required",
+    "help": "This list uses the effective minimum, target and physical or available-stock basis for each original item. Items needing catalog review remain separate. Quantities in different units are never combined.",
+    "receivingHelp": "A procurement forecast creates no stock or expense. Record the approved original expense or supplier invoice, then receive the actual goods against its original receipt.",
+    "noPolicy": "No inventory minimum policy is currently configured for this location.",
+    "empty": "No current shortage or catalog review matches this search.",
+    "download": "Download the current list",
+    "filename": "procurement.csv",
+    "receiving": "Goods receiving",
+    "catalog": "Item catalog",
+    "settings": "Inventory configuration",
+    "applyHelp": "Apply the search to load the current list.",
+    "chooseHelp": "Choose the property, store, laundry or transit location you are purchasing for.",
+    "privateHidden": "Private procurement information is hidden. Reopen this view to check current access.",
+    "conditions": {
+      "READY": "Ready for purchasing review",
+      "MISSING": "Add the original item to the catalog",
+      "RETIRED": "Item is retired",
+      "INCOMPATIBLE": "Reconcile the configured category or unit"
+    },
+    "bases": {
+      "PHYSICAL": "Physical stock basis",
+      "AVAILABLE": "Available stock basis"
+    },
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading…",
+      "offline": "Reconnect to view current stock levels.",
+      "forbidden": "Your current access no longer permits these stock levels.",
+      "unavailable": "Stock levels are unavailable. Try again.",
+      "validation": "Check the original item or location and filters.",
+      "conflict": "Stock or source access changed. Refresh the current quantities.",
+      "stock_held": "Original stock commitments must remain intact.",
+      "uncertain": "The result is unconfirmed. Refresh the current stock."
+    }
   }
 }
