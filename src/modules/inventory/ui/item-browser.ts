@@ -1,0 +1,12 @@
+import {z} from "zod";
+import {readBoundedResponseBytes} from "@/platform/http/read-exact-response";
+export type InventoryBrowserState="ready"|"loading"|"offline"|"forbidden"|"unavailable"|"validation"|"conflict"|"stock_held"|"uncertain";
+export class InventoryBrowserError extends Error{constructor(readonly state:InventoryBrowserState){super(state);}}
+const failure=z.object({error:z.string()}).strict();
+export async function inventoryItemRequest(operation:"review"|"publish"|"recover"|"page"|"item",input:unknown,signal:AbortSignal,scope:string){
+ if(!navigator.onLine)throw new InventoryBrowserError("offline");
+ let response:Response;try{response=await fetch("/api/inventory/items/"+operation,{method:"POST",credentials:"same-origin",cache:"no-store",redirect:"error",referrerPolicy:"no-referrer",headers:{"Content-Type":"application/json","x-alvillas-inventory-scope":scope},body:JSON.stringify(input),signal});}catch{throw new InventoryBrowserError(operation==="publish"?"uncertain":"unavailable");}
+ let value:unknown;try{value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(await readBoundedResponseBytes(response,262144)))as unknown;}catch{throw new InventoryBrowserError(operation==="publish"?"uncertain":"unavailable");}
+ if(!response.ok){const parsed=failure.safeParse(value),error=parsed.success?parsed.data.error:"unavailable";throw new InventoryBrowserError(response.status===401||response.status===403?"forbidden":error==="conflict"||error==="stock_held"||error==="validation"?error:operation==="publish"?"uncertain":"unavailable");}
+ return value;
+}

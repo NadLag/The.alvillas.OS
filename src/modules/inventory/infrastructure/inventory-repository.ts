@@ -1,9 +1,34 @@
 import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { StockPosition } from "../domain/stocktake";
+export type InventoryItemHead={id:string;key:string;category:string;unit:string|null;labels:unknown;sourceConfigRuleId:string|null;createdAt:Date;archivedAt:Date|null;xmin:string;tuple:string};
 
 export class InventoryRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
+  async catalogClock(){return(await this.tx.$queryRaw<Array<{now:Date}>>(Prisma.sql`SELECT clock_timestamp() AS now`))[0].now;}
+  lockCatalogCommand(key:string){return this.lock("catalog-command:"+key,false);}
+  lockCatalogItem(key:string){return this.lock("catalog:"+key,false);}
+  async catalogItemById(id:string):Promise<InventoryItemHead|null>{return(await this.catalogHeads(Prisma.sql`i.id=${id}::uuid`,1))[0]??null;}
+  async catalogItemByKey(key:string):Promise<InventoryItemHead|null>{return(await this.catalogHeads(Prisma.sql`i.key=${key}`,1))[0]??null;}
+  catalogPage(input:{query:string;category?:string;archived:boolean;after?:string}){
+    const pattern="%"+input.query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
+    return this.catalogHeads(Prisma.sql`(${input.archived}::boolean=(i.archived_at IS NOT NULL))
+     ${input.category?Prisma.sql`AND i.category=${input.category}`:Prisma.empty}
+     ${input.after?Prisma.sql`AND i.key>${input.after}`:Prisma.empty}
+     AND(i.key ILIKE ${pattern} OR i.unit ILIKE ${pattern} OR i.labels->>'en' ILIKE ${pattern} OR i.labels->>'fr' ILIKE ${pattern} OR i.labels->>'ar' ILIKE ${pattern})`,51);
+  }
+  private catalogHeads(where:Prisma.Sql,take:number){
+    return this.tx.$queryRaw<InventoryItemHead[]>(Prisma.sql`SELECT i.id,i.key,i.category,i.unit,i.labels,i.source_config_rule_id AS "sourceConfigRuleId",i.created_at AS "createdAt",i.archived_at AS "archivedAt",i.xmin::text,i.ctid::text AS tuple FROM inventory_item i WHERE i.organization_id=${this.organizationId}::uuid AND ${where} ORDER BY i.key LIMIT ${take}`);
+  }
+  async catalogCreate(input:{key:string;category:string;unit:string|null;labels:Prisma.InputJsonValue}){
+    const row=await this.tx.inventoryItem.create({data:{organizationId:this.organizationId,...input}});return(await this.catalogItemById(row.id))!;
+  }
+  catalogUpdate(row:InventoryItemHead,input:{labels:Prisma.InputJsonValue;archivedAt:Date|null}){
+    return this.tx.$executeRaw(Prisma.sql`UPDATE inventory_item SET labels=${JSON.stringify(input.labels)}::jsonb,archived_at=${input.archivedAt} WHERE organization_id=${this.organizationId}::uuid AND id=${row.id}::uuid AND xmin::text=${row.xmin} AND ctid::text=${row.tuple}`);
+  }
+  itemStockLocations(itemId:string){
+    return this.tx.$queryRaw<Array<{locationId:string;quantity:string}>>(Prisma.sql`SELECT location_id AS "locationId",sum(quantity_delta)::text AS quantity FROM inventory_movement WHERE organization_id=${this.organizationId}::uuid AND item_id=${itemId}::uuid GROUP BY location_id ORDER BY location_id`);
+  }
 
   private async lock(key: string, shared: boolean) {
     const name = `inventory:${this.organizationId}:${key}`;
@@ -42,7 +67,7 @@ export class InventoryRepository {
   async metadata(itemKeys: string[], propertyIds: string[]) {
     const [items, locations] = await Promise.all([
       this.tx.inventoryItem.findMany({ where: { organizationId: this.organizationId, key: { in: itemKeys } },
-        select: { key: true, category: true, unit: true, archivedAt: true } }),
+        select: { key: true, category: true, unit: true, labels:true, archivedAt: true } }),
       this.tx.inventoryLocation.findMany({ where: { organizationId: this.organizationId, propertyId: { in: propertyIds } },
         select: { propertyId: true, archivedAt: true } })
     ]);

@@ -7179,5 +7179,67 @@
     "cashHelp": "Record only money actually received in the assigned task cash form. Cash custody, service allocation and driver compensation remain separate.",
     "service": "Transfer service",
     "serviceHelp": "Confirmation creates the native Transfer task. Assign its actual driver and schedule in Operations; cash uses the existing custody ledger."
+  },
+  "InventoryItems": {
+    "eyebrow": "Inventory",
+    "title": "Inventory items",
+    "subtitle": "Maintain consumables, linen and assets in the shared inventory catalog.",
+    "back": "Back to workspace",
+    "category": "Category",
+    "allCategories": "All categories",
+    "categories": {
+      "CONSUMABLE": "Consumables",
+      "LINEN": "Linen",
+      "EQUIPMENT": "Assets"
+    },
+    "fields": {
+      "key": "Item code",
+      "unit": "Counting unit",
+      "en": "Name in English",
+      "fr": "Name in French",
+      "ar": "Name in Arabic",
+      "reason": "Reason"
+    },
+    "operations": {
+      "CREATE": "Add item",
+      "RENAME": "Rename item",
+      "ARCHIVE": "Retire item",
+      "RESTORE": "Restore item"
+    },
+    "search": "Search items",
+    "searchAction": "Search",
+    "retired": "Show retired items",
+    "refresh": "Refresh",
+    "retry": "Try again",
+    "empty": "No items match these filters.",
+    "firstPage": "First page",
+    "nextPage": "Next page",
+    "identityHelp": "The item code, category and counting unit remain fixed. Create a different item when its physical unit or category changes.",
+    "retireHelp": "Retire this item only after all locations have no remaining stock. Its movements and history remain available.",
+    "restoreHelp": "Restore this original item with its existing identity and history.",
+    "review": "Review change",
+    "reviewTitle": "Review the original change",
+    "reviewHelp": "Confirm the names, unit, category and reason before recording this change.",
+    "publish": "Record change",
+    "saving": "Recording…",
+    "changeReview": "Edit this change",
+    "close": "Close",
+    "saved": "The original change was recorded.",
+    "unconfirmed": "The result is uncertain. Refresh to recover the original request before creating another change.",
+    "notRecorded": "The original request was not recorded. It has been closed safely; you can review a new change.",
+    "privateHidden": "Private inventory information is hidden while this page is inactive.",
+    "notProvided": "Not provided",
+    "unspecifiedUnit": "Original unit unspecified",
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading inventory…",
+      "offline": "Reconnect to view or change private inventory items.",
+      "forbidden": "Your current access does not allow this inventory action.",
+      "unavailable": "Inventory is unavailable. Try again.",
+      "validation": "Check the item names, code, unit and reason.",
+      "conflict": "This item or your access changed. Refresh and review the original item again.",
+      "stock_held": "Stock remains at one or more locations. Reconcile its actual movements before retiring the item.",
+      "uncertain": "The result is uncertain. Recover the original request before submitting another change."
+    }
   }
 }

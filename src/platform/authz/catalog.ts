@@ -55,6 +55,7 @@ export const permissionResources = [
   "issue",
   "service",
   "service_order",
+  "inventory_item",
   "wallet",
   "cash_collection",
   "expense",
