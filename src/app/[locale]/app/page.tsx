@@ -184,6 +184,8 @@ export default async function AppPage({
             <CommandCenterExceptionsLink context={reservationContext.authContext} locale={appLocale} />
             <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} />
             <CommandCenterTodaySummary actor={reservationContext} locale={appLocale} />
+            {authorizeCollection(reservationContext.authContext, "view", "task") ?
+              <Link className="secondary-button" href={`/${appLocale}/app/command-center/operations`}>{(await getTranslations("CommandOperations"))("title")}</Link> : null}
             {canViewCommandFinance(reservationContext.authContext) ?
               <Link className="secondary-button" href={`/${appLocale}/app/command-center/finance`}>{(await getTranslations("CommandFinance"))("title")}</Link> : null}
           </> : null}

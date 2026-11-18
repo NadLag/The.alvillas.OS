@@ -1,4 +1,26 @@
 {
+  "CommandOperations": {
+    "title": "Operations overview",
+    "back": "Back to dashboard",
+    "workload": "Team workload",
+    "readiness": "Property readiness",
+    "delays": "Delayed tasks",
+    "property": "Property",
+    "allProperties": "All properties",
+    "from": "From",
+    "until": "To",
+    "apply": "Apply",
+    "unassigned": "Unassigned",
+    "privateWorker": "Team member",
+    "open": "{count, plural, one {# open task} other {# open tasks}}",
+    "readinessCounts": "{delayed, number} delayed · {atRisk, number} at risk",
+    "job": "Job",
+    "empty": "No work matches these filters.",
+    "previous": "Previous page",
+    "next": "Next page",
+    "invalid": "Check the dates and filters.",
+    "reset": "Reset filters"
+  },
   "CommandFinance": {
     "title": "Financial overview",
     "back": "Back to dashboard",

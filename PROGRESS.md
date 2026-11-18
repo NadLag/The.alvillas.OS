@@ -314,7 +314,7 @@ F-RPT-09 | IN-PROGRESS | Configured weekly/monthly report delivery uses immutabl
 F-CMD-01 | IN-PROGRESS | Local-day arrivals, departures, turnovers and incomplete jobs with current role grants and EN/FR/AR navigation. Integration and hosted acceptance pending.
 F-CMD-02 | IN-PROGRESS | Authorized exception queues with native review routes for approvals, variances, stock, maintenance, conflicts and failed syncs. Hosted acceptance pending.
 F-CMD-03 | IN-PROGRESS | Currency-specific ledger view separates revenue and expenses from bank and cash balances, owner payable and the ALVILLAS ledger position. Hosted acceptance pending.
-F-CMD-04 | TODO |
+F-CMD-04 | IN-PROGRESS | Operations tabs show native workload, property readiness and delayed tasks with scoped filters and links. Hosted acceptance pending.
 F-CMD-05 | TODO |
 F-CMD-06 | TODO |
 F-WEB-01 | TODO |

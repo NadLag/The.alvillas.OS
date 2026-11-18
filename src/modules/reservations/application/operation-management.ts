@@ -76,7 +76,7 @@ export function taskDateRange(
 export async function operationManagement(
   ctx: ReservationActorContext,
   input: unknown,
-  deps: OperationDeps = {},
+  deps: OperationDeps & { includeWorkload?: boolean } = {},
 ) {
   operationAllowed(ctx, "view");
   const query = taskQuerySchema.parse(input),
@@ -245,10 +245,25 @@ export async function operationManagement(
         break;
       }
     }
+    let workload;
+    if (deps.includeWorkload) {
+      const totals = new Map<string, number>();
+      for (const group of workerGroups) if (group.assignedToPersonId && !terminalTaskStates.includes(group.state)) {
+        totals.set(group.assignedToPersonId, (totals.get(group.assignedToPersonId) ?? 0) + group._count._all);
+      }
+      workload = {
+        workers: workers.flatMap(worker => {
+          const open = totals.get(worker.id);
+          return open ? [{ ...worker, open }] : [];
+        }).sort((a, b) => b.open - a.open || a.name.localeCompare(b.name)),
+        unassigned: await repo.count({ AND: [where, { assignedToPersonId: null, state: { notIn: [...terminalTaskStates] } }] })
+      };
+    }
     return {
       query,
       range,
       workers,
+      ...(workload ? { workload } : {}),
       crew: [...crew.values()].sort((a, b) => a.name.localeCompare(b.name)),
       tasks: tasks
         .filter((t) => authorize(ctx.authContext, "view", taskResource(t)))

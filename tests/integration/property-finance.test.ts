@@ -1,3 +1,4 @@
+import { operationManagement } from "@/modules/reservations/application/operation-management";
 import { getCommandFinance } from "@/modules/finance/application/command-center-finance";
 import { commandExceptionsPage } from "@/platform/command-center/exceptions";
 import { getCommandCenterToday } from "@/modules/reservations/application/command-center-today";
@@ -204,6 +205,9 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(report).toMatchObject({ arrivals: [{ reference: "TODAY-IN", date: "2026-03-09" }],
      departures: [{ reference: "TODAY-OUT" }], turnovers: [{ propertyId: f.property.id }], incomplete: [{ date: "2026-03-09" }] });
    expect(JSON.stringify(report)).not.toContain("Private arrival name");
+   const work = await operationManagement(actor, { propertyId: f.property.id, view: "LIST", from: "2026-03-09", until: "2026-03-09" },
+     { db, now, includeWorkload: true });
+   expect(work.workload).toEqual({ unassigned: 1, workers: [] });
    expect(await getCommandCenterToday({ ...other.ctx, personId: other.person.id }, { db, now })).toBeNull();
    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { validTo: new Date("2026-02-28") } }));
    expect(await getCommandCenterToday(actor, { db, now })).toBeNull();

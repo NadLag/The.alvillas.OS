@@ -1,4 +1,26 @@
 {
+  "CommandOperations": {
+    "title": "Vue opérationnelle",
+    "back": "Retour au tableau de bord",
+    "workload": "Charge de l’équipe",
+    "readiness": "Préparation des propriétés",
+    "delays": "Tâches en retard",
+    "property": "Propriété",
+    "allProperties": "Toutes les propriétés",
+    "from": "Du",
+    "until": "Au",
+    "apply": "Appliquer",
+    "unassigned": "Non attribuées",
+    "privateWorker": "Membre de l’équipe",
+    "open": "{count, plural, one {# tâche ouverte} other {# tâches ouvertes}}",
+    "readinessCounts": "{delayed, number} en retard · {atRisk, number} à risque",
+    "job": "Tâche",
+    "empty": "Aucun travail ne correspond aux filtres.",
+    "previous": "Page précédente",
+    "next": "Page suivante",
+    "invalid": "Vérifiez les dates et les filtres.",
+    "reset": "Réinitialiser les filtres"
+  },
   "CommandFinance": {
     "title": "Vue financière",
     "back": "Retour au tableau de bord",

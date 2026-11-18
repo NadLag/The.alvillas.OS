@@ -1,4 +1,26 @@
 {
+  "CommandOperations": {
+    "title": "نظرة على العمليات",
+    "back": "العودة إلى لوحة التحكم",
+    "workload": "عبء عمل الفريق",
+    "readiness": "جاهزية العقارات",
+    "delays": "المهام المتأخرة",
+    "property": "العقار",
+    "allProperties": "جميع العقارات",
+    "from": "من",
+    "until": "إلى",
+    "apply": "تطبيق",
+    "unassigned": "غير مسندة",
+    "privateWorker": "عضو الفريق",
+    "open": "مهام مفتوحة ({count, number})",
+    "readinessCounts": "المتأخرة {delayed, number} · المعرّضة للتأخر {atRisk, number}",
+    "job": "مهمة",
+    "empty": "لا توجد مهام تطابق شروط البحث.",
+    "previous": "الصفحة السابقة",
+    "next": "الصفحة التالية",
+    "invalid": "تحقق من التواريخ والفلاتر.",
+    "reset": "إعادة ضبط الفلاتر"
+  },
   "CommandFinance": {
     "title": "النظرة المالية",
     "back": "العودة إلى لوحة التحكم",
