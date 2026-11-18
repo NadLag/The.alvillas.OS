@@ -1,3 +1,4 @@
+import { getOwnerMoneyMovements } from "@/modules/owner-portal/application/owner-money-movements";
 import { getOwnerFinancialActivity } from "@/modules/owner-portal/application/owner-financial-activity";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
@@ -80,6 +81,34 @@ async function exporter(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("native shared statement generation", () => {
+  it("separates owner-attributed receipt and settlement custody evidence from the remaining payable", async () => {
+    const f = await fixture(), at = new Date("2026-11-02T12:00:00Z");
+    await withTenant(db, f.org, async tx => {
+      const finance = new FinanceRepository(tx, f.org);
+      const dims = { owner_id: f.owner.id, property_id: f.property.id }, payout = { ...dims, source: "OWNER_PAYOUT", payout_id: randomUUID() };
+      const booked = Money.of("125.01", "MAD"), paid = Money.of("45.02", "MAD");
+      const post = (postings: Parameters<typeof finance.createFinancialTransaction>[0]["postings"]) => finance.createFinancialTransaction({
+        reference: "OWNER-SOURCE:" + randomUUID(), occurredAt: at, createdBy: f.account.id, idempotencyKey: randomUUID(), postings
+      });
+      await post([
+        { ledgerAccountId: f.bank.id, side: "DEBIT", amount: booked, bucket: "OWNER_REVENUE", dimensions: { posting_kind: "accommodation_revenue_received" } },
+        { ledgerAccountId: f.claim.id, side: "CREDIT", amount: booked, bucket: "OWNER_REVENUE", dimensions: { ...dims, posting_kind: "owner_accommodation_revenue" } }
+      ]);
+      await post([
+        { ledgerAccountId: f.bank.id, side: "CREDIT", amount: paid, bucket: "PAYOUT_PAYMENT", dimensions: payout },
+        { ledgerAccountId: f.claim.id, side: "DEBIT", amount: paid, bucket: "PAYOUT", dimensions: payout }
+      ]);
+    });
+    await append(f, "MAD", "10.00", at.toISOString(), "DEBIT");
+    const before = await facts(f.org);
+    const value = await getOwnerMoneyMovements(f.ctx, f.property.id, { from: "2026-11-02", to: "2026-11-02", currency: "MAD" }, 1, { db, requestId: randomUUID() });
+    expect(value.payable.toJSON().amount).toBe("69.99");
+    expect(value.payments.toJSON().amount).toBe("45.02");
+    expect(value.collected.map(([rail, amount]) => [rail, amount.toJSON().amount])).toEqual([["BOOKING_RECEIPT", "125.01"]]);
+    expect(value.movements).toHaveLength(2);
+    expect(await facts(f.org)).toEqual(before);
+  });
+
   it("withholds rendered bytes and success history when the financial calendar changes during export", async () => {
     const f = await fixture(), actor = await exporter(f); await append(f, "MAD", "0.07", "2026-11-01T23:30:00Z"); const original = await facts(f.org);
     const input = { kind: "OWNER_STATEMENTS", format: "CSV", locale: "en", fromOn: "2026-11-02", toOn: "2026-11-02", currency: "MAD", ownerId: f.owner.id,

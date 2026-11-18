@@ -19,7 +19,7 @@ import { authorize, type DataClass } from "@/platform/authz/authorize";
 import { present, type PresentationContext } from "@/platform/authz/present";
 import { ownerPropertyCondition, type OwnerPropertyCondition } from "../domain/property-condition";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 
 export class OwnerPortalAuthorizationError extends Error {
   constructor(message = "Owner portal action is not authorized") {
@@ -189,6 +189,16 @@ export async function getOwnerStatement(
   periodInput: StatementPeriodSelection = {},
   deps: OwnerPortalServiceDeps = {}
 ): Promise<OwnerStatementSnapshot> {
+  return readOwnerStatement(ctx, propertyId, periodInput, deps, statement => statement);
+}
+
+export async function readOwnerStatement<T>(
+  ctx: OwnerPortalActorContext,
+  propertyId: string,
+  periodInput: StatementPeriodSelection,
+  deps: OwnerPortalServiceDeps,
+  read: (statement: OwnerStatementSnapshot, tx: TenantTransaction) => T | Promise<T>
+): Promise<T> {
   assertAllowed(ctx, "owner_statement", propertyId);
   const selection = statementPeriodSelectionSchema.parse(periodInput);
   const meta = await auditMeta(deps);
@@ -210,7 +220,8 @@ export async function getOwnerStatement(
         ownerId: access.ownerId,
         propertyId,
         periodEnd,
-        currency
+        currency,
+        includeLocations: false
       });
     const statement = buildOwnerStatement({
       organizationId: ctx.organizationId,
@@ -258,6 +269,6 @@ export async function getOwnerStatement(
       occurredAt: configured.now
     });
 
-    return presented;
+    return await read(presented, tx);
   }, { isolationLevel: "RepeatableRead" });
 }

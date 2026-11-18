@@ -1192,6 +1192,24 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "funds": {
+      "title": "Mouvements de fonds",
+      "transferred": "Virements effectués par ALVILLAS",
+      "direct": "Paiements directs des plateformes",
+      "directUnavailable": "Aucun justificatif de règlement au propriétaire n’est disponible.",
+      "custody": "Détention physique actuelle",
+      "custodyUnavailable": "Les références conservées ne permettent pas de rapprocher les fonds détenus pour ce propriétaire.",
+      "collected": "Encaissements attribués à ce propriétaire",
+      "attribution": "Les encaissements indiquent la part comptabilisée du propriétaire sur les fonds vérifiés.",
+      "history": "Historique des encaissements et règlements",
+      "empty": "Aucun mouvement vérifié pour ces dates.",
+      "rails": {
+        "BOOKING_RECEIPT": "Encaissements de réservation",
+        "APPLIED_GUEST_PAYMENT": "Paiements voyageurs affectés",
+        "SERVICE_CASH": "Paiements de services encaissés",
+        "ALVILLAS_PAYOUT": "Virement ALVILLAS"
+      }
+    },
     "activity": {
       "title": "Revenus et dépenses",
       "statement": "Ouvrir le relevé",

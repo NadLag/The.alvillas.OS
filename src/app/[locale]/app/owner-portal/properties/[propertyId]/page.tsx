@@ -96,6 +96,9 @@ export default async function OwnerStatementPage({
           <Link className="secondary-button" href={`/${appLocale}/app/owner-portal/properties/${propertyId}/activity?from=${statement.fromOn}&to=${statement.toOn}&currency=${statement.currency}`}>
             {t("activity.title")}
           </Link>
+          <Link className="secondary-button" href={`/${appLocale}/app/owner-portal/properties/${propertyId}/funds?from=${statement.fromOn}&to=${statement.toOn}&currency=${statement.currency}`}>
+            {t("funds.title")}
+          </Link>
           <LocaleSwitch
             compact
             currentLocale={appLocale}
@@ -199,8 +202,7 @@ export default async function OwnerStatementPage({
           )}
         </section>
 
-        <aside className="workspace-side" aria-label={t("heldByAlvillas")}>
-          <p className="panel-label">{t("heldByAlvillas")}</p>
+        <aside className="workspace-side" aria-label={t("remainingPayable")}>
           <dl className="statement-side-list">
             <div>
               <dt>{t("remainingPayable")}</dt>
@@ -208,14 +210,7 @@ export default async function OwnerStatementPage({
                 {formatCurrency(appLocale, statement.closingBalance)}
               </dd>
             </div>
-            {statement.heldBreakdown.map((item) => (
-              <div data-testid="owner-held-location" key={item.locationName}>
-                <dt>{item.locationName === "UNALLOCATED" ? t("unallocated") : item.locationName}</dt>
-                <dd data-amount={item.amount.toJSON().amount}>
-                  {formatCurrency(appLocale, item.amount)}
-                </dd>
-              </div>
-            ))}
+
           </dl>
           <div className="statement-buckets">
             <p className="panel-label">{t("bucketSummary")}</p>
