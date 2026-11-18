@@ -8199,6 +8199,29 @@
       "conflict": "L’incident ou le dossier original a changé. Actualisez avant une nouvelle vérification.",
       "uncertain": "L’enregistrement n’est pas confirmé. Actualisez pour vérifier la modification originale."
     },
+    "contractor": {
+      "title": "Prestataire et délais",
+      "open": "Ouvrir l’affectation du prestataire",
+      "close": "Fermer l’affectation du prestataire",
+      "saved": "L’affectation du prestataire a été enregistrée.",
+      "empty": "Aucun prestataire n’a encore été affecté.",
+      "cleared": "Affectation du prestataire terminée",
+      "response": "Réponse attendue avant",
+      "completion": "Achèvement attendu avant",
+      "milestones": {
+        "MET": "Respecté",
+        "BREACHED": "En retard",
+        "CANCELLED": "Clôturé",
+        "PENDING": "En attente"
+      },
+      "missingPolicy": "Configurez les délais de maintenance avant d’affecter un prestataire.",
+      "search": "Rechercher un prestataire par nom",
+      "choices": "Prestataires correspondants",
+      "clear": "Terminer l’affectation du prestataire",
+      "cancel": "Annuler la modification",
+      "confirmClear": "Confirmer la fin de l’affectation",
+      "assign": "Affecter le prestataire"
+    },
     "workOrders": {
       "title": "Ordres de travail",
       "description": "Associez les travaux à ce problème et gérez leur affectation, leur avancement et leurs preuves.",

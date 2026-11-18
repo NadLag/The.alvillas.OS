@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  maintenanceContractorAssignments MaintenanceContractorAssignment[]
   maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderOrganization")
   maintenanceIssueContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextOrganization")
   actualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryOrganization")
@@ -857,6 +858,7 @@ model Person {
 }
 
 model UserAccount {
+  maintenanceContractorAssignments MaintenanceContractorAssignment[]
   maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderActor")
   maintenanceIssueContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextActor")
   createdActualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryCreator")
@@ -2443,6 +2445,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  maintenanceContractorAssignments MaintenanceContractorAssignment[]
   supplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceConfig")
   serviceOrders ServiceOrder[] @relation("ServiceOrderCatalog")
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkPolicy")
@@ -3536,6 +3539,7 @@ model ApprovalStageRecipient {
 }
 
 model Supplier {
+  maintenanceContractorAssignments MaintenanceContractorAssignment[]
   priceListVersions SupplierPriceListVersion[] @relation("SupplierPriceSupplier")
   laundryBatches LaundryBatch[] @relation("LaundryBatchSupplier")
   documents Document[] @relation("DocumentSupplier")
@@ -6880,6 +6884,7 @@ model MaintenanceIssueContext {
 }
 
 model MaintenanceWorkOrder {
+  maintenanceContractorAssignments MaintenanceContractorAssignment[]
   id String @id @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   issueId String @map("issue_id") @db.Uuid
@@ -6900,4 +6905,30 @@ model MaintenanceWorkOrder {
   @@unique([organizationId,actorId,idempotencyKey],map:"maintenance_work_order_actor_nonce")
   @@index([organizationId,issueId,createdAt(sort:Desc)],map:"maintenance_work_order_issue_history")
   @@map("maintenance_work_order")
+}
+
+model MaintenanceContractorAssignment {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  taskId String @map("task_id") @db.Uuid
+  contractorId String? @map("contractor_id") @db.Uuid
+  ruleId String? @map("rule_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  revision Int
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  priority String? @db.VarChar(12)
+  responseDueAt DateTime? @map("response_due_at") @db.Timestamptz(6)
+  completionDueAt DateTime? @map("completion_due_at") @db.Timestamptz(6)
+  reason String @db.VarChar(1000)
+  requestHash String @map("request_hash") @db.Char(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  workOrder MaintenanceWorkOrder @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "maintenance_contractor_task_fk")
+  contractor Supplier? @relation(fields: [organizationId, contractorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "maintenance_contractor_supplier_fk")
+  rule ConfigRule? @relation(fields: [organizationId, ruleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "maintenance_contractor_policy_fk")
+  actor UserAccount @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "maintenance_contractor_actor_fk")
+
+  @@unique([organizationId, taskId, revision(sort: Desc)], map: "maintenance_contractor_task_revision")
+  @@unique([organizationId, actorId, idempotencyKey], map: "maintenance_contractor_actor_nonce")
+  @@map("maintenance_contractor_assignment")
 }

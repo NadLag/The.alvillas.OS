@@ -1,3 +1,4 @@
+import { maintenanceSlaPolicyKey, maintenanceSlaPolicySchema } from "./maintenance-sla-policy";
 import {taskTypeSchema} from "./task-type";
 import {laundryPricingPolicyKey,legacyLaundryPricingSchema,laundrySupplierPricePolicySchema,laundryPricingSupplierId} from "./laundry-pricing-policy";
 export {taskTypeSchema} from "./task-type";
@@ -382,6 +383,7 @@ export const configRuleSchemas = {
   [serviceOrderPolicyKey]:serviceOrderPolicySchema,
   "finance.tax": taxRuleSchema,
   "ops.operating_rules": operatingRulesSchema,
+  [maintenanceSlaPolicyKey]: maintenanceSlaPolicySchema,
   "ops.mid_stay_threshold": midStayThresholdSchema,
   [reservationTaskTemplatesConfigKey]: reservationTaskConfigSchema,
   "feature_flag": featureFlagConfigSchema

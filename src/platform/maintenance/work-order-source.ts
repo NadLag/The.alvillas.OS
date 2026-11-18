@@ -9,7 +9,7 @@ import {DocumentRepository} from "@/modules/documents/infrastructure/document-re
 import {workOrderTaskSchema,WorkOrderAccessError,WorkOrderConflictError} from "@/modules/maintenance/domain/work-order";
 
 /** Assignment, priority, status, scheduling and completion remain native tasks. */
-export async function nativeMaintenanceWorkOrderTask(actor:AccountActorContext,tx:TenantTransaction,taskId:string,action:"view"|"edit"="view"){
+export async function nativeMaintenanceWorkOrderTask(actor:AccountActorContext,tx:TenantTransaction,taskId:string,action:"view"|"edit"|"assign"="view"){
  const read=async()=>{
   const repository=new OperationRepository(tx,actor.organizationId),task=await repository.task(taskId),property=task?await repository.property(task.propertyId):null;
   if(!task||!property||task.type!=="MAINTENANCE")throw new WorkOrderAccessError();

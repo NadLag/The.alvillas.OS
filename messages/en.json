@@ -8199,6 +8199,29 @@
       "conflict": "The issue or original record changed. Refresh before reviewing again.",
       "uncertain": "The save has not been confirmed. Refresh to check the original change."
     },
+    "contractor": {
+      "title": "Contractor and SLA",
+      "open": "Open contractor assignment",
+      "close": "Close contractor assignment",
+      "saved": "Contractor assignment saved.",
+      "empty": "No contractor assignment yet.",
+      "cleared": "Contractor assignment ended",
+      "response": "Response by",
+      "completion": "Completion by",
+      "milestones": {
+        "MET": "Met",
+        "BREACHED": "Overdue",
+        "CANCELLED": "Closed",
+        "PENDING": "Pending"
+      },
+      "missingPolicy": "Configure maintenance SLA targets before assigning a contractor.",
+      "search": "Find a contractor by name",
+      "choices": "Matching contractors",
+      "clear": "End contractor assignment",
+      "cancel": "Cancel change",
+      "confirmClear": "Confirm end of assignment",
+      "assign": "Assign contractor"
+    },
     "workOrders": {
       "title": "Work orders",
       "description": "Link maintenance work to this issue and manage its assignment, progress and evidence.",

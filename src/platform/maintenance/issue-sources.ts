@@ -74,6 +74,7 @@ export async function inspectMaintenanceIssueSource(actor:AccountActorContext,tx
     checks=archive.checks;label=version.title;dataClass=archive.privacy.includes("financial")||archive.native.resource.dataClass==="financial"?"financial":archive.privacy.includes("sensitive")?"sensitive":archive.native.resource.dataClass??"operational";snapshot={id:version.id,sha256:version.admission.sha256,source:archive.fingerprint};navigation={kind:"DOCUMENT_VERSION",documentId:root.id,version:version.number};
    }
   }else{
+   if(reference.kind==="ASSET")throw new MaintenanceIssueAccessError();
    const native=await documents.documentSource({kind:reference.kind,id:reference.id});if(!native||native.archived)throw new MaintenanceIssueAccessError();sameProperty(native.resource.propertyId,context);
    checks=native.checks;label=native.label;dataClass=native.resource.dataClass??"operational";snapshot=native.fingerprint;
   }
