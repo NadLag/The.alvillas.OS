@@ -1,4 +1,6 @@
 import { Prisma } from "@prisma/client";
+import { OwnerStatementRepository } from "@/platform/ledger/owner-statement-repository";
+import { CompanyLedgerRepository } from "./company-ledger-repository";
 import { KpiMaterializationRepository } from "./kpi-materialization-repository";
 import { KpiReportRepository } from "./kpi-report-repository";
 import { InventoryReportRepository } from "./inventory-report-repository";
@@ -65,6 +67,15 @@ export class PerformanceReportRepository extends PropertyFinanceRepository {
 
   portfolioNights(fromOn: string, toOn: string, scope?: { propertyId: string | null; ownerId?: string; bookingSource?: string }) {
     return this.nights(fromOn, toOn, scope?.propertyId ?? undefined, scope);
+  }
+
+  async commandFinance(input: { currency: string; startsAt: Date; endsAt: Date }) {
+    const [postings, accounts, payable] = await Promise.all([
+      this.companyPostings(input),
+      new CompanyLedgerRepository(this.tx, this.organizationId).totals(input),
+      new OwnerStatementRepository(this.tx, this.organizationId).portfolioPayable(input.currency, input.endsAt)
+    ]);
+    return { postings, accounts, payable };
   }
 
   companyPostings(input: { currency: string; startsAt: Date; endsAt: Date }) {

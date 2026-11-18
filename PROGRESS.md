@@ -313,7 +313,7 @@ F-RPT-08 | IN-PROGRESS | Tenant-scoped materialized calendar with revision inval
 F-RPT-09 | IN-PROGRESS | Configured weekly/monthly report delivery uses immutable runs, native notifications and current recipient access. Integration and hosted acceptance pending.
 F-CMD-01 | IN-PROGRESS | Local-day arrivals, departures, turnovers and incomplete jobs with current role grants and EN/FR/AR navigation. Integration and hosted acceptance pending.
 F-CMD-02 | IN-PROGRESS | Authorized exception queues with native review routes for approvals, variances, stock, maintenance, conflicts and failed syncs. Hosted acceptance pending.
-F-CMD-03 | TODO |
+F-CMD-03 | IN-PROGRESS | Currency-specific ledger view separates revenue and expenses from bank and cash balances, owner payable and the ALVILLAS ledger position. Hosted acceptance pending.
 F-CMD-04 | TODO |
 F-CMD-05 | TODO |
 F-CMD-06 | TODO |

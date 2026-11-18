@@ -1,4 +1,19 @@
 {
+  "CommandFinance": {
+    "title": "Financial overview",
+    "back": "Back to dashboard",
+    "summary": "Financial position",
+    "revenue": "ALVILLAS revenue",
+    "expenses": "Operating expenses",
+    "cash": "Recorded bank and cash balances",
+    "ownerPayable": "Net owner payable",
+    "companyBalance": "ALVILLAS ledger balance",
+    "basis": "Revenue and expenses cover the selected dates. Balances are as of the end date. Owner payable is a ledger obligation. Cash ownership requires separate custody records.",
+    "companyLedger": "Company ledger",
+    "ownerLedgers": "Owner ledgers",
+    "unavailable": "The financial position is unavailable for these dates or currency.",
+    "reset": "Reset filters"
+  },
   "CommandExceptions": {
     "title": "Exceptions",
     "back": "Back to dashboard",

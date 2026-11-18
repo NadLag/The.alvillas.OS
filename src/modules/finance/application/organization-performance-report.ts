@@ -21,7 +21,7 @@ export type PerformanceReportDeps = { db?: TenantTransactionRunner; requestId?: 
 export type OrganizationReportPeriod = {
   fromOn: string; toOn: string; today: string; timezone: string; currency: string; currencies: string[];
   propertyId: string | null; propertyName: string | null;
-  properties: { id: string; name: string }[]; portfolioAvailable: boolean;
+  propertyOptions: { id: string; name: string }[]; portfolioAvailable: boolean;
   sourceFingerprint: string; generatedAt: string; formats: AccountantExportFormat[];
 };
 export type PerformanceExport<T> = {
@@ -30,7 +30,7 @@ export type PerformanceExport<T> = {
 };
 export type ReportQuery = { allowMaterialized: boolean; propertyId: string | null; currency: string; timezone: string; fromOn: string; toOn: string; startsAt: Date; endsAt: Date };
 export type OrganizationReportSource<S, T extends object> = {
-  auditResource: "company_report" | "team_report" | "inventory_report" | "kpi_report";
+  auditResource: "company_report" | "team_report" | "inventory_report" | "kpi_report" | "command_finance";
   allowProperty?: boolean;
   dimensions?: Record<string, string>;
   resolveDates?: (today: string) => { fromOn: string; toOn: string };
@@ -106,7 +106,7 @@ export async function readOrganizationPerformance<S, T extends object>(actor: Fi
       authorizeUnconditionalSource(context, "view", { ...reportResource, ...propertyResource(row) }, now)));
     const report = { ...descriptor.summarize(currency, source), propertyId, propertyName: property?.name ?? null,
       portfolioAvailable: [actor.authContext, currentAuthority].every(context => authorizeOrganizationSource(context, "view", resource("report", "financial"), now)),
-      properties: visibleProperties.map(({ id, name }) => ({ id, name })), fromOn, toOn, today, timezone, currency,
+      propertyOptions: visibleProperties.map(({ id, name }) => ({ id, name })), fromOn, toOn, today, timezone, currency,
       currencies: settings.currencies.map(row => row.code), sourceFingerprint, generatedAt: now.toISOString(),
       formats: authorizeUnconditionalSource(actor.authContext, "export", reportResource, now, !property) &&
         descriptor.financialSources.every(type => authorizeOrganizationSource(actor.authContext, "export", resource(type, "financial"), now))

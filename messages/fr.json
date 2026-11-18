@@ -1,4 +1,19 @@
 {
+  "CommandFinance": {
+    "title": "Vue financière",
+    "back": "Retour au tableau de bord",
+    "summary": "Situation financière",
+    "revenue": "Revenus d’ALVILLAS",
+    "expenses": "Charges d’exploitation",
+    "cash": "Soldes bancaires et de caisse enregistrés",
+    "ownerPayable": "Solde net dû aux propriétaires",
+    "companyBalance": "Solde du grand livre ALVILLAS",
+    "basis": "Les revenus et charges couvrent les dates sélectionnées. Les soldes sont arrêtés à la date de fin. Le montant dû aux propriétaires est une dette comptable. La détention des fonds requiert des justificatifs distincts.",
+    "companyLedger": "Grand livre de la société",
+    "ownerLedgers": "Grands livres propriétaires",
+    "unavailable": "La situation financière est indisponible pour ces dates ou cette devise.",
+    "reset": "Réinitialiser les filtres"
+  },
   "CommandExceptions": {
     "title": "Exceptions",
     "back": "Retour au tableau de bord",

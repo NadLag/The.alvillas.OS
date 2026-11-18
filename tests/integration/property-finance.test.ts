@@ -1,3 +1,4 @@
+import { getCommandFinance } from "@/modules/finance/application/command-center-finance";
 import { commandExceptionsPage } from "@/platform/command-center/exceptions";
 import { getCommandCenterToday } from "@/modules/reservations/application/command-center-today";
 import { tickScheduledReports } from "@/modules/finance/application/scheduled-report-job";
@@ -268,6 +269,12 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(report.profit.toJSON().amount).toBe("739.91");
    expect(report.cashPosition.toJSON().amount).toBe("1517.68");
    expect(report.outsidePortfolio.toJSON().amount).toBe("-9.99");
+   const dashboard = await getCommandFinance(ctx, filter, { db });
+   expect([dashboard.revenue, dashboard.expenses, dashboard.cash, dashboard.ownerPayable, dashboard.companyBalance]
+     .map(value => value.toJSON().amount)).toEqual(["1000.01", "260.10", "1517.68", "1077.77", "739.91"]);
+   const euroDashboard = await getCommandFinance(ctx, { ...filter, currency: "EUR" }, { db });
+   expect(euroDashboard.ownerPayable.toJSON()).toEqual({ amount: "0.00", currency: "EUR" });
+   await expect(getCommandFinance(f.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
    expect(report.margin).toBe("73.99");
    expect(report.properties[0]).toMatchObject({ propertyId: f.property.id, occupied: "1", available: "2", occupancy: "50.00" });
    const eur = await getCompanyPerformanceReport(ctx, { ...filter, currency: "EUR" }, { db });

@@ -8,7 +8,7 @@ import type { PerformanceMetric } from "../domain/performance-report";
 
 type Period = { fromOn: string; toOn: string; today: string; currency: string; currencies: string[]; formats: AccountantExportFormat[] };
 
-export async function PerformanceReportFilters({ report, locale, download, filters, fields }: { report: Period; locale: AppLocale; download: string;
+export async function PerformanceReportFilters({ report, locale, download, filters, fields }: { report: Period; locale: AppLocale; download?: string;
   filters?: Record<string, string>; fields?: ReactNode }) {
   const t = await getTranslations("PerformanceReports");
   const query = new URLSearchParams({ ...filters, fromOn: report.fromOn, toOn: report.toOn, currency: report.currency });
@@ -24,7 +24,7 @@ export async function PerformanceReportFilters({ report, locale, download, filte
       </select></label>
       <button className="primary-button" type="submit">{t("apply")}</button>
     </form>
-    {formats.length ? <nav className="form-actions" aria-label={t("exports")}>
+    {download && formats.length ? <nav className="form-actions" aria-label={t("exports")}>
       {formats.map(format => <a key={format} download className="secondary-button" href={download + "/" + format + "?" + query.toString()}>
         {t("download." + format)}
       </a>)}
@@ -33,14 +33,14 @@ export async function PerformanceReportFilters({ report, locale, download, filte
 }
 
 export async function PerformancePropertyFilter({ report }: { report: Pick<OrganizationReportPeriod,
-  "propertyId" | "propertyName" | "properties" | "portfolioAvailable"> }) {
+  "propertyId" | "propertyName" | "propertyOptions" | "portfolioAvailable"> }) {
   const t = await getTranslations("PerformanceReports");
   return <label className="field"><span>{t("propertyFilter")}</span>
     <select name="propertyId" defaultValue={report.propertyId ?? ""}>
       {report.portfolioAvailable ? <option value="">{t("allProperties")}</option> : null}
-      {report.propertyId && report.propertyName && !report.properties.some(property => property.id === report.propertyId) ?
+      {report.propertyId && report.propertyName && !report.propertyOptions.some(property => property.id === report.propertyId) ?
         <option value={report.propertyId}>{report.propertyName}</option> : null}
-      {report.properties.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
+      {report.propertyOptions.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
     </select>
   </label>;
 }

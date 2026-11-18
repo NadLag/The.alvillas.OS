@@ -1,3 +1,4 @@
+import { canViewCommandFinance } from "@/modules/finance/application/command-center-finance";
 import { CommandCenterExceptionsLink } from "@/platform/command-center/exceptions-link";
 import { CommandCenterTodaySummary } from "@/modules/reservations/ui/command-center-today";
 import { ReservationCommandExceptions } from "@/modules/reservations/ui/command-exceptions";
@@ -183,6 +184,8 @@ export default async function AppPage({
             <CommandCenterExceptionsLink context={reservationContext.authContext} locale={appLocale} />
             <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} />
             <CommandCenterTodaySummary actor={reservationContext} locale={appLocale} />
+            {canViewCommandFinance(reservationContext.authContext) ?
+              <Link className="secondary-button" href={`/${appLocale}/app/command-center/finance`}>{(await getTranslations("CommandFinance"))("title")}</Link> : null}
           </> : null}
         </section>
         <aside className="workspace-side" aria-label={t("sessionLabel")}>
