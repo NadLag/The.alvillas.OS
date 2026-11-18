@@ -25,8 +25,7 @@ export class OwnerApprovalRepository {
         AND ((a.state='PENDING' AND s.state='PENDING' AND NOT EXISTS (SELECT 1 FROM approval_stage prior
           WHERE prior.organization_id=s.organization_id AND prior.approval_id=s.approval_id AND prior.position<s.position AND prior.state='PENDING')) ${retry})
         AND EXISTS (SELECT 1 FROM property_owner link JOIN owner o ON o.organization_id=link.organization_id AND o.id=link.owner_id AND o.archived_at IS NULL
-          JOIN owner_portal_access access ON access.organization_id=link.organization_id AND access.owner_id=link.owner_id AND access.archived_at IS NULL
-          JOIN user_account account ON account.organization_id=access.organization_id AND account.id=access.user_account_id AND account.status='ACTIVE'
+          JOIN active_owner_portal_access access ON access.organization_id=link.organization_id AND access.owner_id=link.owner_id AND access.can_view_finances
           WHERE link.organization_id=s.organization_id AND link.property_id=p.id AND link.owner_id=s.owner_id AND link.archived_at IS NULL
             AND access.user_account_id=${accountId}::uuid)
       ${selected} ${cursor} ORDER BY s.id DESC LIMIT 26`);

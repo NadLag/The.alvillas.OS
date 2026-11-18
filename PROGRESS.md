@@ -300,7 +300,7 @@ F-OWN-08 | IN-PROGRESS | Owner portfolio and statements already show authorized 
 F-OWN-09 | IN-PROGRESS | The owner portal opens authorized owner and property document sources in the native private archive. Current ownership and independent document permissions both gate visibility. Focused Chromium covers the documents surface and denies unrelated property access. Mandatory CI and hosted acceptance remain open.
 F-OWN-10 | IN-PROGRESS | Canonical monthly and annual owner reporting implemented and verified on PostgreSQL; mandatory CI and staging acceptance pending.
 F-OWN-11 | IN-PROGRESS | Owner portal reuses account language, inbox and notification preferences; mandatory CI and staging acceptance pending.
-F-OWN-12 | TODO |
+F-OWN-12 | IN-PROGRESS | Scoped representative activation and revocation implemented and verified on PostgreSQL; delegates receive reservations and condition access. Mandatory CI and staging acceptance pending.
 F-OWN-13 | TODO |
 F-RPT-01 | TODO |
 F-RPT-02 | TODO |

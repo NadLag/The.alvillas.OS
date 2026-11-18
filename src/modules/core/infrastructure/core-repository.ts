@@ -434,6 +434,25 @@ export class CoreRepository {
     return owners.map(ownerToSummary);
   }
 
+  async revokeOwnerRepresentative(ownerId: string, representativeId: string) {
+    const owner = await this.tx.owner.findFirst({
+      where: { organizationId: this.organizationId, id: ownerId, archivedAt: null },
+      select: { id: true }
+    });
+    if (!owner) return null;
+    const representative = await this.tx.ownerRepresentative.findFirst({
+      where: { organizationId: this.organizationId, ownerId, id: representativeId, archivedAt: null },
+      select: { status: true }
+    });
+    if (!representative) return null;
+    if (representative.status === "REVOKED") return { status: representative.status, changed: false };
+    const { count } = await this.tx.ownerRepresentative.updateMany({
+      where: { organizationId: this.organizationId, ownerId, id: representativeId, archivedAt: null, status: representative.status },
+      data: { status: "REVOKED" }
+    });
+    return { status: representative.status, changed: count > 0 };
+  }
+
   async findOwner(ownerId: string): Promise<OwnerSummary | null> {
     const owner = await this.tx.owner.findFirst({
       where: {

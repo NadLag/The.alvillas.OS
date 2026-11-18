@@ -42,6 +42,7 @@ export type OwnerPortalPropertySummary = {
   propertyName: string;
   city: string;
   shareBps: number;
+  canViewFinances: boolean;
   condition?: OwnerPropertyCondition;
 };
 
@@ -205,7 +206,7 @@ export async function readOwnerStatement<T>(
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new OwnerPortalRepository(tx, ctx.organizationId);
-    const access = await repository.findOwnerPropertyAccess(ctx.actorId, propertyId);
+    const access = await repository.findOwnerPropertyAccess(ctx.actorId, propertyId, true);
 
     if (!access) {
       throw new OwnerPortalNotFoundError();

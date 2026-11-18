@@ -84,18 +84,20 @@ export default async function OwnerPortalPage({
               <Link
                 className="resource-row"
                 data-testid="owner-property-row"
-                href={`/${appLocale}/app/owner-portal/properties/${property.propertyId}`}
+                href={`/${appLocale}/app/owner-portal/properties/${property.propertyId}${property.canViewFinances ? "" : "/reservations"}`}
               >
                 <span>
                   <strong>{property.propertyName}</strong>
                   <small>{t("propertyMeta", { city: property.city, owner: property.ownerName })}</small>
                   {property.condition ? <small data-testid="owner-property-condition">{t("condition.states." + property.condition)}</small> : null}
                 </span>
-                <span>{t("openStatement")}</span>
+                <span>{t(property.canViewFinances ? "openStatement" : "reservationList.title")}</span>
               </Link>
+              {property.canViewFinances ? (
               <Link className="secondary-button" href={`/${appLocale}/app/owner-portal/properties/${property.propertyId}/reservations`}>
                 {t("reservationList.title")}
               </Link>
+              ) : null}
               </li>
             ))}
           </ul>

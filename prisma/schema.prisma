@@ -1227,6 +1227,8 @@ model RoleAssignment {
   userAccount       UserAccount?       @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   role              Role               @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  ownerPortalAccesses OwnerPortalAccess[]
+
   @@unique([organizationId, id], map: "role_assignment_org_id_unique")
   @@index([organizationId, personId, archivedAt], map: "role_assignment_org_person_idx")
   @@index([organizationId, userAccountId, archivedAt], map: "role_assignment_org_account_idx")
@@ -1295,6 +1297,9 @@ model OwnerRepresentative {
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   owner           Owner        @relation(fields: [ownerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  portalAccesses  OwnerPortalAccess[]
+
+  @@unique([organizationId, ownerId, id], map: "owner_representative_org_owner_id_unique")
   @@unique([organizationId, ownerId, email], map: "owner_representative_org_owner_email_unique")
   @@index([organizationId, ownerId, archivedAt], map: "owner_representative_org_owner_archived_idx")
   @@index([organizationId, status, validTo], map: "owner_representative_org_status_valid_idx")
@@ -1332,6 +1337,8 @@ model OwnerPortalAccess {
   organizationId String       @map("organization_id") @db.Uuid
   ownerId        String       @map("owner_id") @db.Uuid
   userAccountId  String       @map("user_account_id") @db.Uuid
+  representativeId String? @map("representative_id") @db.Uuid
+  roleAssignmentId String? @map("role_assignment_id") @db.Uuid
   archivedAt     DateTime?    @map("archived_at") @db.Timestamptz(6)
   createdBy      String?      @map("created_by") @db.Uuid
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -1339,6 +1346,9 @@ model OwnerPortalAccess {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   owner          Owner        @relation(fields: [ownerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   userAccount    UserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  representative    OwnerRepresentative? @relation(fields: [organizationId, ownerId, representativeId], references: [organizationId, ownerId, id], onDelete: Restrict, onUpdate: NoAction, map: "owner_portal_access_representative_fk")
+  roleAssignment    RoleAssignment? @relation(fields: [organizationId, roleAssignmentId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "owner_portal_access_role_assignment_fk")
 
   @@unique([organizationId, ownerId, userAccountId], map: "owner_portal_access_org_owner_user_unique")
   @@index([organizationId, userAccountId, archivedAt], map: "owner_portal_access_org_user_idx")

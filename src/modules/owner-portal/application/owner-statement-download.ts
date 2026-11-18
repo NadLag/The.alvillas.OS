@@ -40,13 +40,13 @@ export async function downloadOwnerStatement(
   const filename = `statement-${statement.fromOn}-${statement.toOn}-${statement.currency}.${format}`;
   await withTenant(deps.db ?? prisma, actor.organizationId, async tx => {
     const repository = new OwnerPortalRepository(tx, actor.organizationId);
-    const access = await repository.findOwnerPropertyAccess(actor.actorId, propertyId);
+    const access = await repository.findOwnerPropertyAccess(actor.actorId, propertyId, true);
     if (access?.ownerId !== statement.ownerId) throw new OwnerPortalNotFoundError();
     await writeAuditEvent(tx, { organizationId: actor.organizationId, actorId: actor.actorId,
       action: "owner_statement.downloaded", resourceType: "owner_statement", resourceId: propertyId, propertyScopeId: propertyId,
       after: { ownerId: statement.ownerId, filename, locale, format, bytes: bytes.byteLength, sha256: createHash("sha256").update(bytes).digest("hex") },
       requestId: deps.requestId ?? randomUUID(), occurredAt: new Date() });
-    if ((await repository.findOwnerPropertyAccess(actor.actorId, propertyId))?.ownerId !== statement.ownerId) throw new OwnerPortalNotFoundError();
+    if ((await repository.findOwnerPropertyAccess(actor.actorId, propertyId, true))?.ownerId !== statement.ownerId) throw new OwnerPortalNotFoundError();
   });
   return { bytes, filename };
 }

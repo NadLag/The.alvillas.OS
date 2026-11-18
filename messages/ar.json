@@ -546,6 +546,7 @@
       "generic": "The record could not be saved. Try again."
     },
     "owners": {
+      "revokeRepresentative": "إلغاء وصول الممثل",
       "eyebrow": "Core domain",
       "title": "Owners",
       "subtitle": "Create and review owner contacts inside the current organization scope.",

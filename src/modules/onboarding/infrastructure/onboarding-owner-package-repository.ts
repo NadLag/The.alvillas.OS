@@ -20,5 +20,5 @@ export class OnboardingOwnerPackageRepository{
   JOIN owner o ON o.organization_id=a.organization_id AND o.id=a.owner_id AND o.archived_at IS NULL
   JOIN property_owner po ON po.organization_id=a.organization_id AND po.owner_id=a.owner_id AND po.property_id=${propertyId}::uuid AND po.archived_at IS NULL
   JOIN property target ON target.organization_id=po.organization_id AND target.id=po.property_id AND target.archived_at IS NULL
-  WHERE a.organization_id=${this.organizationId}::uuid AND a.owner_id=${ownerId}::uuid AND a.archived_at IS NULL ORDER BY a.id,po.id`);}
+  WHERE a.organization_id=${this.organizationId}::uuid AND a.owner_id=${ownerId}::uuid AND a.archived_at IS NULL AND a.representative_id IS NULL ORDER BY a.id,po.id`);}
 }

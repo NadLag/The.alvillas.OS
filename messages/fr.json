@@ -546,6 +546,7 @@
       "generic": "Le dossier n'a pas pu etre enregistre. Reessayez."
     },
     "owners": {
+      "revokeRepresentative": "Révoquer l’accès du représentant",
       "eyebrow": "Domaine coeur",
       "title": "Proprietaires",
       "subtitle": "Creez et consultez les contacts proprietaires dans la portee de l'organisation.",

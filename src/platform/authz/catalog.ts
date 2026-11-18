@@ -356,7 +356,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     key: "owner_representative",
     name: "Owner Representative",
     description: "Delegated owner access as recorded and revocable.",
-    permissions: ownerPortalPermissions,
+    permissions: ownerPortalPermissions.filter(permission => permission !== permissionKey("owner_statement", "view")),
     mfaRequired: false
   }
 ];

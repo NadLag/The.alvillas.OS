@@ -10,6 +10,7 @@ type OwnerPropertyRow = {
   propertyName: string;
   city: string;
   shareBps: number;
+  canViewFinances: boolean;
 };
 
 
@@ -17,42 +18,18 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values)];
 }
 
-function ownerPropertyRows(
-  rows: Array<{
-    ownerId: string;
-    ownerName: string;
-    propertyOwners: Array<{
-      shareBps: number;
-      property: {
-        id: string;
-        name: string;
-        city: string;
-      };
-    }>;
-  }>
-): OwnerPropertyRow[] {
-  return rows.flatMap((access) =>
-    access.propertyOwners.map((link) => ({
-      ownerId: access.ownerId,
-      ownerName: access.ownerName,
-      propertyId: link.property.id,
-      propertyName: link.property.name,
-      city: link.property.city,
-      shareBps: link.shareBps
-    }))
-  );
-}
-
 export class OwnerPortalRepository extends LedgerCalendarRepository {
   async listAccessForUser(userAccountId: string): Promise<{
     ownerIds: string[];
     propertyIds: string[];
+    financialPropertyIds: string[];
   }> {
     const rows = await this.ownerPropertyAccessRows(userAccountId);
 
     return {
       ownerIds: unique(rows.map((row) => row.ownerId)),
-      propertyIds: unique(rows.map((row) => row.propertyId))
+      propertyIds: unique(rows.map((row) => row.propertyId)),
+      financialPropertyIds: unique(rows.filter((row) => row.canViewFinances).map((row) => row.propertyId))
     };
   }
 
@@ -62,9 +39,10 @@ export class OwnerPortalRepository extends LedgerCalendarRepository {
 
   async findOwnerPropertyAccess(
     userAccountId: string,
-    propertyId: string
+    propertyId: string,
+    financialOnly = false
   ): Promise<OwnerPropertyRow | null> {
-    const rows = await this.ownerPropertyAccessRows(userAccountId, propertyId);
+    const rows = await this.ownerPropertyAccessRows(userAccountId, propertyId, financialOnly);
     return rows.find((row) => row.propertyId === propertyId) ?? null;
   }
 
@@ -77,8 +55,7 @@ export class OwnerPortalRepository extends LedgerCalendarRepository {
         FROM property p
         JOIN property_owner po ON po.organization_id = p.organization_id AND po.property_id = p.id AND po.archived_at IS NULL
         JOIN owner o ON o.organization_id = p.organization_id AND o.id = po.owner_id AND o.archived_at IS NULL
-        JOIN owner_portal_access a ON a.organization_id = p.organization_id AND a.owner_id = o.id AND a.archived_at IS NULL
-        JOIN user_account u ON u.organization_id = a.organization_id AND u.id = a.user_account_id AND u.status = 'ACTIVE'
+        JOIN active_owner_portal_access a ON a.organization_id = p.organization_id AND a.owner_id = o.id
         WHERE p.organization_id = ${this.organizationId}::uuid AND p.archived_at IS NULL
           AND a.user_account_id = ${userAccountId}::uuid AND p.id = ANY(${[...propertyIds]}::uuid[])
       ), issue_signals AS (
@@ -121,45 +98,19 @@ export class OwnerPortalRepository extends LedgerCalendarRepository {
     });
   }
 
-  private async ownerPropertyAccessRows(userAccountId: string, propertyId?: string): Promise<OwnerPropertyRow[]> {
-    const rows = await this.tx.ownerPortalAccess.findMany({
-      where: {
-        organizationId: this.organizationId,
-        userAccountId,
-        userAccount: { status: "ACTIVE", organizationId: this.organizationId },
-        archivedAt: null,
-        owner: {
-          archivedAt: null
-        }
-      },
-      include: {
-        owner: {
-          include: {
-            propertyOwners: {
-              where: {
-                archivedAt: null,
-                propertyId,
-                property: {
-                  archivedAt: null
-                }
-              },
-              include: {
-                property: true
-              },
-              orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }]
-            }
-          }
-        }
-      },
-      orderBy: [{ createdAt: "asc" }]
-    });
-
-    return ownerPropertyRows(
-      rows.map((row) => ({
-        ownerId: row.owner.id,
-        ownerName: row.owner.displayName,
-        propertyOwners: row.owner.propertyOwners
-      }))
-    ).sort((a, b) => a.propertyName.localeCompare(b.propertyName));
+  private ownerPropertyAccessRows(userAccountId: string, propertyId?: string, financialOnly = false) {
+    const target = propertyId ? Prisma.sql`AND p.id = ${propertyId}::uuid` : Prisma.empty;
+    const capability = financialOnly ? Prisma.sql`AND access.can_view_finances` : Prisma.empty;
+    return this.tx.$queryRaw<OwnerPropertyRow[]>(Prisma.sql`
+      SELECT o.id AS "ownerId", o.display_name AS "ownerName", p.id AS "propertyId", p.name AS "propertyName",
+        p.city, link.share_bps AS "shareBps", access.can_view_finances AS "canViewFinances"
+      FROM active_owner_portal_access access
+      JOIN owner o ON o.organization_id = access.organization_id AND o.id = access.owner_id
+      JOIN property_owner link ON link.organization_id = access.organization_id AND link.owner_id = access.owner_id
+        AND link.archived_at IS NULL
+      JOIN property p ON p.organization_id = link.organization_id AND p.id = link.property_id AND p.archived_at IS NULL
+      WHERE access.organization_id = ${this.organizationId}::uuid AND access.user_account_id = ${userAccountId}::uuid
+        ${target} ${capability}
+      ORDER BY p.name, access.created_at, o.id, p.id`);
   }
 }

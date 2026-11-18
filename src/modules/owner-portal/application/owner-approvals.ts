@@ -22,7 +22,7 @@ export async function loadOwnerApprovals(owner: OwnerPortalActorContext, actor: 
   assertOwnerScope(owner, actor, propertyId);
   return withTenant(db, owner.organizationId, async tx => {
     const [property, rows] = await Promise.all([
-      new OwnerPortalRepository(tx, owner.organizationId).findOwnerPropertyAccess(owner.actorId, propertyId),
+      new OwnerPortalRepository(tx, owner.organizationId).findOwnerPropertyAccess(owner.actorId, propertyId, true),
       new OwnerApprovalRepository(tx, owner.organizationId).pending(owner.actorId, propertyId, selection, after)
     ]);
     if (!property) throw new OwnerPortalNotFoundError();
@@ -54,6 +54,6 @@ export async function decideOwnerApproval(owner: OwnerPortalActorContext, actor:
     if (!stage) throw new ApprovalAccessError();
     await decideApproval(actor, decision, { db: { $transaction: work => work(tx) } });
     const ownership = await new OwnerPortalRepository(tx, owner.organizationId).listOwnerProperties(owner.actorId);
-    if (!ownership.some(row => row.propertyId === propertyId && row.ownerId === stage.ownerId)) throw new ApprovalAccessError();
+    if (!ownership.some(row => row.canViewFinances && row.propertyId === propertyId && row.ownerId === stage.ownerId)) throw new ApprovalAccessError();
   });
 }
