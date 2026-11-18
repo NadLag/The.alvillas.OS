@@ -40,9 +40,9 @@ export default async function InventoryReportsPage({ params, searchParams }: {
         fields={<label className="field"><span>{t("propertyFilter")}</span>
           <select name="propertyId" defaultValue={report.propertyId ?? ""}>
             {report.portfolioAvailable ? <option value="">{t("allProperties")}</option> : null}
-            {report.propertyId && report.propertyName && !report.properties.some(property => property.id === report.propertyId) ?
+            {report.propertyId && report.propertyName && !report.propertyOptions.some(property => property.id === report.propertyId) ?
               <option value={report.propertyId}>{report.propertyName}</option> : null}
-            {report.properties.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
+            {report.propertyOptions.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
           </select>
         </label>} />
       <PerformanceMetrics title={t("inventoryCosts")} metrics={report.monetaryMetrics} locale={locale} />
