@@ -28,6 +28,6 @@ export async function maintenanceIssueSourceChoices(context:AccountActorContext,
   }
   await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"maintenance.issue.sources.read",resourceType:"maintenance_issue_context",resourceId:input.issueId,propertyScopeId:issue.row.propertyId,after:{sourceKind:input.kind,returned:items.length},requestId:deps.requestId??randomUUID(),occurredAt:issue.now});
   for(const check of checks)await check();await issue.recheck();if(stamp!==await maintenanceAuthorityStamp(actor,tx)||jsonbFingerprint(rows)!==jsonbFingerprint(await repository.candidates(candidateInput)))throw new MaintenanceIssueConflictError();
-  return{authorizationStamp:stamp,ready:input.kind!=="ASSET",items,next:rows.length>20?maintenanceSourceCursor(actor,filter,rows[19].id):null};
+  return{authorizationStamp:stamp,ready:true,items,next:rows.length>20?maintenanceSourceCursor(actor,filter,rows[19].id):null};
  });
 }

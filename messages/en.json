@@ -8131,6 +8131,16 @@
     "priceChange": "Review price change"
   },
   "MaintenanceIssues": {
+    "openAsset": "Open asset",
+    "assetLink": {
+      "title": "Work order asset",
+      "manage": "Manage linked asset",
+      "search": "Search by asset name or tag",
+      "link": "Link asset",
+      "remove": "Remove asset link",
+      "saved": "Asset link saved.",
+      "empty": "No asset linked."
+    },
     "eyebrow": "Maintenance",
     "title": "Maintenance issue",
     "subtitle": "Review related records and retain a clear history.",
@@ -8284,6 +8294,56 @@
       "manage": "Manage assignment, progress and evidence",
       "register": "Link work order",
       "refresh": "Refresh work orders"
+    }
+  },
+  "Assets": {
+    "title": "Asset register",
+    "create": "Register asset",
+    "edit": "Edit asset",
+    "property": "Property",
+    "chooseProperty": "Select a property",
+    "tag": "Asset tag",
+    "name": "Asset name",
+    "category": "Category",
+    "description": "Description",
+    "condition": "Current condition",
+    "chooseCondition": "Select the condition",
+    "purchaseOn": "Purchase date",
+    "cost": "Purchase cost",
+    "currency": "Currency code",
+    "warrantyProvider": "Warranty provider",
+    "warrantyReference": "Warranty reference",
+    "warrantyStartsOn": "Warranty start",
+    "warrantyEndsOn": "Warranty expiry",
+    "life": "Expected useful life in months",
+    "reason": "Reason for this change",
+    "save": "Save asset",
+    "saving": "Saving asset…",
+    "find": "Search",
+    "search": "Search by asset tag, name or category",
+    "searchProperty": "Find a property",
+    "next": "Next assets",
+    "nextProperties": "Next properties",
+    "back": "Back to assets",
+    "empty": "No matching assets.",
+    "noProperties": "No matching properties available for asset registration.",
+    "notRecorded": "Not recorded",
+    "history": "Asset history",
+    "revision": "Revision {number}",
+    "older": "Older revisions",
+    "errors": {
+      "invalid": "Review the dates, cost and required fields.",
+      "forbidden": "Your access to this asset is unavailable.",
+      "conflict": "The record changed or the tag is already in use. Reload the register and try again.",
+      "offline": "Connect to the internet to save this asset.",
+      "unavailable": "The asset could not be saved. Try again."
+    },
+    "conditions": {
+      "EXCELLENT": "Excellent",
+      "GOOD": "Good",
+      "FAIR": "Fair",
+      "POOR": "Poor",
+      "UNSERVICEABLE": "Unserviceable"
     }
   }
 }

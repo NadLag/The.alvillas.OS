@@ -12,9 +12,13 @@ import {
   changeMaintenanceContractor, readMaintenanceContractor, searchMaintenanceContractors
 } from "@/modules/maintenance/application/contractor-assignment";
 
+import { changeWorkOrderAsset, readWorkOrderAssets } from "@/modules/maintenance/application/work-order-assets";
+
 export const runtime = "nodejs";
 const operations = {
   read: readIssueWorkOrders,
+  "assets-read": readWorkOrderAssets,
+  "assets-publish": changeWorkOrderAsset,
   tasks: workOrderTaskChoices,
   review: previewWorkOrderRegistration,
   publish: publishWorkOrderRegistration,
@@ -33,7 +37,7 @@ const operations = {
 export async function POST(request: NextRequest, { params }: { params: Promise<{ operation: string }> }) {
   const operation = z.enum([
     "read", "tasks", "review", "publish", "recover", "status", "finance-read", "finance-search", "finance-review",
-    "finance-publish", "finance-status", "contractor-read", "contractor-search", "contractor-publish"
+    "finance-publish", "finance-status", "assets-read", "assets-publish", "contractor-read", "contractor-search", "contractor-publish"
   ]).safeParse((await params).operation);
   const feature = operation.success && operation.data.startsWith("contractor-") ? "F-MNT-04" : "F-MNT-02";
   return maintenanceIssueHttp(request, (actor, input, requestId) => {

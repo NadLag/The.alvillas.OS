@@ -8131,6 +8131,16 @@
     "priceChange": "Examiner le changement de prix"
   },
   "MaintenanceIssues": {
+    "openAsset": "Ouvrir l’équipement",
+    "assetLink": {
+      "title": "Équipement de l’ordre de travail",
+      "manage": "Gérer l’équipement lié",
+      "search": "Rechercher par nom ou identifiant",
+      "link": "Lier l’équipement",
+      "remove": "Supprimer le lien",
+      "saved": "Lien enregistré.",
+      "empty": "Aucun équipement lié."
+    },
     "eyebrow": "Maintenance",
     "title": "Incident de maintenance",
     "subtitle": "Consultez les dossiers associés et conservez un historique clair.",
@@ -8284,6 +8294,56 @@
       "manage": "Gérer l’affectation, l’avancement et les preuves",
       "register": "Associer l’ordre de travail",
       "refresh": "Actualiser les ordres de travail"
+    }
+  },
+  "Assets": {
+    "title": "Registre des équipements",
+    "create": "Enregistrer un équipement",
+    "edit": "Modifier l’équipement",
+    "property": "Propriété",
+    "chooseProperty": "Sélectionner une propriété",
+    "tag": "Identifiant de l’équipement",
+    "name": "Nom de l’équipement",
+    "category": "Catégorie",
+    "description": "Description",
+    "condition": "État actuel",
+    "chooseCondition": "Sélectionner l’état",
+    "purchaseOn": "Date d’achat",
+    "cost": "Coût d’achat",
+    "currency": "Code de devise",
+    "warrantyProvider": "Garant",
+    "warrantyReference": "Référence de garantie",
+    "warrantyStartsOn": "Début de garantie",
+    "warrantyEndsOn": "Fin de garantie",
+    "life": "Durée de vie prévue en mois",
+    "reason": "Motif de la modification",
+    "save": "Enregistrer l’équipement",
+    "saving": "Enregistrement…",
+    "find": "Rechercher",
+    "search": "Rechercher par identifiant, nom ou catégorie",
+    "searchProperty": "Rechercher une propriété",
+    "next": "Équipements suivants",
+    "nextProperties": "Propriétés suivantes",
+    "back": "Retour aux équipements",
+    "empty": "Aucun équipement correspondant.",
+    "noProperties": "Aucune propriété correspondante disponible pour l’enregistrement.",
+    "notRecorded": "Non renseigné",
+    "history": "Historique de l’équipement",
+    "revision": "Révision {number}",
+    "older": "Révisions antérieures",
+    "errors": {
+      "invalid": "Vérifiez les dates, le coût et les champs obligatoires.",
+      "forbidden": "L’accès à cet équipement est indisponible.",
+      "conflict": "L’équipement a changé ou l’identifiant est déjà utilisé. Rechargez le registre et réessayez.",
+      "offline": "Connectez-vous à Internet pour enregistrer cet équipement.",
+      "unavailable": "L’enregistrement a échoué. Réessayez."
+    },
+    "conditions": {
+      "EXCELLENT": "Excellent",
+      "GOOD": "Bon",
+      "FAIR": "Moyen",
+      "POOR": "Mauvais",
+      "UNSERVICEABLE": "Hors service"
     }
   }
 }

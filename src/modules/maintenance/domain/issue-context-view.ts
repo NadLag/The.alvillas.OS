@@ -2,7 +2,7 @@ import {localizedTextSchema} from "@/i18n/content";
 import {z} from "zod";
 import {maintenanceIssueSourceSchema,maintenanceIssueLinkIntentSchema,maintenanceIssueLinkReceiptSchema} from "./issue-context";
 const id=z.uuid(),kind=z.enum(["PROPERTY","RESERVATION","GUEST","TASK","PERSON","SUPPLIER","EXPENSE","ASSET","PHOTO","DOCUMENT"]),version=z.string().regex(/^(?:0|[1-9]\d{0,18})$/u);
-export const maintenanceSourceNavigationSchema=z.discriminatedUnion("kind",[z.object({kind:z.literal("FIELD_EVIDENCE"),id}).strict(),z.object({kind:z.literal("DOCUMENT_VERSION"),documentId:id,version:z.number().int().positive()}).strict()]);
+export const maintenanceSourceNavigationSchema=z.discriminatedUnion("kind",[z.object({kind:z.literal("FIELD_EVIDENCE"),id}).strict(),z.object({kind:z.literal("ASSET"),id}).strict(),z.object({kind:z.literal("DOCUMENT_VERSION"),documentId:id,version:z.number().int().positive()}).strict()]);
 const authorizationStamp=z.string().regex(/^[a-f0-9]{64}$/u);
 export const maintenanceIssueViewSchema=z.object({authorizationStamp,issue:z.object({id,taskId:id,propertyId:id,title:z.string(),description:z.string(),severity:z.string(),state:z.string(),evidenceId:id.nullable()}).strict(),version,capabilities:z.object({edit:z.boolean()}).strict(),sources:z.array(z.discriminatedUnion("state",[
  z.object({state:z.literal("VISIBLE"),contextId:id,reference:maintenanceIssueSourceSchema,label:z.string(),labels:localizedTextSchema.optional(),navigation:maintenanceSourceNavigationSchema.optional(),dataClass:z.enum(["operational","personal","guest","financial","sensitive"])}).strict(),

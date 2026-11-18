@@ -1,3 +1,5 @@
+import { readAssetSource } from "@/modules/assets/application/asset-service";
+import { AssetAccessError, AssetConflictError } from "@/modules/assets/domain/asset";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import type {TenantTransaction} from "@/platform/db/tenant";
 import type {CurrentAuthorityCheck} from "@/platform/authz/current-authority";
@@ -16,10 +18,10 @@ import {documentSourceReferenceSchema,DocumentAccessError} from "@/modules/docum
 import {IdentityRepository} from "@/modules/identity/infrastructure/identity-repository";
 import {ExpenseRepository} from "@/modules/finance/infrastructure/expense-repository";
 import {getExpense,ExpenseAccessError} from "@/modules/finance/application/expense-service";
-import {MaintenanceIssueAccessError,MaintenanceIssueConflictError,MaintenanceIssueSourceUnavailableError,maintenanceIssueSourceSchema,type MaintenanceIssueSource} from "@/modules/maintenance/domain/issue-context";
+import {MaintenanceIssueAccessError,MaintenanceIssueConflictError,maintenanceIssueSourceSchema,type MaintenanceIssueSource} from "@/modules/maintenance/domain/issue-context";
 
 export type MaintenanceSourceContext={propertyId:string;taskId:string};
-export type MaintenanceSourceNavigation={kind:"FIELD_EVIDENCE";id:string}|{kind:"DOCUMENT_VERSION";documentId:string;version:number};
+export type MaintenanceSourceNavigation={kind:"FIELD_EVIDENCE";id:string}|{kind:"DOCUMENT_VERSION";documentId:string;version:number}|{kind:"ASSET";id:string};
 export type AuthorizedMaintenanceSource={reference:MaintenanceIssueSource;label:string;labels?:z.infer<typeof localizedTextSchema>;dataClass:"operational"|"personal"|"guest"|"financial"|"sensitive";navigation?:MaintenanceSourceNavigation;fingerprint:string;checks:CurrentAuthorityCheck[];recheck:()=>Promise<void>};
 export type MaintenanceAssetSource=(actor:AccountActorContext,tx:TenantTransaction,reference:Extract<MaintenanceIssueSource,{kind:string}>,context:MaintenanceSourceContext)=>Promise<AuthorizedMaintenanceSource>;
 const digest=(value:unknown)=>jsonbFingerprint(JSON.parse(JSON.stringify(value)));
@@ -44,8 +46,18 @@ export async function nativeMaintenanceIssue(actor:AccountActorContext,tx:Tenant
 export async function inspectMaintenanceIssueSource(actor:AccountActorContext,tx:TenantTransaction,raw:unknown,context:MaintenanceSourceContext,assets?:MaintenanceAssetSource):Promise<AuthorizedMaintenanceSource>{
  const reference=maintenanceIssueSourceSchema.parse(raw);
  if(reference.kind==="ASSET"){
-  if(!assets)throw new MaintenanceIssueSourceUnavailableError("ASSET");
-  return assets(actor,tx,reference,context);
+  if (assets) return assets(actor,tx,reference,context);
+  const translate = (error: unknown): never => {
+    if (error instanceof AssetAccessError) throw new MaintenanceIssueAccessError();
+    if (error instanceof AssetConflictError) throw new MaintenanceIssueConflictError();
+    throw error;
+  };
+  try {
+    const source = await readAssetSource(actor, tx, reference.id, context.propertyId);
+    return { reference, label: source.label, dataClass: "operational", navigation: { kind: "ASSET", id: source.id },
+      fingerprint: jsonbFingerprint({ id: source.id, revisionId: source.revisionId }), checks: source.checks,
+      recheck: async () => { try { await source.recheck(); } catch (error) { translate(error); } } };
+  } catch (error) { return translate(error); }
  }
  const read=async()=>{
   const documents=new DocumentRepository(tx,actor.organizationId);

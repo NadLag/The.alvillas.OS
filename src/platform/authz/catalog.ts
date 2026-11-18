@@ -53,6 +53,8 @@ export const permissionResources = [
   "guest_hub_agreement",
   "task",
   "issue",
+  "asset",
+  "asset_cost",
   "service",
   "service_order",
   "inventory_item",
@@ -166,7 +168,8 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     key: "operations_manager",
     name: "Operations Manager",
     description: "Full scoped operational control without default financial visibility.",
-    permissions: [...geographyView, ...operationalFull, permissionKey("owner", "view")],
+    permissions: [
+      "asset:view", "asset:create", "asset:edit",...geographyView, ...operationalFull, permissionKey("owner", "view")],
     mfaRequired: false
   },
   {
@@ -190,7 +193,8 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     key: "field_staff",
     name: "Field Staff",
     description: "General assigned field jobs and own task updates.",
-    permissions: [permissionKey("task", "view"), permissionKey("task", "edit")],
+    permissions: [
+      "asset:view", "asset:create", "asset:edit",permissionKey("task", "view"), permissionKey("task", "edit")],
     mfaRequired: false
   },
   {
@@ -264,6 +268,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     name: "Finance",
     description: "Organization financial operations without role administration.",
     permissions: [
+      "asset:view", "asset_cost:view",
       permissionKey("identity", "view"),
       permissionKey("owner", "view"),
       permissionKey("property", "view"),
@@ -289,6 +294,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     name: "Procurement",
     description: "Supplier, inventory and purchase visibility without owner ledgers.",
     permissions: [
+      "asset:view", "asset_cost:view",
       ...permissionsFor(["supplier"], ["view", "create", "edit"]),
       permissionKey("property", "view"),
       permissionKey("task", "view"),
@@ -321,7 +327,8 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     key: "regional_manager",
     name: "Regional Manager",
     description: "Scoped regional operations with optional scope-level finance grants.",
-    permissions: [...geographyView, ...operationalFull, permissionKey("owner", "view"), permissionKey("report", "view")],
+    permissions: [
+      "asset:view", "asset:create", "asset:edit",...geographyView, ...operationalFull, permissionKey("owner", "view"), permissionKey("report", "view")],
     mfaRequired: false
   },
   {
