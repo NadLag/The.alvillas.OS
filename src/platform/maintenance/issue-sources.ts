@@ -23,11 +23,11 @@ async function clock(tx:TenantTransaction,organizationId:string){return new Docu
 function sameProperty(actual:string|undefined|null,context:MaintenanceSourceContext){if(actual&&actual!==context.propertyId)throw new MaintenanceIssueAccessError();}
 
 /** The original operational issue and task remain the sole intake records. */
-export async function nativeMaintenanceIssue(actor:AccountActorContext,tx:TenantTransaction,id:string){
+export async function nativeMaintenanceIssue(actor:AccountActorContext,tx:TenantTransaction,id:string,action:"view"|"edit"="view"){
  const read=async()=>{
   const row=await new OperationRepository(tx,actor.organizationId).maintenanceIssue(id);
   if(!row||row.task.archivedAt||row.task.property.archivedAt||row.propertyId!==row.task.propertyId)throw new MaintenanceIssueAccessError();
-  const task={...taskResource(row.task),dataClass:"operational" as const},checks:CurrentAuthorityCheck[]=[{action:"view",resource:task},{action:"view",resource:{...task,type:"issue",id:row.id}},{action:"view",resource:{...task,type:"property",id:row.propertyId}}];
+  const task={...taskResource(row.task),dataClass:"operational" as const},resource={...task,type:"issue",id:row.id,status:row.state},checks:CurrentAuthorityCheck[]=[{action:"view",resource:task},{action:"view",resource},{action,resource},{action:"view",resource:{...task,type:"property",id:row.propertyId}}];
   const now=await clock(tx,actor.organizationId);
   await recheckAccountAuthorization(actor,tx,now,checks,new MaintenanceIssueAccessError());
   return{row,checks,now,fingerprint:digest({issue:row,task})};

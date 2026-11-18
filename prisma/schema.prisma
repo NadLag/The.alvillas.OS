@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  maintenanceIssueContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextOrganization")
   actualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryOrganization")
   actualLaundryInvoiceLines LaundryActualInvoiceLine[] @relation("ActualLaundryLineOrganization")
   laundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryOrganization")
@@ -855,6 +856,7 @@ model Person {
 }
 
 model UserAccount {
+  maintenanceIssueContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextActor")
   createdActualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryCreator")
   createdLaundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryCreator")
   createdSupplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceCreator")
@@ -1888,6 +1890,7 @@ model OperationEvidenceUpload {
 }
 
 model OperationIssue {
+  maintenanceContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextIssue")
   evidenceId     String?                @map("evidence_id") @db.Uuid
   evidence       OperationTaskEvidence? @relation(fields: [organizationId, taskId, evidenceId], references: [organizationId, taskId, id], onDelete: Restrict, onUpdate: NoAction, map: "operation_issue_evidence_fkey")
   id             String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -1907,6 +1910,7 @@ model OperationIssue {
 
   @@unique([organizationId, idempotencyKey], map: "operation_issue_key_unique")
   @@index([organizationId, propertyId, state], map: "operation_issue_property_state_idx")
+  @@unique([organizationId,id],map:"operation_issue_org_id")
   @@map("operation_issue")
 }
 
@@ -6837,4 +6841,36 @@ model LaundryActualInvoiceLine {
   @@unique([organizationId,associationId,invoiceLineId],map:"actual_laundry_line_once")
   @@index([organizationId,invoiceLineId],map:"actual_laundry_original_line_idx")
   @@map("laundry_actual_invoice_line")
+}
+
+model MaintenanceIssueContext {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  issueId String @map("issue_id") @db.Uuid
+  previousId String? @map("previous_id") @db.Uuid
+  version BigInt
+  operation String @db.VarChar(10)
+  sourceKind String @map("source_kind") @db.VarChar(20)
+  sourceProvider String? @map("source_provider") @db.VarChar(30)
+  sourceId String @map("source_id") @db.Uuid
+  nativeFingerprint String @map("native_fingerprint") @db.Char(64)
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  requestHash String @map("request_hash") @db.Char(64)
+  actorId String @map("actor_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  snapshot Json
+  reason String @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation("MaintenanceIssueContextOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  issue OperationIssue @relation("MaintenanceIssueContextIssue",fields:[organizationId,issueId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"maintenance_issue_context_issue_fk")
+  actor UserAccount @relation("MaintenanceIssueContextActor",fields:[organizationId,actorId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"maintenance_issue_context_actor_fk")
+  previous MaintenanceIssueContext? @relation("MaintenanceIssueContextPrevious",fields:[organizationId,previousId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"maintenance_issue_context_previous_fk")
+  successors MaintenanceIssueContext[] @relation("MaintenanceIssueContextPrevious")
+  @@unique([organizationId,id],map:"maintenance_issue_context_org_id")
+  @@unique([organizationId,issueId,version],map:"maintenance_issue_context_sequence")
+  @@unique([organizationId,actorId,idempotencyKey],map:"maintenance_issue_context_actor_nonce")
+  @@unique([organizationId,previousId],map:"maintenance_issue_context_predecessor")
+  @@index([organizationId,issueId,version(sort:Desc)],map:"maintenance_issue_context_history")
+  @@map("maintenance_issue_context")
 }
