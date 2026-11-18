@@ -10,7 +10,7 @@ import { fileURLToPath, URL } from "node:url";
 const worker = fileURLToPath(new URL("./typecheck-worker.mjs", import.meta.url));
 // A technical compiler resource bound; every original root remains checked.
 export const nativeCompilerMaxRoots = 24;
-export const unitCompilerMaxRoots = 96;
+export const unitCompilerMaxRoots = 48;
 export function compilerProjectNames(nativeRootCount, unitRootCount) {
   if (!Number.isSafeInteger(nativeRootCount) || nativeRootCount < 0) throw RangeError("A complete native root count is required");
   if (!Number.isSafeInteger(unitRootCount) || unitRootCount < 0) throw RangeError("A complete unit root count is required");
