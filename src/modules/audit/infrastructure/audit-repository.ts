@@ -14,9 +14,10 @@ import { expenseResource } from "@/platform/authz/expense-resource";
 import {nativeInventoryLocationResources} from "@/platform/inventory/location-resource";
 import {nativeInventoryMovementResources} from "@/platform/inventory/movement-resource";
 import {nativeLaundryBatchResources} from "@/platform/inventory/laundry-resource";
+import {nativeExpectedLaundryResources} from "@/platform/inventory/expected-laundry-resource";
 import {nativeInventoryReorderResources,nativeInventoryAutomationAuditResources} from "@/platform/inventory/reorder-resource";
 
-export type FinancialAuditResource = NativeFinancialResource & { inventorySources?:readonly Resource[]; laundrySupplier?:Resource; attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
+export type FinancialAuditResource = NativeFinancialResource & { inventorySources?:readonly Resource[]; laundryCostChecks?:readonly CurrentAuthorityCheck[]; laundrySupplier?:Resource; attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -78,6 +79,7 @@ function whereFor(organizationId: string, filters: AuditHistoryFilters): Prisma.
 }
 
 export class AuditRepository {
+  expectedLaundryResources(ids:string[]){return nativeExpectedLaundryResources(this.tx,this.organizationId,ids);}
   inventoryAutomationResources(ids:string[]){return nativeInventoryAutomationAuditResources(this.tx,this.organizationId,ids);}
   inventoryReorderResources(ids:string[]){return nativeInventoryReorderResources(this.tx,this.organizationId,ids);}
   inventoryMovementResources(ids:string[]){return nativeInventoryMovementResources(this.tx,this.organizationId,ids);}

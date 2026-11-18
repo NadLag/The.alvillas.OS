@@ -7872,7 +7872,8 @@
       "REVERSAL": "Contrepassation"
     },
     "propertyChoice": "Propriété",
-    "browseArchived": "Inclure les prestataires archivés"
+    "browseArchived": "Inclure les prestataires archivés",
+    "expectedInvoice": "Facture fournisseur attendue"
   },
   "SupplierPrices": {
     "eyebrow": "Opérations",
@@ -7941,6 +7942,84 @@
       "uncertain": "Le résultat reste incertain. Résolvez la demande d’origine."
     },
     "openEnded": "Sans date de fin",
-    "originalSupplier": "Ouvrir le prestataire d’origine"
+    "originalSupplier": "Ouvrir le prestataire d’origine",
+    "billingBasis": "Étape des quantités facturables",
+    "billingUnconfigured": "Conditions de facturation du fournisseur non configurées",
+    "billableConditions": "États physiques facturables",
+    "billingBases": {
+      "PLANNED": "Unités prévues",
+      "SENT": "Unités envoyées",
+      "RECEIVED": "Unités reçues par la blanchisserie",
+      "WASHED": "Unités lavées"
+    },
+    "billingConditions": {
+      "USABLE": "Utilisable",
+      "DAMAGED": "Endommagé"
+    },
+    "billingHelp": "Sélectionnez explicitement les conditions convenues avec le fournisseur. Leur absence bloque le calcul ; les états exclus ne sont pas facturés. Une nouvelle version conserve les accords antérieurs."
+  },
+  "ExpectedLaundry": {
+    "eyebrow": "Stock · Blanchisserie",
+    "title": "Facture de blanchisserie attendue",
+    "subtitle": "Quantités de garde originales valorisées avec le tarif fournisseur versionné applicable.",
+    "refresh": "Actualiser",
+    "originalBatch": "Lot de blanchisserie original",
+    "priceLists": "Tarifs fournisseurs",
+    "noPosting": "Il s’agit d’une estimation tarifée. Son enregistrement ne crée ni facture fournisseur, paiement, dépense, charge propriétaire ni mouvement de stock.",
+    "saved": "Facture attendue enregistrée.",
+    "notRecorded": "La commande en attente n’a pas été enregistrée et est désormais clôturée.",
+    "unconfirmed": "Vérification du résultat de la commande originale…",
+    "privateHidden": "Les informations financières privées sont masquées.",
+    "pricingDate": "Date et heure de tarification",
+    "timeHelp": "La date utilise le fuseau horaire du navigateur. L’estimation conserve l’instant exact de tarification.",
+    "property": "Bien réel du lot",
+    "chooseProperty": "Choisir un bien original",
+    "organizationScope": "Périmètre de la société",
+    "loadQuote": "Charger le tarif applicable",
+    "quoteVersion": "Version originale du tarif {number}",
+    "originalQuote": "Ouvrir le tarif original",
+    "reason": "Motif",
+    "review": "Vérifier l’estimation",
+    "quoteRequired": "Choisissez le contexte de tarification et chargez un tarif applicable. Configurez les conditions manquantes dans une nouvelle version.",
+    "reviewTitle": "Vérifier la facture attendue originale",
+    "originalAssessment": "Facture attendue enregistrée",
+    "needsReview": "La garde ou le tarif applicable a changé. Enregistrez une nouvelle évaluation des données actuelles ; cette estimation originale reste inchangée.",
+    "billable": "Facturable",
+    "excluded": "Exclu par les conditions fournisseur",
+    "missingPrice": "Prix unitaire original indisponible",
+    "incomplete": "Estimation incomplète",
+    "total": "Total tarifé",
+    "saving": "Enregistrement…",
+    "record": "Enregistrer la facture attendue",
+    "sequence": "Séquence de garde originale {number}",
+    "history": "Historique immuable des estimations",
+    "inspect": "Consulter l’estimation originale",
+    "older": "Estimations antérieures",
+    "empty": "Aucune facture attendue enregistrée pour ce lot.",
+    "statuses": {
+      "NEEDS_TERMS": "L’étape et les états facturables du fournisseur sont requis.",
+      "NEEDS_PRICE": "Les prix ou unités d’origine sont incomplets.",
+      "PROVISIONAL": "Provisoire : l’étape de garde convenue est incomplète.",
+      "READY": "Prêt : chaque unité actuellement facturable dispose d’un tarif exact."
+    },
+    "conditions": {
+      "USABLE": "Utilisable",
+      "DAMAGED": "Endommagé"
+    },
+    "issues": {
+      "MISSING_PRICE": "La référence originale n’a aucun tarif.",
+      "UNIT_MISMATCH": "L’unité du tarif diffère de l’unité de garde originale."
+    },
+    "states": {
+      "ready": "Prêt",
+      "loading": "Chargement…",
+      "offline": "Reconnectez-vous pour vérifier ou enregistrer les mouvements.",
+      "forbidden": "Votre accès actuel ne permet plus de consulter cet inventaire.",
+      "unavailable": "L’inventaire est indisponible. Réessayez.",
+      "validation": "Vérifiez les données d’origine, les quantités et le motif.",
+      "conflict": "Le stock ou l’accès a changé. Vérifiez à nouveau les quantités actuelles.",
+      "stock_held": "Le stock physique ou les réservations empêchent cette opération.",
+      "uncertain": "Le résultat reste incertain. Résolvez la demande d’origine."
+    }
   }
 }

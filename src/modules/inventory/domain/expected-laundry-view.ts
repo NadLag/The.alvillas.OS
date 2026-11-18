@@ -1,0 +1,15 @@
+import {z} from "zod";
+import {localizedTextSchema} from "@/i18n/content";
+import {laundrySupplierPricePolicySchema} from "@/platform/config/laundry-pricing-policy";
+import {expectedLaundryInvoiceDraftSchema,expectedLaundryInvoiceReceiptSchema} from "./expected-laundry-command";
+import {expectedLaundryInvoiceResultSchema} from "./expected-laundry-invoice";
+const id=z.uuid(),hash=z.string().regex(/^[a-f0-9]{64}$/u),instant=z.iso.datetime();
+export const expectedLaundryContextSchema=z.object({batchId:id,supplier:z.object({id,label:z.string()}).strict(),properties:z.array(z.object({id,label:z.string()}).strict()).max(6),selectedPropertyId:id.nullable(),quote:z.object({id,version:z.number().int(),policy:laundrySupplierPricePolicySchema}).strict().nullable(),canRecord:z.boolean()}).strict();
+export const expectedLaundryReviewSchema=z.object({draft:expectedLaundryInvoiceDraftSchema,reviewFingerprint:hash,sourceFingerprint:hash,batch:z.object({id,sequence:z.number().int(),closure:z.object({id,operation:z.enum(["CLOSE","CANCEL"])}).strict().nullable()}).strict(),supplier:z.object({id,label:z.string()}).strict(),quote:z.object({id,version:z.number().int(),scope:z.object({scopeType:z.enum(["organization","property"]),scopeId:id.nullable()}).strict(),policy:laundrySupplierPricePolicySchema}).strict(),items:z.array(z.object({id,key:z.string(),name:localizedTextSchema,unit:z.string()}).strict()).max(50),result:expectedLaundryInvoiceResultSchema}).strict();
+export const expectedLaundryPublishSchema=expectedLaundryInvoiceReceiptSchema.safeExtend({replayed:z.boolean()});
+export const expectedLaundryRecoverySchema=z.discriminatedUnion("recorded",[z.object({recorded:z.literal(true),receipt:expectedLaundryInvoiceReceiptSchema}).strict(),z.object({recorded:z.literal(false),receipt:z.null()}).strict()]);
+export const expectedLaundryDetailSchema=z.object({receipt:expectedLaundryInvoiceReceiptSchema,currentBatchSequence:z.number().int(),needsReview:z.boolean()}).strict();
+export const expectedLaundryHistorySchema=z.object({items:z.array(z.object({id,createdAt:instant,batchSequence:z.number().int(),quoteVersionId:id,currency:z.string(),total:z.string().nullable(),status:z.enum(["READY","PROVISIONAL"])}).strict()).max(20),next:id.nullable()}).strict();
+export type ExpectedLaundryContext=z.infer<typeof expectedLaundryContextSchema>;
+export type ExpectedLaundryReview=z.infer<typeof expectedLaundryReviewSchema>;
+export type ExpectedLaundryDetail=z.infer<typeof expectedLaundryDetailSchema>;

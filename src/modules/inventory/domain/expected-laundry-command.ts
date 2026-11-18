@@ -1,0 +1,13 @@
+import {z} from "zod";
+import {inventoryItemReasonSchema} from "./item-catalog";
+import {laundrySupplierPricePolicySchema} from "@/platform/config/laundry-pricing-policy";
+import {expectedLaundryInvoiceSourceSchema,expectedLaundryInvoiceResultSchema,calculateExpectedLaundryInvoice} from "./expected-laundry-invoice";
+const id=z.uuid().transform(value=>value.toLowerCase());
+const hash=z.string().regex(/^[a-f0-9]{64}$/u);
+export const expectedLaundryInvoiceDraftSchema=z.object({batchId:id,quoteVersionId:id,pricingPropertyId:id.nullable(),priceAt:z.iso.datetime(),reason:inventoryItemReasonSchema}).strict();
+export const expectedLaundryInvoiceCommandSchema=z.object({draft:expectedLaundryInvoiceDraftSchema,reviewFingerprint:hash,idempotencyKey:id}).strict();
+export const expectedLaundryInvoiceReceiptSchema=z.object({schemaVersion:z.literal(1),organizationId:id,actorId:id,idempotencyKey:id,requestHash:hash,reviewFingerprint:hash,sourceFingerprint:hash,assessmentId:id,draft:expectedLaundryInvoiceDraftSchema,batchSequence:z.number().int().nonnegative(),policy:laundrySupplierPricePolicySchema,source:expectedLaundryInvoiceSourceSchema,result:expectedLaundryInvoiceResultSchema,createdAt:z.iso.datetime()}).strict().superRefine((value,context)=>{const calculated=calculateExpectedLaundryInvoice(value.policy,value.source);if(!["READY","PROVISIONAL"].includes(value.result.status)||value.result.total===null||JSON.stringify(expectedLaundryInvoiceResultSchema.parse(calculated))!==JSON.stringify(value.result))context.addIssue({code:"custom",message:"The original quoted estimate must be complete and exactly reproducible"});});
+export const expectedLaundryInvoiceCancellationSchema=z.object({schemaVersion:z.literal(1),organizationId:id,actorId:id,idempotencyKey:id}).strict();
+export const expectedLaundryInvoiceReceiptKey=(nonce:string)=>"laundry-expected-invoice:"+nonce;
+export type ExpectedLaundryInvoiceReceipt=z.infer<typeof expectedLaundryInvoiceReceiptSchema>;
+export type ExpectedLaundryInvoiceDraft=z.infer<typeof expectedLaundryInvoiceDraftSchema>;

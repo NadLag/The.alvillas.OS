@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  laundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryOrganization")
   supplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceOrganization")
   laundryBatches LaundryBatch[] @relation("LaundryBatchOrganization")
   laundryBatchLines LaundryBatchLine[] @relation("LaundryLineOrganization")
@@ -852,6 +853,7 @@ model Person {
 }
 
 model UserAccount {
+  createdLaundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryCreator")
   createdSupplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceCreator")
   createdLaundryBatches LaundryBatch[] @relation("LaundryBatchCreator")
   createdLaundryEvents LaundryBatchEvent[] @relation("LaundryEventCreator")
@@ -1327,6 +1329,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  laundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryProperty")
   serviceOrders ServiceOrder[]
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkProperty")
   documents Document[] @relation("DocumentProperty")
@@ -2374,6 +2377,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  laundryExpectedInvoices LaundryExpectedInvoice[]
   supplierPriceListVersions SupplierPriceListVersion[]
   serviceOrders ServiceOrder[]
   externalPaymentRefundFees ExternalPaymentRefundFee[]
@@ -6621,6 +6625,7 @@ model ExpensePurchase {
 }
 
 model LaundryBatch {
+  expectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryBatch")
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   sourceLocationId String @map("source_location_id") @db.Uuid
@@ -6722,6 +6727,7 @@ model LaundryBatchChange {
 }
 
 model SupplierPriceListVersion {
+  expectedLaundryInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryQuote")
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   supplierId String @map("supplier_id") @db.Uuid
@@ -6738,4 +6744,35 @@ model SupplierPriceListVersion {
   @@unique([organizationId,configRuleId],map:"supplier_price_version_config_key")
   @@index([organizationId,supplierId,createdAt,id],map:"supplier_price_version_supplier_idx")
   @@map("supplier_price_list_version")
+}
+
+model LaundryExpectedInvoice {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  batchId String @map("batch_id") @db.Uuid
+  quoteVersionId String @map("quote_version_id") @db.Uuid
+  pricingPropertyId String? @map("pricing_property_id") @db.Uuid
+  priceAt DateTime @map("price_at") @db.Timestamptz(6)
+  batchSequence Int @map("batch_sequence")
+  status String @db.VarChar(20)
+  currency String @db.Char(3)
+  total Decimal @db.Decimal(65,2)
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  requestHash String @map("request_hash") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  snapshot Json
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation("ExpectedLaundryOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  batch LaundryBatch @relation("ExpectedLaundryBatch",fields:[organizationId,batchId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  quote SupplierPriceListVersion @relation("ExpectedLaundryQuote",fields:[organizationId,quoteVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  property Property? @relation("ExpectedLaundryProperty",fields:[organizationId,pricingPropertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("ExpectedLaundryCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  currencyDefinition Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"expected_laundry_org_id")
+  @@unique([organizationId,idempotencyKey],map:"expected_laundry_nonce")
+  @@index([organizationId,batchId,createdAt(sort:Desc),id(sort:Desc)],map:"expected_laundry_batch_idx")
+  @@map("laundry_expected_invoice")
 }
