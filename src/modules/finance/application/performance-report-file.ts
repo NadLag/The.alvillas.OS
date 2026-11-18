@@ -19,7 +19,7 @@ type ExportSource = {
 };
 
 export async function performanceReportFile(source: ExportSource, format: AccountantExportFormat, locale: AppLocale,
-  policy: { id: string; version: number; capacity: number }, titleKey: "propertyTitle" | "companyTitle") {
+  policy: { id: string; version: number; capacity: number }, titleKey: "propertyTitle" | "companyTitle" | "teamTitle") {
   const { default: catalog } = await import(`../../../../messages/${locale}.json`) as {
     default: typeof en;
   };

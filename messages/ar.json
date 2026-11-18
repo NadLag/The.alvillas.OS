@@ -1243,7 +1243,14 @@
       "outsidePortfolio": "النتيجة خارج المحفظة النشطة",
       "bankBalance": "الأرصدة المصرفية",
       "cashBalance": "الأرصدة النقدية",
-      "cashPosition": "إجمالي الأرصدة المصرفية والنقدية"
+      "cashPosition": "إجمالي الأرصدة المصرفية والنقدية",
+      "scheduledJobs": "المهام المجدولة",
+      "openJobs": "المهام المفتوحة",
+      "completedJobs": "المهام المنجزة",
+      "onTimeJobs": "المهام المنجزة في موعدها",
+      "recognizedCompensation": "التعويضات المرحلة",
+      "walletDebits": "مدين المحفظة",
+      "walletCredits": "دائن المحفظة"
     },
     "reportsBack": "مساحة التقارير",
     "cashLocations": "الحسابات المصرفية والنقدية",
@@ -1251,9 +1258,14 @@
     "portfolio": "المحفظة النشطة",
     "emptyPortfolio": "لا توجد عقارات نشطة لعرضها.",
     "previous": "العقارات السابقة",
-    "next": "العقارات التالية"
+    "next": "العقارات التالية",
+    "teamTitle": "تقارير الفريق",
+    "emptyTeam": "لا يوجد نشاط للفريق خلال الفترة المحددة.",
+    "previousPeople": "الأشخاص السابقون",
+    "nextPeople": "الأشخاص التاليون"
   },
   "ReportsWorkspace": {
+    "teamReports": "تقارير الفريق",
     "companyReports": "?????? ALVILLAS",
     "propertyReports": "تقارير العقارات",
     "eyebrow": "الأداء",

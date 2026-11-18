@@ -1243,7 +1243,14 @@
       "outsidePortfolio": "Résultat hors portefeuille actif",
       "bankBalance": "Soldes bancaires",
       "cashBalance": "Soldes de caisse",
-      "cashPosition": "Total banque et caisse"
+      "cashPosition": "Total banque et caisse",
+      "scheduledJobs": "Interventions planifiées",
+      "openJobs": "Interventions ouvertes",
+      "completedJobs": "Interventions terminées",
+      "onTimeJobs": "Interventions terminées à temps",
+      "recognizedCompensation": "Rémunération comptabilisée",
+      "walletDebits": "Débits du portefeuille",
+      "walletCredits": "Crédits du portefeuille"
     },
     "reportsBack": "Espace des rapports",
     "cashLocations": "Comptes bancaires et de caisse",
@@ -1251,9 +1258,14 @@
     "portfolio": "Portefeuille actif",
     "emptyPortfolio": "Aucune propriété active à présenter.",
     "previous": "Propriétés précédentes",
-    "next": "Propriétés suivantes"
+    "next": "Propriétés suivantes",
+    "teamTitle": "Rapports d’équipe",
+    "emptyTeam": "Aucune activité d’équipe pour la période choisie.",
+    "previousPeople": "Personnes précédentes",
+    "nextPeople": "Personnes suivantes"
   },
   "ReportsWorkspace": {
+    "teamReports": "Rapports d’équipe",
     "companyReports": "Rapports ALVILLAS",
     "propertyReports": "Rapports par propriété",
     "eyebrow": "Performance",

@@ -35,6 +35,8 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
       {hasReportAccess ? <nav className="form-actions">
         <Link className="secondary-button" href={`/${locale}/app/properties`}>{t("propertyReports")}</Link>
         {canViewCompany ? <Link className="secondary-button" href={`/${locale}/app/reports/company`}>{t("companyReports")}</Link> : null}
+        {canViewCompany && finance && authorizeOrganizationSource(finance.authContext, "view", { type: "team_member", organizationId: finance.organizationId }, new Date())
+          ? <Link className="secondary-button" href={`/${locale}/app/reports/team`}>{t("teamReports")}</Link> : null}
       </nav> : null}
       {canGenerate ? (
         <section className="detail-panel">

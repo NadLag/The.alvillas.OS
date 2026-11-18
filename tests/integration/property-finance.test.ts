@@ -1,3 +1,5 @@
+import { getTeamPerformanceReport } from "@/modules/finance/application/team-performance-report";
+import { teamReportMetrics } from "@/modules/finance/domain/performance-report";
 import { exportCompanyPerformanceReport, getCompanyPerformanceReport } from "@/modules/finance/application/company-performance-report";
 import { companyReportMetrics } from "@/modules/finance/domain/performance-report";
 import { getPropertyPerformanceReport, exportPropertyPerformanceReport } from "@/modules/finance/application/property-performance-report";
@@ -46,7 +48,7 @@ const financial=(f:Fixture)=>withTenant(db,f.org,tx=>tx.$queryRaw<Array<{kind:st
 
 async function grantPerformanceReports(f: Fixture) {
    await withTenant(db, f.org, async tx => {
-     const keys = ["report:view", "report:export", "reservation:view", "property_finance:export", "financial_transaction:export",
+     const keys = ["report:view", "report:export", "reservation:view", "task:view", "property_finance:export", "financial_transaction:export",
        "company_ledger:export", "owner_statement:export", "expense:export", "supplier_invoice:export", "employee_payable:export",
        "staff_compensation:export", "wallet:export", "cash_collection:export"];
      const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: keys } } });
@@ -157,6 +159,44 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    } }, { db });
    expect(new TextDecoder().decode(bytes)).toContain("1517.68");
    await expect(getCompanyPerformanceReport(f.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
+   expect(await financial(f)).toEqual(original);
+ });
+
+ it("reports actual workload and performers with immutable currency-separated wallet activity", async () => {
+   const f = await fixture(), ctx = await grantPerformanceReports(f);
+   const performer = await withTenant(db, f.org, async tx => {
+     const performer = await tx.person.create({ data: { organizationId: f.org, displayName: "Native recorded performer" } });
+     const task = { organizationId: f.org, propertyId: f.property.id, type: "TRANSFER", dueDate: new Date("2026-03-08"),
+       assignedToPersonId: f.person.id, titleTranslations: { en: "Original operational job", fr: "Intervention d?origine" } };
+     await tx.operationTask.create({ data: { ...task, state: "ASSIGNED", idempotencyKey: randomUUID() } });
+     await tx.operationTask.create({ data: { ...task, state: "COMPLETED", idempotencyKey: randomUUID(),
+       completedByPersonId: performer.id, completedAt: new Date("2026-03-08T13:00:00Z") } });
+     await tx.operationTask.create({ data: { ...task, state: "CANCELLED", idempotencyKey: randomUUID() } });
+     const finance = new FinanceRepository(tx, f.org);
+     const wallet = await finance.ensureLedgerAccount({ code: "WALLET_TEAM_REPORT", name: "Internal funding account",
+       accountType: "STAFF_WALLET", normalSide: "DEBIT" });
+     await tx.teamWallet.create({ data: { organizationId: f.org, personId: performer.id, ledgerAccountId: wallet.id, createdBy: f.account.id } });
+     for (const [currency, amount] of [["MAD", "125.07"], ["EUR", "12.34"]]) {
+       const value = Money.of(amount, currency);
+       await finance.createFinancialTransaction({ reference: randomUUID(), description: "Original wallet journal", occurredAt: new Date("2026-03-08T14:00:00Z"),
+         idempotencyKey: randomUUID(), createdBy: f.account.id, postings: [
+           { ledgerAccountId: f.bank.id, side: "CREDIT", amount: value, bucket: "REPORT_WALLET", dimensions: {} },
+           { ledgerAccountId: wallet.id, side: "DEBIT", amount: value, bucket: "REPORT_WALLET", dimensions: {} }
+         ] });
+     }
+     return performer;
+   });
+   const filter = { fromOn: "2026-03-08", toOn: "2026-03-08", currency: "MAD" };
+   const original = await financial(f), report = await getTeamPerformanceReport(ctx, filter, { db });
+   expect(report.people).toHaveLength(2);
+   expect(report.people.find(row => row.id === f.person.id)).toMatchObject({ assigned: "2", open: "1", completed: "0" });
+   const actual = report.people.find(row => row.id === performer.id);
+   expect(actual).toMatchObject({ assigned: "0", completed: "1", onTime: "1", walletDebits: "125.07" });
+   expect(teamReportMetrics(actual!, "MAD")).toContainEqual(expect.objectContaining({ key: "onTimeJobs", count: "100.00%" }));
+   const eur = await getTeamPerformanceReport(ctx, { ...filter, currency: "EUR" }, { db });
+   expect(eur.people.find(row => row.id === performer.id)?.walletDebits).toBe("12.34");
+   await expect(getTeamPerformanceReport(f.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
+   expect(JSON.stringify(report)).not.toContain("WALLET_TEAM_REPORT");
    expect(await financial(f)).toEqual(original);
  });
 

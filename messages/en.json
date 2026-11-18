@@ -1243,7 +1243,14 @@
       "outsidePortfolio": "Result outside the active portfolio",
       "bankBalance": "Bank balances",
       "cashBalance": "Cash balances",
-      "cashPosition": "Total bank and cash balances"
+      "cashPosition": "Total bank and cash balances",
+      "scheduledJobs": "Scheduled jobs",
+      "openJobs": "Open jobs",
+      "completedJobs": "Completed jobs",
+      "onTimeJobs": "Completed on time",
+      "recognizedCompensation": "Recognized compensation",
+      "walletDebits": "Wallet debits",
+      "walletCredits": "Wallet credits"
     },
     "reportsBack": "Reports workspace",
     "cashLocations": "Bank and cash locations",
@@ -1251,9 +1258,14 @@
     "portfolio": "Active portfolio",
     "emptyPortfolio": "There are no active properties to report.",
     "previous": "Previous properties",
-    "next": "Next properties"
+    "next": "Next properties",
+    "teamTitle": "Team reports",
+    "emptyTeam": "No team activity for the selected period.",
+    "previousPeople": "Previous people",
+    "nextPeople": "Next people"
   },
   "ReportsWorkspace": {
+    "teamReports": "Team reports",
     "companyReports": "Company reports",
     "propertyReports": "Property reports",
     "eyebrow": "Performance",

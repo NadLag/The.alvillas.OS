@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { PropertyFinanceRepository } from "./property-finance-repository";
-import type { CompanyPostingTotal, PortfolioNights, PropertyPostingTotal } from "../domain/performance-report";
+import type { CompanyPostingTotal, PortfolioNights, PropertyPostingTotal, TeamPerformanceSource } from "../domain/performance-report";
 
 export class PerformanceReportRepository extends PropertyFinanceRepository {
   propertyPostings(input: { propertyId: string; currency: string; startsAt: Date; endsAt: Date }) {
@@ -64,6 +64,55 @@ export class PerformanceReportRepository extends PropertyFinanceRepository {
       SELECT key, CASE WHEN key IN ('cashBalance','bankBalance') THEN NULL ELSE property_id END AS "propertyId",
         sum(CASE WHEN (side = 'DEBIT') = (key IN ('operatingCosts','bankBalance','cashBalance')) THEN amount ELSE -amount END)::text AS amount
       FROM classified WHERE key IS NOT NULL GROUP BY key, "propertyId" ORDER BY key, "propertyId"`);
+  }
+
+  teamPerformance(input: { currency: string; timezone: string; fromOn: string; toOn: string; startsAt: Date; endsAt: Date }) {
+    return this.tx.$queryRaw<TeamPerformanceSource[]>(Prisma.sql`
+      WITH workload AS (
+        SELECT assigned_to_person_id AS person_id, count(*) AS assigned,
+          count(*) FILTER (WHERE state IN ('PLANNED','ASSIGNED','IN_PROGRESS','BLOCKED')) AS open
+        FROM operation_task
+        WHERE organization_id = ${this.organizationId}::uuid AND archived_at IS NULL
+          AND state NOT IN ('CANCELLED','SKIPPED') AND assigned_to_person_id IS NOT NULL
+          AND due_date BETWEEN ${input.fromOn}::date AND ${input.toOn}::date
+        GROUP BY assigned_to_person_id
+      ), completions AS (
+        SELECT task.completed_by_person_id AS person_id, count(*) AS completed,
+          count(*) FILTER (WHERE (task.completed_at AT TIME ZONE property.timezone)::date <= task.due_date) AS on_time
+        FROM operation_task task JOIN property ON property.organization_id=task.organization_id AND property.id=task.property_id
+        WHERE task.organization_id = ${this.organizationId}::uuid AND task.completed_by_person_id IS NOT NULL AND task.state = 'COMPLETED'
+          AND task.completed_at >= ${input.startsAt} AND task.completed_at < ${input.endsAt}
+        GROUP BY task.completed_by_person_id
+      ), compensation AS (
+        SELECT c.person_id, sum(CASE WHEN p.side='CREDIT' THEN p.amount ELSE -p.amount END) AS recognized
+        FROM posting p JOIN financial_transaction t ON t.organization_id=p.organization_id AND t.id=p.transaction_id
+        JOIN ledger_account a ON a.organization_id=p.organization_id AND a.id=p.ledger_account_id
+        JOIN employee_compensation_claim c ON c.organization_id=p.organization_id AND c.id::text=p.dimensions->>'employee_compensation_claim_id'
+          AND c.person_id::text=p.dimensions->>'employee_person_id'
+        WHERE p.organization_id=${this.organizationId}::uuid AND p.currency=${input.currency}
+          AND a.code='EMPLOYEE_PAYABLE' AND a.account_type='CLAIM_OWNERSHIP' AND p.bucket='EMPLOYEE_COMPENSATION'
+          AND t.sealed AND t.occurred_at>=${input.startsAt} AND t.occurred_at<${input.endsAt}
+        GROUP BY c.person_id
+      ), wallet AS (
+        SELECT w.person_id, sum(p.amount) FILTER (WHERE p.side='DEBIT') AS debit,
+          sum(p.amount) FILTER (WHERE p.side='CREDIT') AS credit
+        FROM team_wallet w JOIN posting p ON p.organization_id=w.organization_id AND p.ledger_account_id=w.ledger_account_id
+        JOIN financial_transaction t ON t.organization_id=p.organization_id AND t.id=p.transaction_id
+        WHERE w.organization_id=${this.organizationId}::uuid AND p.currency=${input.currency}
+          AND t.sealed AND t.occurred_at>=${input.startsAt} AND t.occurred_at<${input.endsAt}
+        GROUP BY w.person_id
+      ), involved AS (
+        SELECT person_id FROM workload UNION SELECT person_id FROM completions
+        UNION SELECT person_id FROM compensation UNION SELECT person_id FROM wallet
+      )
+      SELECT p.id, p.display_name AS name, coalesce(w.assigned,0)::text AS assigned, coalesce(w.open,0)::text AS open,
+        coalesce(j.completed,0)::text AS completed, coalesce(j.on_time,0)::text AS "onTime",
+        coalesce(c.recognized,0)::text AS recognized, coalesce(wallet.debit,0)::text AS "walletDebits",
+        coalesce(wallet.credit,0)::text AS "walletCredits"
+      FROM involved staff JOIN person p ON p.organization_id=${this.organizationId}::uuid AND p.id=staff.person_id
+      LEFT JOIN workload w ON w.person_id=p.id LEFT JOIN completions j ON j.person_id=p.id
+      LEFT JOIN compensation c ON c.person_id=p.id LEFT JOIN wallet ON wallet.person_id=p.id
+      ORDER BY p.display_name,p.id`);
   }
 
   protected nights(fromOn: string, toOn: string, propertyId?: string) {
