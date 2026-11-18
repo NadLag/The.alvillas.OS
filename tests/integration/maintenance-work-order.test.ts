@@ -1,0 +1,61 @@
+import {randomUUID} from "node:crypto";
+import {PrismaClient} from "@prisma/client";
+import {it,expect,beforeAll,afterAll,afterEach,vi} from "vitest";
+import {withTenant} from "@/platform/db/tenant";
+import {authContextForAccount} from "@/platform/authz/account-context";
+import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
+import {nativeGuestHubFixture} from "./support/guest-hub-fixture";
+import {provisionIntegrationRole} from "./support/database-role";
+import {reportOperationIssue} from "@/modules/reservations/application/operation-evidence";
+import {createOperationTask,transitionOperationTask} from "@/modules/reservations/application/operation-service";
+import {previewWorkOrderRegistration,publishWorkOrderRegistration,recoverWorkOrderRegistration,workOrderRegistrationCommandStatus} from "@/modules/maintenance/application/work-order-registration";
+import {readIssueWorkOrders,workOrderTaskChoices} from "@/modules/maintenance/application/work-order-workspace";
+import {WorkOrderAccessError,WorkOrderConflictError} from "@/modules/maintenance/domain/work-order";
+import {WorkOrderRepository} from "@/modules/maintenance/infrastructure/work-order-repository";
+import {listAuditHistory} from "@/modules/audit/application/audit-service";
+
+let admin:PrismaClient,db:PrismaClient;
+beforeAll(async()=>{const url=new URL(process.env.TEST_DATABASE_URL!);if(!["127.0.0.1","localhost"].includes(url.hostname)||!(url.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&url.pathname==="/alvillas_os"))throw Error("Owned maintenance work-order database required");admin=new PrismaClient({datasourceUrl:url.toString()});await provisionIntegrationRole(admin,"alvillas_ops_tests");url.username=url.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:url.toString()});});
+afterEach(()=>vi.restoreAllMocks());afterAll(async()=>{await db?.$disconnect();await admin?.$disconnect();});
+async function fixture(){
+ const f=await nativeGuestHubFixture(admin,db),grants:Record<string,string>={},deps={db,requestId:randomUUID(),ipAddress:null};
+ await withTenant(db,f.organizationId,async tx=>{
+  for(const key of["task:view","task:edit","issue:view","issue:create","issue:edit","property:view","audit_log:view"]){const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key}}),role=await tx.role.create({data:{organizationId:f.organizationId,key:"maintenance_order_"+randomUUID(),name:"Original maintenance order "+key}});await tx.rolePermission.create({data:{organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}});grants[key]=(await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:f.account.id,personId:f.person.id,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}})).id;}
+  await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"ops.checklists",scopeType:"property",scopeId:f.property.id,createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),reason:"Actual original maintenance checklist configuration",value:{checklists:[{key:"maintenance_original",name:{en:"Maintenance",fr:"Maintenance",ar:"الصيانة"},items:[{key:"original_evidence",label:{en:"Retain original evidence",fr:"Conserver les preuves originales",ar:"حفظ الأدلة الأصلية"}}]}]}});
+ });
+ const actor={...f.ctx,authContext:{...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id}},sourceTask=await withTenant(db,f.organizationId,tx=>tx.operationTask.findFirstOrThrow({where:{organizationId:f.organizationId,reservationId:f.reservation.id}})),issueId=await reportOperationIssue(actor,{taskId:sourceTask.id,title:"Original repair observation",description:"Actual original issue retained before a native maintenance work order",severity:"HIGH",idempotencyKey:randomUUID()},deps),task=await createOperationTask(actor,{propertyId:f.property.id,reservationId:f.reservation.id,type:"MAINTENANCE",title:{en:"Original repair work",fr:"Travaux de réparation",ar:"أعمال الإصلاح"},dueDate:"2031-05-02",priority:"HIGH",checklistTemplateKey:"maintenance_original",idempotencyKey:randomUUID(),reason:"Create through the existing canonical maintenance task writer"},deps);
+ return{...f,actor,task,sourceTask,issueId,grants,deps,intent:{issueId,taskId:task.id,reason:"Register the original maintenance task for this independently authorized issue"}};
+}
+async function originals(f:Awaited<ReturnType<typeof fixture>>){return withTenant(db,f.organizationId,async tx=>({tasks:await tx.operationTask.findMany({where:{organizationId:f.organizationId},orderBy:{id:"asc"}}),issues:await tx.operationIssue.findMany({where:{organizationId:f.organizationId},orderBy:{id:"asc"}}),money:await tx.financialTransaction.count({where:{organizationId:f.organizationId}}),stock:await tx.inventoryMovement.count({where:{organizationId:f.organizationId}})}));}
+
+it("registers the native maintenance task once with original issue ancestry, immutable audit/receipt, recovery and negative closure",async()=>{
+ const f=await fixture(),before=await originals(f),review=await previewWorkOrderRegistration(f.actor,f.intent,f.deps),nonce=randomUUID(),command={intent:review.intent,reviewFingerprint:review.reviewFingerprint,idempotencyKey:nonce};expect(review.task).toMatchObject({id:f.task.id,type:"MAINTENANCE",priority:"HIGH",state:"PLANNED"});expect((await workOrderTaskChoices(f.actor,{issueId:f.issueId},f.deps)).items.map(row=>row.id)).toEqual([f.task.id]);
+ const receipts=await Promise.all([publishWorkOrderRegistration(f.actor,command,f.deps),publishWorkOrderRegistration(f.actor,command,f.deps)]);expect(receipts.map(row=>row.taskId)).toEqual([f.task.id,f.task.id]);expect(receipts.map(row=>row.replayed).sort()).toEqual([false,true]);expect(await originals(f)).toEqual(before);
+ expect(await readIssueWorkOrders(f.actor,{issueId:f.issueId},f.deps)).toMatchObject({items:[{state:"VISIBLE",task:{id:f.task.id}}]});expect((await workOrderTaskChoices(f.actor,{issueId:f.issueId},f.deps)).items).toEqual([]);
+ expect(await recoverWorkOrderRegistration(f.actor,{issueId:f.issueId,taskId:f.task.id,idempotencyKey:nonce},f.deps)).toMatchObject({recorded:true,receipt:{taskId:f.task.id,intent:{issueId:f.issueId}}});
+ await expect(withTenant(db,f.organizationId,tx=>tx.$executeRawUnsafe("UPDATE maintenance_work_order SET issue_id=$1::uuid WHERE organization_id=$2::uuid AND id=$3::uuid",randomUUID(),f.organizationId,f.task.id))).rejects.toThrow(/ledger rows are append-only/);
+ const audit=await listAuditHistory(f.actor,{resourceType:"maintenance_work_order",resourceId:f.task.id},f.deps);expect(audit.rows).toHaveLength(1);expect(JSON.stringify(audit.rows)).not.toContain(f.intent.reason);
+ const closed=randomUUID();expect(await recoverWorkOrderRegistration(f.actor,{issueId:f.issueId,taskId:f.task.id,idempotencyKey:closed},f.deps)).toEqual({recorded:false,receipt:null});await expect(publishWorkOrderRegistration(f.actor,{...command,idempotencyKey:closed},f.deps)).rejects.toBeInstanceOf(WorkOrderConflictError);
+ await expect(previewWorkOrderRegistration(f.actor,f.intent,f.deps)).rejects.toBeInstanceOf(WorkOrderConflictError);
+ // Later operational progress changes the native task, never the original receipt.
+ await transitionOperationTask(f.actor,{taskId:f.task.id,expectedVersion:f.task.version,state:"BLOCKED",reason:"Native maintenance progress remains in the canonical operations lifecycle",idempotencyKey:randomUUID()},f.deps);
+ expect(await publishWorkOrderRegistration(f.actor,command,f.deps)).toEqual({...receipts[0],replayed:true});
+ const unknown=randomUUID();expect(await workOrderRegistrationCommandStatus(f.actor,{issueId:f.issueId,idempotencyKey:unknown},f.deps)).toMatchObject({state:"UNKNOWN"});expect(await recoverWorkOrderRegistration(f.actor,{issueId:f.issueId,idempotencyKey:unknown},f.deps)).toEqual({recorded:false,receipt:null});expect(await workOrderRegistrationCommandStatus(f.actor,{issueId:f.issueId,idempotencyKey:unknown},f.deps)).toMatchObject({state:"CANCELLED"});
+ // Preserve original issue viewing through a narrower job grant, withdrawing
+ // access to the independently protected maintenance task.
+ await withTenant(db,f.organizationId,async tx=>{const original=await tx.roleAssignment.findUniqueOrThrow({where:{id:f.grants["task:view"]}});await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:f.account.id,personId:f.person.id,roleId:original.roleId,scopeType:"job",scopeId:f.sourceTask.id,validFrom:new Date("2020-01-01")}});await tx.roleAssignment.update({where:{id:original.id},data:{archivedAt:new Date()}});});
+ const masked=await readIssueWorkOrders(f.actor,{issueId:f.issueId},f.deps);expect(masked.items).toEqual([{state:"MASKED"}]);expect(JSON.stringify(masked)).not.toContain(f.task.id);await expect(recoverWorkOrderRegistration(f.actor,{issueId:f.issueId,idempotencyKey:nonce},f.deps)).rejects.toBeInstanceOf(WorkOrderAccessError);const status=await workOrderRegistrationCommandStatus(f.actor,{issueId:f.issueId,idempotencyKey:nonce},f.deps);expect(status.state).toBe("RECORDED");expect(JSON.stringify(status)).not.toContain(f.task.id);
+});
+it("rejects foreign tenants, non-maintenance tasks, narrowed authority and stale original task reviews",async()=>{
+ const f=await fixture(),other=await fixture();await expect(previewWorkOrderRegistration(f.actor,other.intent,f.deps)).rejects.toBeInstanceOf(WorkOrderAccessError);await expect(previewWorkOrderRegistration(f.actor,{...f.intent,taskId:f.sourceTask.id},f.deps)).rejects.toBeInstanceOf(WorkOrderAccessError);
+ const narrowed={...f.actor,authContext:{...f.actor.authContext,permissions:new Set<string>(),scopes:[],assignments:[]}};await expect(previewWorkOrderRegistration(narrowed,f.intent,f.deps)).rejects.toBeInstanceOf(WorkOrderAccessError);
+ const review=await previewWorkOrderRegistration(f.actor,f.intent,f.deps);await transitionOperationTask(f.actor,{taskId:f.task.id,expectedVersion:f.task.version,state:"BLOCKED",reason:"An actual native task revision invalidates the old registration review",idempotencyKey:randomUUID()},f.deps);
+ await expect(publishWorkOrderRegistration(f.actor,{intent:review.intent,reviewFingerprint:review.reviewFingerprint,idempotencyKey:randomUUID()},f.deps)).rejects.toBeInstanceOf(WorkOrderConflictError);expect(await withTenant(db,f.organizationId,tx=>new WorkOrderRepository(tx,f.organizationId).original(f.task.id))).toBeNull();
+});
+it("requires atomic original audit/receipt and rolls back registration when task editing is withdrawn after insertion",async()=>{
+ const f=await fixture(),review=await previewWorkOrderRegistration(f.actor,f.intent,f.deps),before=await originals(f);
+ await expect(withTenant(db,f.organizationId,async tx=>{const repository=new WorkOrderRepository(tx,f.organizationId),fingerprint=await repository.nativeFingerprint(f.issueId,f.task.id);if(!fingerprint)throw Error("Original task ancestry required");await repository.insert({schemaVersion:1,organizationId:f.organizationId,actorId:f.actor.actorId,taskId:f.task.id,propertyId:f.property.id,intent:f.intent,idempotencyKey:randomUUID(),nativeFingerprint:fingerprint,sourceFingerprint:"a".repeat(64),reviewFingerprint:review.reviewFingerprint,requestHash:"b".repeat(64),createdAt:(await repository.clock()).toISOString()});})).rejects.toThrow(/original_audit_receipt_required/);
+ const nonce=randomUUID(),original=WorkOrderRepository.prototype.insert;vi.spyOn(WorkOrderRepository.prototype,"insert").mockImplementation(async function(this:WorkOrderRepository,value){await original.call(this,value);await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants["task:edit"]},data:{archivedAt:new Date()}}));});
+ await expect(publishWorkOrderRegistration(f.actor,{intent:review.intent,reviewFingerprint:review.reviewFingerprint,idempotencyKey:nonce},f.deps)).rejects.toBeInstanceOf(WorkOrderAccessError);vi.restoreAllMocks();
+ expect(await originals(f)).toEqual(before);expect(await withTenant(db,f.organizationId,tx=>new WorkOrderRepository(tx,f.organizationId).original(f.task.id))).toBeNull();expect(await withTenant(db,f.organizationId,tx=>tx.outboxEvent.count({where:{organizationId:f.organizationId,idempotencyKey:"maintenance-work-order:"+f.actor.actorId+":"+nonce}}))).toBe(0);
+});

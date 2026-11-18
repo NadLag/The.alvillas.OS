@@ -8198,6 +8198,19 @@
       "validation": "Check the selected record and enter a reason of at least six characters.",
       "conflict": "The issue or original record changed. Refresh before reviewing again.",
       "uncertain": "The save has not been confirmed. Refresh to check the original change."
+    },
+    "workOrders": {
+      "title": "Work orders",
+      "description": "Link maintenance work to this issue and manage its assignment, progress and evidence.",
+      "empty": "No work orders are linked to this issue.",
+      "add": "Link a maintenance task",
+      "taskHelp": "Choose a maintenance task for this property. Create or manage tasks in Operations.",
+      "operations": "Open property operations",
+      "searchLabel": "Search maintenance tasks",
+      "registered": "Linked on {date}",
+      "manage": "Manage assignment, progress and evidence",
+      "register": "Link work order",
+      "refresh": "Refresh work orders"
     }
   }
 }

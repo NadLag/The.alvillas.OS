@@ -11,6 +11,7 @@ import {readCommandNonce,writeCommandNonce,clearCommandNonce} from "@/platform/h
 import {maintenanceIssueCommandStatusSchema,maintenanceIssueLinkPublishedSchema,type MaintenanceIssueSource} from "../domain/issue-context";
 import {maintenanceIssueViewSchema,maintenanceIssueHistorySchema,maintenanceIssueChoicesSchema,maintenanceIssueReviewSchema,maintenanceIssueRecoverySchema,type MaintenanceIssueView} from "../domain/issue-context-view";
 import {maintenanceIssueRequest,MaintenanceBrowserError,type MaintenanceBrowserState} from "./issue-browser";
+import {WorkOrderManager} from "./work-order-manager";
 
 type Choices=z.infer<typeof maintenanceIssueChoicesSchema>;
 type Review=z.infer<typeof maintenanceIssueReviewSchema>;
@@ -126,6 +127,7 @@ export function MaintenanceIssueManager({locale,authorizationScope:scope,issueId
    </section>:null}
    {review?<section className="detail-panel resource-form" data-testid="maintenance-issue-review"><h2>{t("reviewTitle")}</h2><p>{t("operations."+review.intent.operation)} · {t("kinds."+review.intent.source.kind)}</p><p dir="auto">{name(review.source)}</p><p dir="auto">{review.intent.reason}</p><p>{t("historyPreserved")}</p><button type="button" className="primary-button" disabled={busy} onClick={()=>void publish()}>{t(busy?"saving":"publish")}</button><button type="button" className="quiet-button" disabled={busy} onClick={()=>setReview(null)}>{t("changeReview")}</button></section>:null}
    <section className="resource-form"><h2>{t("history")}</h2><button type="button" className="secondary-button" disabled={busy} onClick={()=>void historyPage()}>{t("showHistory")}</button>{history?<div data-testid="maintenance-issue-history">{!history.items.length?<p>{t("emptyHistory")}</p>:<ol className="resource-list">{history.items.map(row=><li key={row.id}><strong>{t("operations."+row.operation)} · {t("kinds."+row.kind)}</strong><p>{formatDateTime(locale,new Date(row.createdAt),{timeZone:"UTC"})} · {t(row.actor==="SELF"?"you":"anotherActor")}</p>{row.detail?<><p dir="auto">{name(row.detail)}</p><p dir="auto">{row.detail.reason}</p>{row.detail.navigation?<a href={media(row.detail.navigation)} target="_blank" rel="noopener noreferrer">{t("openEvidence")}</a>:null}</>:<p>{t("maskedSource")}</p>}</li>)}</ol>}<div className="form-actions">{history.next?<button type="button" className="secondary-button" disabled={busy} onClick={()=>void historyPage(history.next!)}>{t("next")}</button>:null}<button type="button" className="quiet-button" disabled={busy} onClick={()=>void historyPage()}>{t("first")}</button></div></div>:null}</section>
+   <WorkOrderManager key={scope+":"+issueId+":"+value.authorizationStamp} locale={locale} scope={scope} issueId={issueId} authorizationStamp={value.authorizationStamp} onRevalidate={load}/>
   </>:null}
   {state!=="ready"&&state!=="loading"?<p role="alert">{t("states."+state)}</p>:null}
  </div>;

@@ -148,7 +148,7 @@ export function presentAuditHistoryRow(
       { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
       { before: { dataClass: "sensitive" }, after: { dataClass: "sensitive" }, reason: { dataClass: "sensitive" } }) as AuditHistoryRow;
   }
-  if(row.resourceType==="maintenance_issue_context"||row.resourceType==="maintenance_issue_context_command"){
+  if(row.resourceType==="maintenance_issue_context"||row.resourceType==="maintenance_issue_context_command"||row.resourceType==="maintenance_work_order"||row.resourceType==="maintenance_work_order_command"){
     // Context reasons can refer to financial or personal sources. Their native
     // issue history authorizes the original source before disclosing details.
     return present({...ctx.authContext,visibleDataClasses:new Set()},action,

@@ -8198,6 +8198,19 @@
       "validation": "Vérifiez le dossier sélectionné et indiquez un motif d’au moins six caractères.",
       "conflict": "L’incident ou le dossier original a changé. Actualisez avant une nouvelle vérification.",
       "uncertain": "L’enregistrement n’est pas confirmé. Actualisez pour vérifier la modification originale."
+    },
+    "workOrders": {
+      "title": "Ordres de travail",
+      "description": "Associez les travaux à ce problème et gérez leur affectation, leur avancement et leurs preuves.",
+      "empty": "Aucun ordre de travail n’est associé à ce problème.",
+      "add": "Associer une tâche de maintenance",
+      "taskHelp": "Choisissez une tâche de maintenance pour ce bien. Créez ou gérez les tâches dans les opérations.",
+      "operations": "Ouvrir les opérations du bien",
+      "searchLabel": "Rechercher des tâches de maintenance",
+      "registered": "Associé le {date}",
+      "manage": "Gérer l’affectation, l’avancement et les preuves",
+      "register": "Associer l’ordre de travail",
+      "refresh": "Actualiser les ordres de travail"
     }
   }
 }

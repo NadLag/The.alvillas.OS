@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderOrganization")
   maintenanceIssueContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextOrganization")
   actualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryOrganization")
   actualLaundryInvoiceLines LaundryActualInvoiceLine[] @relation("ActualLaundryLineOrganization")
@@ -856,6 +857,7 @@ model Person {
 }
 
 model UserAccount {
+  maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderActor")
   maintenanceIssueContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextActor")
   createdActualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryCreator")
   createdLaundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryCreator")
@@ -1704,6 +1706,7 @@ model ReservationConflict {
 }
 
 model OperationTask {
+  maintenanceWorkOrder MaintenanceWorkOrder? @relation("MaintenanceWorkOrderTask")
   serviceOrder ServiceOrder?
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   workTimeEvidence EmployeeWorkTimeEvidence[]
@@ -1890,6 +1893,7 @@ model OperationEvidenceUpload {
 }
 
 model OperationIssue {
+  maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderIssue")
   maintenanceContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextIssue")
   evidenceId     String?                @map("evidence_id") @db.Uuid
   evidence       OperationTaskEvidence? @relation(fields: [organizationId, taskId, evidenceId], references: [organizationId, taskId, id], onDelete: Restrict, onUpdate: NoAction, map: "operation_issue_evidence_fkey")
@@ -6873,4 +6877,27 @@ model MaintenanceIssueContext {
   @@unique([organizationId,previousId],map:"maintenance_issue_context_predecessor")
   @@index([organizationId,issueId,version(sort:Desc)],map:"maintenance_issue_context_history")
   @@map("maintenance_issue_context")
+}
+
+model MaintenanceWorkOrder {
+  id String @id @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  issueId String @map("issue_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  nativeFingerprint String @map("native_fingerprint") @db.Char(64)
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  requestHash String @map("request_hash") @db.Char(64)
+  snapshot Json
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation("MaintenanceWorkOrderOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  task OperationTask @relation("MaintenanceWorkOrderTask",fields:[organizationId,id],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"maintenance_work_order_task_fk")
+  issue OperationIssue @relation("MaintenanceWorkOrderIssue",fields:[organizationId,issueId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"maintenance_work_order_issue_fk")
+  actor UserAccount @relation("MaintenanceWorkOrderActor",fields:[organizationId,actorId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"maintenance_work_order_actor_fk")
+  @@unique([organizationId,id],map:"maintenance_work_order_org_id")
+  @@unique([organizationId,actorId,idempotencyKey],map:"maintenance_work_order_actor_nonce")
+  @@index([organizationId,issueId,createdAt(sort:Desc)],map:"maintenance_work_order_issue_history")
+  @@map("maintenance_work_order")
 }
