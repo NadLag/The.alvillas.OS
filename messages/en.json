@@ -54,6 +54,7 @@
     "fieldSubtitle": "Use your phone and PIN to open your assigned work."
   },
   "AppShell": {
+    "reports": "Reports",
     "actions": "Workspace actions",
     "switch": {
       "en": "EN",
@@ -1195,12 +1196,22 @@
     "offlineProgress": "You can keep working offline. Finish the job to queue its completion.",
     "draftSaved": "Your changes are saved on this device."
   },
+  "ReportsWorkspace": {
+    "eyebrow": "Performance",
+    "title": "Reports",
+    "back": "Workspace",
+    "financialExports": "Financial exports",
+    "ownerReports": "Owner reports",
+    "empty": "There are no reports available with your current permissions."
+  },
   "OwnerPortal": {
     "preferences": {
       "title": "Portal preferences",
       "notifications": "Notification settings"
     },
     "reports": {
+      "settlements": "Settlements and custody",
+      "monthlyStatement": "Open monthly statement",
       "title": "Financial reports",
       "year": "Year",
       "annual": "Annual totals",

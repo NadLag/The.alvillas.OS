@@ -182,6 +182,11 @@ describe("native shared statement generation", () => {
     expect(value.payments.toJSON().amount).toBe("45.02");
     expect(value.collected.map(([rail, amount]) => [rail, amount.toJSON().amount])).toEqual([["BOOKING_RECEIPT", "125.01"]]);
     expect(value.movements).toHaveLength(2);
+    const report = await getOwnerFinancialReport(f.ctx, f.property.id, "2026", "MAD", { db, requestId: randomUUID() });
+    expect(report.funds.payable.toJSON().amount).toBe("69.99");
+    expect(report.funds.transferred.toJSON().amount).toBe("45.02");
+    expect(report.funds.collected.map(([rail, amount]) => [rail, amount.toJSON().amount])).toEqual([["BOOKING_RECEIPT", "125.01"]]);
+    expect(report.payouts.forecast).toBeNull();
     const payouts = await getOwnerPayoutHistory(f.ctx, f.property.id, { from: "2026-11-02", to: "2026-11-02", currency: "MAD" }, 1, { db, requestId: randomUUID() });
     expect(payouts.rows).toEqual([]);
     expect(payouts.plannedTotal.toJSON().amount).toBe("0.00");

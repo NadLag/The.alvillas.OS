@@ -54,6 +54,7 @@
     "fieldSubtitle": "استخدم الهاتف والرمز السري للوصول إلى مهامك المسندة."
   },
   "AppShell": {
+    "reports": "التقارير",
     "actions": "Workspace actions",
     "switch": {
       "en": "EN",
@@ -1195,12 +1196,22 @@
     "offlineProgress": "يمكنك مواصلة العمل دون اتصال. أنهِ المهمة لإضافة إكمالها إلى قائمة المزامنة.",
     "draftSaved": "تم حفظ تغييراتك على هذا الجهاز."
   },
+  "ReportsWorkspace": {
+    "eyebrow": "الأداء",
+    "title": "التقارير",
+    "back": "مساحة العمل",
+    "financialExports": "التصديرات المالية",
+    "ownerReports": "تقارير الملاك",
+    "empty": "لا توجد تقارير متاحة بالصلاحيات الحالية."
+  },
   "OwnerPortal": {
     "preferences": {
       "title": "تفضيلات البوابة",
       "notifications": "إعدادات الإشعارات"
     },
     "reports": {
+      "settlements": "التسويات والأموال المحتفظ بها",
+      "monthlyStatement": "فتح الكشف الشهري",
       "title": "التقارير المالية",
       "year": "السنة",
       "annual": "المجاميع السنوية",
