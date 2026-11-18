@@ -283,6 +283,11 @@ it("registers and links canonical property assets with exact cost, unchanged sou
     reason: "Plan replacement of the original installed pump", idempotencyKey: randomUUID() };
   await expect(recordAssetLifecycle(f.actor, plan, f.deps)).resolves.toEqual({ version: 1 });
   await expect(recordAssetLifecycle(f.actor, plan, f.deps)).resolves.toEqual({ version: 1 });
+  const withoutCostEdit = (permissions: ReadonlySet<string>) => new Set([...permissions].filter(key => key !== "asset_cost:edit"));
+  const readOnlyBudget = { ...f.actor, authContext: { ...f.actor.authContext, permissions: withoutCostEdit(f.actor.authContext.permissions),
+    assignments: f.actor.authContext.assignments?.map(assignment => ({ ...assignment, permissions: withoutCostEdit(assignment.permissions) })) } };
+  await expect(recordAssetLifecycle(readOnlyBudget, { ...plan, expectedVersion: 1, budget: null, idempotencyKey: randomUUID() }, f.deps))
+    .rejects.toBeInstanceOf(AssetAccessError);
   const replacement = { assetId: asset.id, kind: "REPLACE", expectedVersion: 1, effectiveOn: today,
     reason: "Record installation of the original replacement pump", successorTag: "PUMP-0043", idempotencyKey: randomUUID() };
   await expect(recordAssetLifecycle(f.actor, { ...replacement, successorTag: "FOREIGN-PUMP" }, f.deps)).rejects.toBeInstanceOf(AssetConflictError);

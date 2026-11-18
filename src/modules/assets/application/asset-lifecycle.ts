@@ -95,6 +95,12 @@ export async function recordAssetLifecycle(actor: AccountActorContext, raw: unkn
     if ((command.kind === "REPLACE" || command.kind === "DISPOSE") &&
       (command.effectiveOn > calendarDateAt(now, row.timezone) || (row.purchaseOn && command.effectiveOn < row.purchaseOn)))
       throw new AssetConflictError();
+    if (command.kind === "PLAN" && head?.kind === "PLAN" && head.amount !== null && head.effectiveOn) {
+      const originalBudget = { ...resource, type: "asset_cost", dataClass: "financial" as const, financialRecordId: command.assetId,
+        amount: head.amount, occurredAt: calendarDateStart(head.effectiveOn, row.timezone) };
+      checks.push({ action: "view", resource: originalBudget }, { action: "edit", resource: originalBudget });
+      await recheckAccountAuthorization(actor, tx, now, checks, new AssetAccessError());
+    }
     if (successorId && (!await repo.active(successorId, source.propertyId) || await repo.hasPredecessor(successorId)))
       throw new AssetConflictError();
     const eventId = await repo.append(command, { actorId: actor.actorId, requestHash, successorId, budget, now });
