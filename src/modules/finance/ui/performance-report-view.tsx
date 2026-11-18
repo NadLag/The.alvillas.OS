@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { getTranslations } from "next-intl/server";
-import { formatCurrency, formatPercentageAmount } from "@/i18n/format";
+import { formatCurrency, formatPercentageAmount, formatRecipeQuantity } from "@/i18n/format";
 import type { AppLocale } from "@/i18n/routing";
+import type { OrganizationReportPeriod } from "../application/organization-performance-report";
 import type { AccountantExportFormat } from "../domain/accountant-export";
 import type { PerformanceMetric } from "../domain/performance-report";
 
@@ -31,13 +32,26 @@ export async function PerformanceReportFilters({ report, locale, download, filte
   </>;
 }
 
+export async function PerformancePropertyFilter({ report }: { report: Pick<OrganizationReportPeriod,
+  "propertyId" | "propertyName" | "propertyOptions" | "portfolioAvailable"> }) {
+  const t = await getTranslations("PerformanceReports");
+  return <label className="field"><span>{t("propertyFilter")}</span>
+    <select name="propertyId" defaultValue={report.propertyId ?? ""}>
+      {report.portfolioAvailable ? <option value="">{t("allProperties")}</option> : null}
+      {report.propertyId && report.propertyName && !report.propertyOptions.some(property => property.id === report.propertyId) ?
+        <option value={report.propertyId}>{report.propertyName}</option> : null}
+      {report.propertyOptions.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
+    </select>
+  </label>;
+}
+
 export async function PerformanceMetrics({ title, metrics, locale }: { title: string; metrics: readonly PerformanceMetric[]; locale: AppLocale }) {
   const t = await getTranslations("PerformanceReports");
   return <section className="detail-panel">
     <h2>{title}</h2>
     <dl className="detail-grid">{metrics.map(({ key, amount, count }) => <div key={key}>
       <dt>{t("metric." + key)}</dt>
-      <dd className={amount ? "money" : undefined}>{amount ? formatCurrency(locale, amount) : count?.endsWith("%") ? formatPercentageAmount(locale, count.slice(0, -1), 2) : count && /^-?\d+$/u.test(count) ? new Intl.NumberFormat(locale).format(BigInt(count)) : count ?? t("unavailable")}</dd>
+      <dd className={amount ? "money" : undefined}>{amount ? formatCurrency(locale, amount) : count?.endsWith("%") ? formatPercentageAmount(locale, count.slice(0, -1), 2) : count && /^-?\d+$/u.test(count) ? new Intl.NumberFormat(locale).format(BigInt(count)) : count && /^\d+\.\d{1,2}$/u.test(count) ? formatRecipeQuantity(locale, count) : count ?? t("unavailable")}</dd>
     </div>)}</dl>
   </section>;
 }

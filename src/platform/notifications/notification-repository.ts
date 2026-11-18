@@ -1,3 +1,5 @@
+import { canReadScheduledReport, reportSchedulesKey, reportSchedulesPolicy } from "@/modules/finance/domain/scheduled-report";
+import { ScheduledReportRepository } from "@/modules/finance/infrastructure/scheduled-report-repository";
 import { SupplierAlertRepository } from "@/modules/finance/infrastructure/supplier-alert-repository";
 import { canReadSupplierAlert, supplierAlertResource } from "@/modules/finance/domain/supplier-alert";
 import { AssetRepository } from "@/modules/assets/infrastructure/asset-repository";
@@ -102,11 +104,11 @@ export class NotificationRepository {
 
   private async deliverLocked(event: OutboxEvent, batch?: DeliveryBatch): Promise<void> {
     const input = notificationInputSchema.parse(event.payload);
-    const financialNotice=input.kind==="lead_reminder"?await this.leadReminderSource(input):input.kind==="document_expiring"?await this.documentExpirySource(input):input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):
+    const financialNotice=input.kind==="report_ready"?await this.scheduledReportNotice(input.targetId,input.recipientId):input.kind==="lead_reminder"?await this.leadReminderSource(input):input.kind==="document_expiring"?await this.documentExpirySource(input):input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):
       input.kind==="supplier_invoice_emergency"?await this.invoiceEmergencySource(event,input):input.kind==="employee_cost_emergency"?(batch?.employeeNotices?batch.employeeNotices.get(event.id)??null:await this.employeeCostEmergencySource(event,input)):input.kind==="receivable_reminder"?(batch?.reminderNotices?batch.reminderNotices.get(event.id)??null:(await this.receivableReminderSources([event])).notices.get(event.id)??null):input.kind==="ledger_integrity_failed"?(batch?.ledgerNotices?batch.ledgerNotices.get(event.id)??null:(await this.ledgerIntegritySources([event])).notices.get(event.id)??null):null;
     const target = financialNotice?.target ?? (batch ? batch.targets.get(`${input.kind}:${input.targetId}`) :
       (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId));
-    if((input.kind==="lead_reminder"||input.kind==="document_expiring"||input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")&&!financialNotice)return this.finish(event.id,batch);
+    if((input.kind==="report_ready"||input.kind==="lead_reminder"||input.kind==="document_expiring"||input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")&&!financialNotice)return this.finish(event.id,batch);
     if (!target) return this.finish(event.id, batch);
     if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id, batch);
     const identity = target.type === "identity";
@@ -118,7 +120,7 @@ export class NotificationRepository {
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
     let routing:NotificationRouting;
-    if(input.kind==="lead_reminder"||input.kind==="document_expiring"||input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")routing=financialNotice!.notice.routing;
+    if(input.kind==="report_ready"||input.kind==="lead_reminder"||input.kind==="document_expiring"||input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")routing=financialNotice!.notice.routing;
     else routing=approval?notificationRoutingSchema.parse(stage?.routingSnapshot??approval.routingSnapshot):batch?.routing.get(routingKey)??await this.routing(input.kind,target.propertyId??null,event.occurredAt);
     if (batch && !approval&&!financialNotice) batch.routing.set(routingKey, routing);
     const mandatory = input.kind === "security_session_revoked";
@@ -146,6 +148,7 @@ export class NotificationRepository {
       const current=financialNotice?(batchState?{account:captured?.account??null,assignments:captured?.assignments??[],now:batchState.now}:await new IdentityRepository(this.tx,this.organizationId).authorizationState(candidate.id)):null;
       const ctx = contextForRoleAssignments(this.organizationId, candidate.id, current?current.assignments:explicit || selected || approval ? assignments : roleAssignments);
       if(current&&(!current.account||securityEnrollment(current.account,current.now).setupRequired))continue;
+      if (input.kind === "report_ready" && !canReadScheduledReport(ctx, target, current!.now)) continue;
       if(input.kind==="document_expiring"&&!canReadDocumentExpiryNotice(ctx,target,current!.now))continue;
       if(input.kind==="receivable_reminder"&&!canReadReceivableReminder(ctx,target,current!.now))continue;
       if(input.kind==="ledger_integrity_failed"&&!canReadLedgerIntegrityFailure(ctx,target,current!.now))continue;
@@ -160,13 +163,26 @@ export class NotificationRepository {
         await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
           create: { organizationId: this.organizationId, type: "notification.channel.requested", payload: { channel, recipientId: candidate.id, kind: input.kind, targetId: input.targetId, sourceEventId: event.id }, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } });
       }
-      if (!mandatory && (!financialNotice||input.kind==="lead_reminder"||input.kind==="document_expiring"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")&&(!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
+      if (!mandatory && (!financialNotice||input.kind==="report_ready"||input.kind==="lead_reminder"||input.kind==="document_expiring"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")&&(!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
       data.push({ organizationId: this.organizationId, recipientId: candidate.id,
         eventId: event.id, kind: input.kind, targetId: input.targetId, createdAt: event.occurredAt });
     }
     if (batch) batch.inbox.push(...data);
     else if (data.length) await this.tx.notification.createMany({ data, skipDuplicates: true });
     await this.finish(event.id, batch);
+  }
+
+  async scheduledReportNotice(targetId: string, recipientId: string): Promise<ReminderNoticeSource | null> {
+    const [run] = await new ScheduledReportRepository(this.tx, this.organizationId).targets([targetId], recipientId);
+    if (!run) return null;
+    const policy = await new ConfigRuleRepository(this.tx, this.organizationId).resolve({ key: reportSchedulesKey,
+      scopes: [{ scopeType: "organization", scopeId: null }], asOf: new Date() });
+    const active = reportSchedulesPolicy.safeParse(policy?.value);
+    const schedule = active.success ? active.data.schedules.find(value => value.id === run.scheduleId && value.recipients.includes(recipientId)
+      && value.kind === run.target.reportRun.kind && (value.propertyId ?? null) === (run.target.propertyId ?? null)) : null;
+    if (!schedule) return null;
+    const channels = run.channels.filter(channel => schedule.channels.includes(channel));
+    return channels.length ? { target: run.target, notice: { routing: { roles: [], people: [], assigned: false, channels } } } : null;
   }
 
   private async leadReminderSource(input:Extract<NotificationInput,{kind:"lead_reminder"}>):Promise<ReminderNoticeSource|null>{const source=await leadReminderContext(this.tx,this.organizationId,input.targetId,input.recipientId);return source?{target:source.target,notice:{routing:source.routing}}:null;}
@@ -558,6 +574,9 @@ export class NotificationRepository {
     for (const row of [...prices, ...contractors]) targets.set(row.id, {
       ...supplierAlertResource(this.organizationId, row), notificationEventId: row.id
     });
+    const reportIds = rows.filter(row => row.kind === "report_ready").map(row => row.targetId);
+    for (const run of await new ScheduledReportRepository(this.tx, this.organizationId).targets(reportIds, readerId))
+      targets.set(run.id, run.target);
     const warrantyIds = rows.filter(row => row.kind === "asset_warranty_expiring").map(row => row.targetId);
     for (const row of await new AssetRepository(this.tx, this.organizationId).warrantyTargets(warrantyIds)) {
       targets.set(row.referenceId, { type: "asset", id: row.assetId, organizationId: this.organizationId,

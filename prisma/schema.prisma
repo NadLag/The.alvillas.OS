@@ -402,6 +402,9 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  reportRuns ReportRun[]
+  reportCalendarSourceRevision ReportCalendarSourceRevision?
+  reportCalendarMaterializations ReportCalendarMaterialization[]
   assetLifecycleEvents AssetLifecycleEvent[]
   workOrderAssetRevisions MaintenanceWorkOrderAsset[]
   assets Asset[]
@@ -863,6 +866,7 @@ model Person {
 }
 
 model UserAccount {
+  reportRuns ReportRun[]
   assetLifecycleEvents AssetLifecycleEvent[]
   workOrderAssetRevisions MaintenanceWorkOrderAsset[]
   assetRevisions AssetRevision[]
@@ -1357,6 +1361,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  reportRuns ReportRun[]
   assets Asset[]
   laundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryProperty")
   serviceOrders ServiceOrder[]
@@ -2410,6 +2415,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  reportRuns ReportRun[]
   assetLifecycleEvents AssetLifecycleEvent[]
   assetRevisions AssetRevision[]
   maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
@@ -2468,6 +2474,8 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  reportRuns ReportRun[]
+  reportCalendarMaterializations ReportCalendarMaterialization[]
   maintenanceContractorAssignments MaintenanceContractorAssignment[]
   supplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceConfig")
   serviceOrders ServiceOrder[] @relation("ServiceOrderCatalog")
@@ -7093,4 +7101,57 @@ model AssetLifecycleEvent {
   @@unique([organizationId, actorId, idempotencyKey], map: "asset_lifecycle_nonce")
   @@unique([organizationId, successorId], map: "asset_lifecycle_successor")
   @@map("asset_lifecycle_event")
+}
+
+model ReportCalendarSourceRevision {
+  organizationId String @id @map("organization_id") @db.Uuid
+  revision BigInt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@map("report_calendar_source_revision")
+}
+
+model ReportCalendarMaterialization {
+  organizationId String @map("organization_id") @db.Uuid
+  periodKey String @map("period_key")
+  fromOn DateTime @map("from_on") @db.Date
+  toOn DateTime @map("to_on") @db.Date
+  sourceRevision BigInt @map("source_revision")
+  configRuleId String @map("config_rule_id") @db.Uuid
+  timezone String
+  rows Json
+  computedAt DateTime @map("computed_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  configRule ConfigRule @relation(fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "report_calendar_materializati_organization_id_config_rule__fkey")
+
+  @@id([organizationId, periodKey])
+  @@index([organizationId, fromOn, toOn], map: "report_calendar_materialization_range_idx")
+  @@map("report_calendar_materialization")
+}
+
+model ReportRun {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  configRuleId String @map("config_rule_id") @db.Uuid
+  scheduleId String @map("schedule_id") @db.Uuid
+  recipientId String @map("recipient_id") @db.Uuid
+  propertyId String? @map("property_id") @db.Uuid
+  reportKind String @map("report_kind")
+  scheduledOn DateTime @map("scheduled_on") @db.Date
+  fromOn DateTime @map("from_on") @db.Date
+  toOn DateTime @map("to_on") @db.Date
+  currency String @db.Char(3)
+  filters Json
+  channels String[]
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  generatedAt DateTime @map("generated_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  configRule ConfigRule @relation(fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  recipient UserAccount @relation(fields: [organizationId, recipientId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property Property? @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef Currency @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, scheduleId, recipientId, scheduledOn], map: "report_run_schedule_occurrence_key")
+  @@index([organizationId, recipientId, generatedAt(sort: Desc)], map: "report_run_recipient_idx")
+  @@map("report_run")
 }

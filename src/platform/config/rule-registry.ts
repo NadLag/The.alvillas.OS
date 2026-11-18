@@ -39,6 +39,8 @@ import {bankStatementPolicyKey,bankStatementPolicySchema} from "./bank-statement
 import {companyExpensePolicyKey,companyExpensePolicySchema,recurringCompanyExpensePolicyKey,recurringCompanyExpensePolicySchema} from "@/modules/finance/domain/company-expense";
 import {recurringExpensePolicyKey,recurringExpensePolicySchema} from "@/modules/finance/domain/recurring-expense";
 import { automationRuleSchema, ruleConditionSchema } from "@/platform/automation/rule";
+import { reportSchedulesKey, reportSchedulesPolicy } from "@/modules/finance/domain/scheduled-report";
+import { kpiRefreshKey, kpiRefreshPolicy } from "@/modules/finance/domain/kpi-materialization";
 import { operationPolicySchema, recurringTasksSchema } from "./operation-policy";
 import { teamPolicyKey, teamPolicySchema } from "@/modules/identity/domain/team";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
@@ -329,6 +331,8 @@ export const configRuleSchemas = {
   "finance.expense_allocation": expenseTreatmentConfigSchema,
   "finance.approval_thresholds": approvalThresholdsConfigSchema,
   "finance.payout_schedule": payoutScheduleConfigSchema,
+  [reportSchedulesKey]: reportSchedulesPolicy,
+  [kpiRefreshKey]: kpiRefreshPolicy,
   [recurringExpensePolicyKey]:recurringExpensePolicySchema,
   [companyExpensePolicyKey]:companyExpensePolicySchema,
   [recurringCompanyExpensePolicyKey]:recurringCompanyExpensePolicySchema,

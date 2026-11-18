@@ -1,3 +1,10 @@
+import { tickScheduledReports } from "@/modules/finance/application/scheduled-report-job";
+import { ScheduledReportRepository } from "@/modules/finance/infrastructure/scheduled-report-repository";
+import { notificationDestination } from "@/platform/notifications/notification";
+import { refreshKpiCalendar } from "@/modules/finance/application/kpi-materialization-job";
+import { KpiMaterializationRepository } from "@/modules/finance/infrastructure/kpi-materialization-repository";
+import { calendarDateAt } from "@/i18n/format";
+import { getKpiReport } from "@/modules/finance/application/kpi-report";
 import { getTeamPerformanceReport } from "@/modules/finance/application/team-performance-report";
 import { teamReportMetrics } from "@/modules/finance/domain/performance-report";
 import { exportCompanyPerformanceReport, getCompanyPerformanceReport } from "@/modules/finance/application/company-performance-report";
@@ -89,6 +96,22 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(report.adr?.toJSON().amount).toBe("9007199254740993.07");
    expect(report.revpar?.toJSON().amount).toBe("4503599627370496.54");
    expect(report.ownerResult.toJSON().amount).toBe("9007199254740993.07");
+   await withTenant(db, f.org, async tx => {
+     const keys = ["inventory_item:view", "inventory_location:view", "inventory_movement:view", "issue:view",
+       "role:view", "service_allocation:view"];
+     const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: keys } } });
+     expect(permissions).toHaveLength(keys.length);
+     await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: f.role.id, permissionId: permission.id })) });
+   });
+   const kpiActor = { ...ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+   const kpis = await getKpiReport(kpiActor, filter, { db });
+   expect(kpis.metrics.find(row => row.key === "occupancy")?.count).toBe("50.00%");
+   expect(kpis.metrics.find(row => row.key === "adr")?.amount?.toJSON().amount).toBe("9007199254740993.07");
+   expect(kpis.metrics.find(row => row.key === "kpiOwnerCash")?.amount).toBeNull();
+   const quarter = await getKpiReport(kpiActor, { propertyId: f.property.id, currency: "EUR", period: "2026-Q1" }, { db });
+   expect(quarter).toMatchObject({ fromOn: "2026-01-01", toOn: "2026-03-31" });
+   expect(quarter.metrics.find(row => row.key === "adr")?.amount?.toJSON().amount).toBe("71.13");
+   await expect(getKpiReport(kpiActor, { ...filter, ownerId: randomUUID() }, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
    const eur = await getPropertyPerformanceReport(ctx, { ...filter, currency: "EUR" }, { db });
    expect(eur.adr?.toJSON().amount).toBe("71.13");
    for (const format of ["CSV", "EXCEL", "PDF"] as const) {
@@ -105,6 +128,56 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    const unrelated = await fixture();
    await expect(getPropertyPerformanceReport(unrelated.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
    expect(await financial(f)).toEqual(original);
+ });
+
+ it("refreshes and invalidates the materialized KPI calendar at the original tenant revision", async () => {
+   const f = await fixture(), another = await fixture();
+   const today = calendarDateAt(new Date(), "UTC"), fromOn = today.slice(0, 7) + "-01";
+   const range = { fromOn, toOn: today, timezone: "UTC" };
+   const cache = (organizationId: string) => withTenant(db, organizationId,
+     tx => new KpiMaterializationRepository(tx, organizationId).lookup(range));
+   await withTenant(db, f.org, async tx => {
+     await tx.property.update({ where: { id: f.property.id }, data: { status: "ACTIVE" } });
+     await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.kpi_refresh", scopeType: "organization",
+       createdBy: f.account.id, effectiveFrom: new Date("2020-01-01"), reason: "Configured materialized calendar window",
+       value: { periods: ["CURRENT_MONTH"], refresh_minutes: 60 } });
+   });
+   expect(await refreshKpiCalendar(f.org, db)).toBe(1);
+   expect(await refreshKpiCalendar(f.org, db)).toBe(0);
+   expect(await cache(f.org)).toMatchObject([{ propertyId: f.property.id, occupied: "0" }]);
+   expect(await cache(another.org)).toBeNull();
+   await withTenant(db, f.org, tx => tx.property.update({ where: { id: f.property.id }, data: { name: "Updated native property name" } }));
+   expect(await cache(f.org)).toBeNull();
+   expect(await refreshKpiCalendar(f.org, db)).toBe(1);
+   expect(await cache(f.org)).toMatchObject([{ propertyName: "Updated native property name" }]);
+ });
+
+ it("publishes one authorized scheduled report with immutable period and current recipient access", async () => {
+   const f = await fixture(), other = await fixture();
+   await grantPerformanceReports(f);
+   await withTenant(db, f.org, async tx => {
+     const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "config_rule:configure" } });
+     await tx.rolePermission.create({ data: { organizationId: f.org, roleId: f.role.id, permissionId: permission.id } });
+     await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.report_schedules", scopeType: "organization",
+       createdBy: f.account.id, effectiveFrom: new Date("2020-01-01"), reason: "Send authorized reports on the configured calendar",
+       value: { schedules: [{ id: randomUUID(), kind: "COMPANY", recipients: [f.account.id, other.account.id], starts_on: "2020-01-01",
+         time: "00:00", occurrence: { frequency: "MONTHLY", day: 1 }, channels: ["in_app"] }] } });
+   });
+   const [first, second] = await Promise.all([tickScheduledReports(f.org, { db }), tickScheduledReports(f.org, { db })]);
+   expect(first.scheduled + second.scheduled).toBe(1);
+   const result = await withTenant(db, f.org, async tx => {
+     const item = await tx.notification.findFirstOrThrow({ where: { organizationId: f.org, kind: "report_ready", recipientId: f.account.id } });
+     const [run] = await new ScheduledReportRepository(tx, f.org).targets([item.targetId], f.account.id);
+     expect(await tx.notification.count({ where: { organizationId: f.org, kind: "report_ready" } })).toBe(1);
+     return { id: item.targetId, scope: run.target };
+   });
+   const input = { kind: "report_ready", recipientId: f.account.id, targetId: result.id } as const;
+   const actor = await authContextForAccount(f.org, f.account.id, { db });
+   expect(notificationDestination(actor, input, result.scope, "ar")).toBe(
+     "/ar/app/reports/company?fromOn="+result.scope.reportRun.fromOn+"&toOn="+result.scope.reportRun.toOn+"&currency=MAD");
+   expect(await withTenant(db, other.org, tx => new ScheduledReportRepository(tx, other.org).targets([result.id], other.account.id))).toEqual([]);
+   await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+   expect(notificationDestination(await authContextForAccount(f.org, f.account.id, { db }), input, result.scope, "en")).toBeNull();
  });
 
  it("separates company profit and portfolio performance from location and owner claim balances", async () => {

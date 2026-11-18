@@ -1,3 +1,4 @@
+import { inventoryReportSources } from "../domain/report-source-scope";
 import type { FinanceActorContext } from "./finance-access";
 import { readOrganizationPerformance, type OrganizationReportPeriod, type OrganizationReportSource,
   type PerformanceExport, type PerformanceReportDeps } from "./organization-performance-report";
@@ -9,11 +10,6 @@ type InventoryPerformance = ReturnType<typeof summarize>;
 function summarize(currency: string, source: InventorySources) {
   return { quantities: source.quantities, monetaryMetrics: inventoryReportMoney(source.money, currency) };
 }
-
-export const inventoryReportSources = {
-  operationalSources: ["inventory_item", "inventory_location", "inventory_movement", "property", "reservation"],
-  financialSources: ["financial_transaction", "expense", "supplier_invoice"]
-} as const;
 
 const inventoryReport: OrganizationReportSource<InventorySources, InventoryPerformance> = {
   ...inventoryReportSources,
