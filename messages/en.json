@@ -287,6 +287,7 @@
       "signInAgain": "Sign in after saving these codes"
     },
     "activation": {
+      "portalPassword": "Create a portal password",
       "eyebrow": "Account activation",
       "title": "Activate your account",
       "subtitle": "Verify the invited phone number and choose your field PIN. Add a password if this account also uses the web workspace.",
@@ -547,6 +548,8 @@
     },
     "owners": {
       "revokeRepresentative": "Revoke representative access",
+      "inviteOwner": "Invite owner to the portal",
+      "inviteRepresentative": "Invite representative",
       "eyebrow": "Core domain",
       "title": "Owners",
       "subtitle": "Create and review owner contacts inside the current organization scope.",

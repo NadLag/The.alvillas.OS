@@ -65,6 +65,11 @@ function authErrorCode(error: AuthError): string | undefined {
   return cause?.err?.code;
 }
 
+function workspacePath(surface: unknown) {
+  if (surface === "owner") return "/app/owner-portal";
+  return surface === "field" ? "/app/field" : "/app";
+}
+
 export async function loginAction(
   locale: string,
   _state: LoginFormState,
@@ -182,7 +187,7 @@ export async function loginAction(
     `/${await preferredLocaleForLogin({
       email: parsed.data.email,
       phone: parsed.data.phone
-    }, appLocale)}/app${formData.get("surface") === "field" ? "/field" : ""}`
+    }, appLocale)}${workspacePath(formData.get("surface"))}`
   );
 }
 
@@ -205,7 +210,7 @@ export async function beginPasskeyLoginAction(email: string) {
 }
 
 export async function finishPasskeyLoginAction(
-  locale: string, email: string, challengeId: string, response: AuthenticationResponseJSON, surface?: "field"
+  locale: string, email: string, challengeId: string, response: AuthenticationResponseJSON, surface?: "field" | "owner"
 ): Promise<LoginFormState> {
   const parsed = z.object({ email: z.string().trim().email(), challengeId: z.string().uuid() }).safeParse({ email, challengeId });
   if (!parsed.success) return { status: "error", messageKey: "invalid" };
@@ -228,7 +233,7 @@ export async function finishPasskeyLoginAction(
   } catch {
     return { status: "error", messageKey: "invalid" };
   }
-  redirect(`/${await preferredLocaleForLogin({ email: normalized }, safeLocale(locale))}/app${surface === "field" ? "/field" : ""}`);
+  redirect(`/${await preferredLocaleForLogin({ email: normalized }, safeLocale(locale))}${workspacePath(surface)}`);
 }
 
 export async function updatePreferredLocaleAction(locale: string, formData: FormData): Promise<void> {

@@ -1,6 +1,9 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { z } from "zod";
+import { coreActorContextFromSession } from "@/modules/core/application/core-access";
+import { CoreAuthorizationError, CoreNotFoundError, getOwner } from "@/modules/core/application/core-service";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
 import { getInvitationProfile, listIdentityDashboard, IdentityConflictError, IdentityNotFoundError } from "@/modules/identity/application/identity-service";
@@ -24,7 +27,7 @@ export default async function IdentityPage({
   searchParams
 }: Readonly<{
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ personId?: string }>;
+  searchParams: Promise<{ personId?: string; ownerId?: string; representativeId?: string }>;
 }>) {
   const { locale } = await params;
   const appLocale = safeLocale(locale);
@@ -37,7 +40,23 @@ export default async function IdentityPage({
   if (!ctx) {
     redirect(`/${appLocale}/login`);
   }
-  const requestedPersonId = (await searchParams).personId;
+  const { personId: requestedPersonId, ownerId, representativeId } = await searchParams;
+  let portalInvite;
+  if (ownerId !== undefined || representativeId !== undefined) {
+    if (!z.uuid().safeParse(ownerId).success || (representativeId !== undefined && !z.uuid().safeParse(representativeId).success)) notFound();
+    const core = await coreActorContextFromSession(session);
+    if (!core || !ownerId) notFound();
+    const owner = await getOwner(core, ownerId).catch((error: unknown) => {
+      if (error instanceof CoreNotFoundError || error instanceof CoreAuthorizationError) notFound();
+      throw error;
+    });
+    const contact = representativeId
+      ? owner.representatives.find(item => item.id === representativeId && item.status === "ACTIVE")
+      : owner;
+    if (!contact?.email) notFound();
+    portalInvite = { ownerId, representative: Boolean(representativeId), displayName: contact.displayName,
+      email: contact.email, phone: contact.phone, preferredLocale: contact.preferredLocale };
+  }
   if (requestedPersonId && !invitationInputSchema.shape.personId.safeParse(requestedPersonId).success) notFound();
   let selectedProfile: Awaited<ReturnType<typeof getInvitationProfile>> | null = null;
   if (requestedPersonId) {
@@ -106,6 +125,7 @@ export default async function IdentityPage({
         people={dashboard.people}
         invitationProfiles={choices}
         initialPersonId={selectedProfile?.id}
+        portalInvite={portalInvite}
         permissions={dashboard.permissions}
         roles={dashboard.roles}
         simulations={dashboard.simulations}

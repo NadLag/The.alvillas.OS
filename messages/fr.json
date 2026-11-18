@@ -287,6 +287,7 @@
       "signInAgain": "Se reconnecter apr?s avoir conserv? ces codes"
     },
     "activation": {
+      "portalPassword": "Créer un mot de passe pour le portail",
       "eyebrow": "Activation du compte",
       "title": "Activez votre compte",
       "subtitle": "Verifiez le telephone invite et choisissez votre PIN terrain. Ajoutez un mot de passe si ce compte utilise aussi l'espace web.",
@@ -547,6 +548,8 @@
     },
     "owners": {
       "revokeRepresentative": "Révoquer l’accès du représentant",
+      "inviteOwner": "Inviter le propriétaire au portail",
+      "inviteRepresentative": "Inviter le représentant",
       "eyebrow": "Domaine coeur",
       "title": "Proprietaires",
       "subtitle": "Creez et consultez les contacts proprietaires dans la portee de l'organisation.",

@@ -390,13 +390,10 @@ export async function activateInvitationAction(
     return flattenZodError(parsed.error);
   }
 
-  try {
-    await activateInvitation(parsed.data, await requestMeta());
-  } catch (error) {
-    return actionErrorState(error);
-  }
-
-  redirect(`/${appLocale}/login`);
+  const activation = await activateInvitation(parsed.data, await requestMeta())
+    .then(result => ({ result }), (error: unknown) => ({ error: actionErrorState(error) }));
+  if ("error" in activation) return activation.error;
+  redirect(`/${appLocale}/login${activation.result.ownerPortal ? "?surface=owner" : ""}`);
 }
 
 export async function suspendAccountAction(

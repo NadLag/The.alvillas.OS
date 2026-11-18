@@ -53,6 +53,7 @@ export default async function OwnerDetailPage({
     throw error;
   }
 
+  const canInvite = authorize(ctx.authContext, "create", { type: "identity", organizationId: ctx.organizationId });
   const canRevoke = authorize(ctx.authContext, "edit", { type: "owner", organizationId: ctx.organizationId,
     id: owner.id, ownerId: owner.id });
 
@@ -60,9 +61,16 @@ export default async function OwnerDetailPage({
     <AdminShell className="resource-page" testId="owner-detail-page">
       <ShellHeader
         actions={
-        <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
-          {t("owners.backToOwners")}
-        </Link>
+          <>
+            <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
+              {t("owners.backToOwners")}
+            </Link>
+            {canInvite && owner.email ? (
+              <Link className="secondary-button" href={`/${appLocale}/app/identity?ownerId=${owner.id}`}>
+                {t("owners.inviteOwner")}
+              </Link>
+            ) : null}
+          </>
         }
         eyebrow={t("owners.detailEyebrow")}
         subtitle={owner.legalName ?? t("owners.noLegalName")}
@@ -109,6 +117,11 @@ export default async function OwnerDetailPage({
                     {[representative.email, representative.phone, representative.status]
                       .filter(Boolean)
                       .join(" | ")}
+                    {canInvite && representative.email && representative.status === "ACTIVE" ? (
+                      <Link className="secondary-button" href={`/${appLocale}/app/identity?ownerId=${owner.id}&representativeId=${representative.id}`}>
+                        {t("owners.inviteRepresentative")}
+                      </Link>
+                    ) : null}
                     {canRevoke && representative.status !== "REVOKED" ? (
                       <form action={revokeOwnerRepresentativeAction.bind(null, appLocale, owner.id, representative.id)}>
                         <button className="secondary-button" type="submit">{t("owners.revokeRepresentative")}</button>

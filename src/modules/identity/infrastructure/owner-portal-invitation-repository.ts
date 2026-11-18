@@ -19,6 +19,15 @@ export class OwnerPortalInvitationRepository {
     return rows.length === 1 ? rows[0] : null;
   }
 
+  async owner(ownerId: string, email: string) {
+    const [owner] = await this.tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT id FROM owner
+      WHERE organization_id = ${this.organizationId}::uuid AND id = ${ownerId}::uuid
+        AND archived_at IS NULL AND lower(email) = ${email}
+      FOR SHARE`);
+    return owner ?? null;
+  }
+
   async activate(input: {
     ownerId: string;
     accountId: string;

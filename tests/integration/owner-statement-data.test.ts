@@ -6,6 +6,7 @@ import { getOwnerFinancialActivity } from "@/modules/owner-portal/application/ow
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { renderIdentityEmail } from "@/platform/email/identity-templates";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { revokeOwnerRepresentative } from "@/modules/core/application/core-service";
 import { withTenant } from "@/platform/db/tenant";
@@ -86,6 +87,41 @@ async function exporter(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("native shared statement generation", () => {
+  it("onboards an invited owner only while canonical contact and scope match", async () => {
+    const f = await fixture("Europe/Paris", bootstrapOrganizationId);
+    const email = "owner-onboarding-" + randomUUID() + "@example.test", phone = "+2127" + Date.now().toString().slice(-8);
+    const setEmail = (value: string) => withTenant(db, f.org, tx => tx.owner.update({ where: { id: f.owner.id }, data: { email: value } }));
+    await setEmail(email);
+    const actor = { organizationId: f.org, actorId: f.account.id, personId: f.person.id, authContext: {
+      organizationId: f.org, permissions: new Set(["identity:create", "role:assign", "role:override", "owner:view"]),
+      scopes: [{ organizationId: f.org, scopeType: "organization" as const }]
+    } };
+    const input = { displayName: f.owner.displayName, email, phone, roleKey: "owner", preferredLocale: "ar" as const,
+      scopeType: "owner" as const, scopeId: f.owner.id, expiresInHours: 1 };
+    const deps = { db, origin: "http://localhost:3000", requestId: randomUUID() };
+    await expect(createInvitation(actor, { ...input, email: "other-" + email }, deps)).rejects.toThrow("not found");
+    const invitation = await createInvitation(actor, input, deps);
+    const activationUrl = deps.origin + "/ar/activate/" + invitation.code + "?surface=owner";
+    expect(renderIdentityEmail("identity.invitation.delivery_requested", {
+      toEmail: email, locale: input.preferredLocale, channel: "email", expiresAt: invitation.expiresAt.toISOString(),
+      activationCode: invitation.code, activationUrl, roleKey: input.roleKey
+    }, deps.origin).text).toContain(activationUrl);
+    const activation = { code: invitation.code, phone, pin: "732170", password: "OwnerAcceptance#871" };
+    await expect(activateInvitation({ ...activation, password: undefined }, deps)).rejects.toThrow("requires a password");
+    await setEmail("replaced-" + email);
+    await expect(activateInvitation(activation, deps)).rejects.toThrow("not found");
+    await setEmail(email);
+    const active = await activateInvitation(activation, deps);
+    expect(active.ownerPortal).toBe(true);
+    const activeAccount = await withTenant(db, f.org, tx => tx.userAccount.findUniqueOrThrow({ where: { id: active.userAccountId }, select: { id: true, personId: true } }));
+    const scope = await ownerPortalActorContextFromSession({ user: { id: activeAccount.id, personId: activeAccount.personId,
+      organizationId: f.org, email, preferredLocale: "ar", sessionId: randomUUID(), sessionRevoked: false, securitySetupRequired: false },
+      expires: new Date(Date.now() + 3600000).toISOString() }, { db });
+    if (!scope) throw new Error("Activated owner cannot access the portal");
+    expect(await listOwnerPortalProperties(scope, { db })).toEqual([expect.objectContaining({ propertyId: f.property.id, canViewFinances: true })]);
+    await expect(activateInvitation(activation, deps)).rejects.toThrow("already used");
+  });
+
   it("activates only a recorded representative and revokes access without granting owner finances", async () => {
     const f = await fixture("Europe/Paris", bootstrapOrganizationId);
     const other = await fixture();

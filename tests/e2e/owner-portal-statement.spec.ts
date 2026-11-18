@@ -87,7 +87,7 @@ test.describe("owner portal live balance and statement", () => {
     expect(csv.ok()).toBe(true);
     expect(await csv.text()).toContain(totals.closing);
     for (const [path, marker] of [["activity", "owner-financial-activity"], ["funds", "owner-funds"],
-      ["payouts", "owner-payouts"], ["approvals", "owner-approvals"], ["documents", "owner-documents"]]) {
+      ["payouts", "owner-payouts"], ["approvals", "owner-approvals"], ["documents", "owner-documents"], ["reports", "owner-reports"]]) {
       await page.goto(propertyPath + "/" + path + (["activity", "funds", "payouts"].includes(path) ? "?" + periodQuery : ""));
       await expect(page.getByTestId(marker)).toBeVisible();
       await expect(page.getByText(scenario.bankCode)).toHaveCount(0);
@@ -109,6 +109,15 @@ test.describe("owner portal live balance and statement", () => {
 
     await page.goto("/en/app/owner-portal/properties/" + scenario.otherPropertyId + "/reservations");
     await expect(page.locator("body")).toContainText(/404|not found/i);
+
+    await page.goto("/en/app/owner-portal");
+    await page.getByRole("link", { name: en.OwnerPortal.preferences.notifications }).click();
+    await expect(page.getByTestId("notification-settings-page")).toBeVisible();
+    await page.getByRole("link", { name: en.Notifications.settings.back, exact: true }).click();
+    await page.getByLabel(en.AppShell.languagePreference).selectOption("fr");
+    await page.getByRole("button", { name: en.AppShell.saveLanguagePreference, exact: true }).click();
+    await expect(page).toHaveURL(/\/fr\/app\/owner-portal$/u);
+    await expect(page.getByRole("heading", { name: fr.OwnerPortal.title, exact: true })).toBeVisible();
 
     await page.context().clearCookies();
     await login(page, scenario.tenantEmail);

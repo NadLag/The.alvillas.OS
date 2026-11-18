@@ -9,13 +9,16 @@ function safeLocale(locale: string): AppLocale {
 }
 
 export default async function ActivationPage({
-  params
+  params,
+  searchParams
 }: Readonly<{
   params: Promise<{ locale: string; code: string }>;
+  searchParams: Promise<{ surface?: string }>;
 }>) {
   const { locale, code } = await params;
   const appLocale = safeLocale(locale);
   setRequestLocale(appLocale);
+  const portal = (await searchParams).surface === "owner";
   const t = await getTranslations("Identity.activation");
 
   return (
@@ -26,10 +29,11 @@ export default async function ActivationPage({
         <p>{t("subtitle")}</p>
         <ActivationForm
           code={code}
+          passwordRequired={portal}
           labels={{
             phone: t("phone"),
             pin: t("pin"),
-            password: t("password"),
+            password: t(portal ? "portalPassword" : "password"),
             activate: t("activate"),
             validation: t("validation"),
             conflict: t("conflict"),

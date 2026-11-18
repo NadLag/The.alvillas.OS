@@ -1002,6 +1002,10 @@ function invitationConflict(error: unknown): never {
   throw error;
 }
 
+function isOwnerPortalRole(roleKey: string) {
+  return roleKey === "owner" || roleKey === "owner_representative";
+}
+
 function assertOwnerInvitationScope(ctx: IdentityActorContext, ownerId: string | undefined) {
   if (!ownerId) throw new IdentityNotFoundError();
   assertAuthorizationAllowed(ctx, "view", { type: "owner", organizationId: ctx.organizationId, id: ownerId, ownerId });
@@ -1031,18 +1035,21 @@ export async function createInvitation(
     if (!roleSummary) throw new IdentityNotFoundError();
     assertPermissionGrantAllowed(ctx, roleSummary.permissionKeys, role.id, assignmentResource);
 
-    if (role.key === "owner_representative") {
-      assertOwnerInvitationScope(ctx, value.scopeType === "owner" ? value.scopeId : undefined);
-    }
+    const portalRole = isOwnerPortalRole(role.key);
+    if (portalRole) assertOwnerInvitationScope(ctx, value.scopeType === "owner" ? value.scopeId : undefined);
     const code = newInviteCode();
     if (value.personId) await new TeamRepository(tx, ctx.organizationId).lock(value.personId);
     const person = value.personId
       ? await getInvitationProfile(ctx, value.personId, { ...deps, db: { $transaction: callback => callback(tx) } })
       : await repository.createStandalonePerson({ displayName: value.displayName, email: value.email, phone: value.phone, preferredLocale: value.preferredLocale ?? "en" });
     if (person.email && await repository.accountEmailExists(person.email)) throw new IdentityConflictError("Use the existing account for this email");
-    if (role.key === "owner_representative" && (!value.scopeId || !person.email ||
-      !await new OwnerPortalInvitationRepository(tx, ctx.organizationId).representative(value.scopeId, person.email))) {
-      throw new IdentityNotFoundError();
+    if (portalRole) {
+      if (!value.scopeId || !person.email) throw new IdentityNotFoundError();
+      const portal = new OwnerPortalInvitationRepository(tx, ctx.organizationId);
+      const target = role.key === "owner"
+        ? await portal.owner(value.scopeId, person.email)
+        : await portal.representative(value.scopeId, person.email);
+      if (!target) throw new IdentityNotFoundError();
     }
     const expiresAt = new Date(Date.now() + value.expiresInHours * 60 * 60 * 1000);
     const invitation = await repository.createInvitation({
@@ -1057,7 +1064,7 @@ export async function createInvitation(
       actorId: ctx.actorId
     });
     const recipientLocale = safeLocale(person.preferredLocale);
-    const activationUrl = identityUrl(deps, `/${recipientLocale}/activate/${code}`);
+    const activationUrl = identityUrl(deps, `/${recipientLocale}/activate/${code}${portalRole ? "?surface=owner" : ""}`);
 
     await enqueueIdentityDelivery(tx, {
       organizationId: ctx.organizationId,
@@ -1110,7 +1117,7 @@ export async function createInvitation(
 export async function activateInvitation(
   input: ActivationInput,
   deps: IdentityServiceDeps = {}
-): Promise<{ userAccountId: string }> {
+): Promise<{ userAccountId: string; ownerPortal?: true }> {
   const parsed = activationInputSchema.parse(input);
   const organizationId = bootstrapOrganizationId;
   const rateLimit = await withTenant(db(deps), organizationId, (tx) => consumeRateLimit(tx, organizationId, {
@@ -1150,12 +1157,18 @@ export async function activateInvitation(
     const repository = new IdentityRepository(tx, organizationId);
     const person = await repository.invitationProfile(invitation.personId);
     if (!person || person.accountCount || person.email !== invitation.email || person.phone !== invitation.phone) throw new IdentityConflictError("Invitation profile changed or already has an account");
+    const portalRole = isOwnerPortalRole(invitation.role.key);
     const ownerScope = invitation.scopeType === "owner" ? invitation.scopeId : null;
     const portal = new OwnerPortalInvitationRepository(tx, organizationId);
-    const representative = invitation.role.key === "owner_representative" && ownerScope && invitation.email
-      ? await portal.representative(ownerScope, invitation.email)
-      : null;
-    if (invitation.role.key === "owner_representative" && !representative) throw new IdentityNotFoundError();
+    let representativeId: string | null = null;
+    if (portalRole) {
+      if (!parsed.password) throw new IdentityConflictError("Owner portal activation requires a password");
+      if (!ownerScope || !invitation.email || invitation.role.archivedAt) throw new IdentityNotFoundError();
+      const direct = invitation.role.key === "owner";
+      const target = direct ? await portal.owner(ownerScope, invitation.email) : await portal.representative(ownerScope, invitation.email);
+      if (!target) throw new IdentityNotFoundError();
+      if (!direct) representativeId = target.id;
+    }
 
     const account = await repository.createInvitationAccount({ personId: person.id, email: invitation.email, phone: parsed.phone });
 
@@ -1195,15 +1208,15 @@ export async function activateInvitation(
       actorId: invitation.createdBy
     });
 
-    if (ownerScope && representative) {
-      const grant = await portal.activate({ ownerId: ownerScope, accountId: account.id, representativeId: representative.id,
+    if (ownerScope && portalRole) {
+      const grant = await portal.activate({ ownerId: ownerScope, accountId: account.id, representativeId,
         assignmentId: assignment.id, actorId: invitation.createdBy });
       await writeAuditEvent(tx, {
         organizationId, actorId: null, action: "owner_portal.access.activate", resourceType: "owner_portal",
         resourceId: grant.id, ipAddress: deps.ipAddress ?? null,
-        after: { ownerId: ownerScope, representativeId: representative.id, assignmentId: assignment.id, userAccountId: account.id,
+        after: { ownerId: ownerScope, representativeId, assignmentId: assignment.id, userAccountId: account.id,
           invitationId: invitation.id },
-        reason: "Activated the recorded owner representative delegation",
+        reason: "Activated the scoped owner portal invitation",
         requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: new Date()
       });
     }
@@ -1234,7 +1247,7 @@ export async function activateInvitation(
       occurredAt: new Date()
     });
 
-    return { userAccountId: account.id };
+    return { userAccountId: account.id, ...(portalRole ? { ownerPortal: true as const } : {}) };
   }).catch(invitationConflict);
 }
 

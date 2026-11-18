@@ -12,7 +12,7 @@ type LoginMethod = "password" | "pin";
 
 type LoginFormProps = {
   locale: string;
-  surface?: "field";
+  surface?: "field" | "owner";
   labels: {
     email: string;
     phone: string;

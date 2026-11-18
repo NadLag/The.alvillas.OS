@@ -301,7 +301,7 @@ F-OWN-09 | IN-PROGRESS | The owner portal opens authorized owner and property do
 F-OWN-10 | IN-PROGRESS | Canonical monthly and annual owner reporting implemented and verified on PostgreSQL; mandatory CI and staging acceptance pending.
 F-OWN-11 | IN-PROGRESS | Owner portal reuses account language, inbox and notification preferences; mandatory CI and staging acceptance pending.
 F-OWN-12 | IN-PROGRESS | Scoped representative activation and revocation implemented and verified on PostgreSQL; delegates receive reservations and condition access. Mandatory CI and staging acceptance pending.
-F-OWN-13 | TODO |
+F-OWN-13 | IN-PROGRESS | Scoped native invitations and account activation verified on PostgreSQL; portal browser journey passed. Mandatory CI and staging acceptance pending.
 F-RPT-01 | TODO |
 F-RPT-02 | TODO |
 F-RPT-03 | TODO |
