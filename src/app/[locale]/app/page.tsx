@@ -69,6 +69,9 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/team`}>
             {t("team")}
           </Link>
+          {reservationContext && authorizeCollection(reservationContext.authContext, "view", "report") ? (
+            <Link className="secondary-button" href={`/${appLocale}/app/reports`}>{t("reports")}</Link>
+          ) : null}
           {reservationContext?.authContext.permissions.has("asset:view") ?
             <Link className="secondary-button" prefetch={false} href={`/${appLocale}/app/assets`}>{(await getTranslations("Assets"))("title")}</Link> : null}
           {reservationContext && authorizeOrganizationSource(reservationContext.authContext,"view",{type:"inventory_item",organizationId:session.user.organizationId,dataClass:"operational"},new Date()) ?

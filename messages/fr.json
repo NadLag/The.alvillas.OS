@@ -54,6 +54,7 @@
     "fieldSubtitle": "Utilisez votre téléphone et votre code PIN pour retrouver vos tâches."
   },
   "AppShell": {
+    "reports": "Rapports",
     "actions": "Actions de l'espace",
     "switch": {
       "en": "EN",
@@ -1194,6 +1195,14 @@
     "offlineLanguage": "Une connexion est nécessaire pour changer de langue. Votre liste de contrôle reste ici.",
     "offlineProgress": "Vous pouvez continuer à travailler hors connexion. Terminez la tâche pour mettre son envoi en attente.",
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
+  },
+  "ReportsWorkspace": {
+    "eyebrow": "Performance",
+    "title": "Rapports",
+    "back": "Espace de travail",
+    "financialExports": "Exports financiers",
+    "ownerReports": "Rapports propriétaires",
+    "empty": "Aucun rapport n’est disponible avec vos autorisations actuelles."
   },
   "OwnerPortal": {
     "preferences": {
