@@ -1,13 +1,14 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { AdminShell, EmptyState, ShellHeader } from "@/design-system/shells";
+import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { safeLocale } from "@/i18n/routing";
 import { financeActorContextFromSession } from "@/modules/finance/application/finance-access";
 import { AccountantExportWorkspace } from "@/modules/finance/ui/accountant-export-workspace";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import { listOwnerPortalProperties } from "@/modules/owner-portal/application/owner-portal-service";
 import { auth } from "@/platform/auth/session";
+import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { authorizeCollection } from "@/platform/authz/authorize";
 import { canViewAccountantExport } from "@/platform/authz/accountant-export-resource";
 
@@ -21,6 +22,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
     financeActorContextFromSession(session), ownerPortalActorContextFromSession(session), getTranslations("ReportsWorkspace")
   ]);
   const hasReportAccess = finance && authorizeCollection(finance.authContext, "view", "report");
+  const canViewCompany = finance && authorizeOrganizationSource(finance.authContext, "view", { type: "report", organizationId: finance.organizationId }, new Date());
   const canGenerate = finance && hasReportAccess && canViewAccountantExport(finance.authContext, "export", new Date());
   const properties = owner ? (await listOwnerPortalProperties(owner)).filter(property => property.canViewFinances) : [];
   if (!hasReportAccess && !properties.length) notFound();
@@ -32,6 +34,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
       } />
       {hasReportAccess ? <nav className="form-actions">
         <Link className="secondary-button" href={`/${locale}/app/properties`}>{t("propertyReports")}</Link>
+        {canViewCompany ? <Link className="secondary-button" href={`/${locale}/app/reports/company`}>{t("companyReports")}</Link> : null}
       </nav> : null}
       {canGenerate ? (
         <section className="detail-panel">
@@ -51,7 +54,6 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
           ))}</ul>
         </section>
       ) : null}
-      {!canGenerate && !properties.length ? <EmptyState tone="motif">{t("empty")}</EmptyState> : null}
     </AdminShell>
   );
 }

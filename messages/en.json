@@ -1236,10 +1236,25 @@
       "conflicts": "Conflicting nights",
       "occupancy": "Occupancy",
       "adr": "Average daily rate (ADR)",
-      "revpar": "Revenue per available night (RevPAR)"
-    }
+      "revpar": "Revenue per available night (RevPAR)",
+      "companyRevenue": "Company revenue",
+      "companyProfit": "Company operating result",
+      "companyMargin": "Operating margin",
+      "outsidePortfolio": "Result outside the active portfolio",
+      "bankBalance": "Bank balances",
+      "cashBalance": "Cash balances",
+      "cashPosition": "Total bank and cash balances"
+    },
+    "reportsBack": "Reports workspace",
+    "cashLocations": "Bank and cash locations",
+    "cashBasis": "Amounts are ledger balances in bank and cash accounts at the report date. The balances can include funds held on behalf of others.",
+    "portfolio": "Active portfolio",
+    "emptyPortfolio": "There are no active properties to report.",
+    "previous": "Previous properties",
+    "next": "Next properties"
   },
   "ReportsWorkspace": {
+    "companyReports": "Company reports",
     "propertyReports": "Property reports",
     "eyebrow": "Performance",
     "title": "Reports",

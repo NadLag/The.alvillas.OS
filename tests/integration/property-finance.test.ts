@@ -1,3 +1,5 @@
+import { exportCompanyPerformanceReport, getCompanyPerformanceReport } from "@/modules/finance/application/company-performance-report";
+import { companyReportMetrics } from "@/modules/finance/domain/performance-report";
 import { getPropertyPerformanceReport, exportPropertyPerformanceReport } from "@/modules/finance/application/property-performance-report";
 import { PerformanceReportAccessError, propertyReportMetrics } from "@/modules/finance/domain/performance-report";
 import { performanceReportFile } from "@/modules/finance/application/performance-report-file";
@@ -42,9 +44,7 @@ async function mortgage(f:Fixture,amount="0.07",currency="MAD",on=f.on){const dr
 const query=(f:Fixture)=>({propertyId:f.property.id,fromOn:f.on,toOn:f.on,currency:"MAD"});
 const financial=(f:Fixture)=>withTenant(db,f.org,tx=>tx.$queryRaw<Array<{kind:string;id:string;xmin:string;body:unknown}>>`SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${f.org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p) FROM posting p WHERE organization_id=${f.org}::uuid ORDER BY kind,id`);
 
-describe("actual property-attributed finance and immutable mortgage history",()=>{
- it("derives property performance from exact sealed postings and original stay dates", async () => {
-   const f = await fixture();
+async function grantPerformanceReports(f: Fixture) {
    await withTenant(db, f.org, async tx => {
      const keys = ["report:view", "report:export", "reservation:view", "property_finance:export", "financial_transaction:export",
        "company_ledger:export", "owner_statement:export", "expense:export", "supplier_invoice:export", "employee_payable:export",
@@ -52,6 +52,19 @@ describe("actual property-attributed finance and immutable mortgage history",()=
      const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: keys } } });
      expect(permissions).toHaveLength(keys.length);
      await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: f.role.id, permissionId: permission.id })) });
+     await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.accountant_exports", scopeType: "organization",
+       effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id, reason: "Authorize original report file generation",
+       value: { source: "ORIGINAL_POSTED_FINANCIAL_SOURCES", reports: ["TRANSACTIONS"], formats: ["CSV", "EXCEL", "PDF"],
+         classifications: {}, capacity: { CSV: 100, EXCEL: 100, PDF: 100 }, rate_limit: { requests: 20, window_seconds: 60 } } });
+   });
+   return { ...f.ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+}
+
+describe("actual property-attributed finance and immutable mortgage history",()=>{
+ it("derives property performance from exact sealed postings and original stay dates", async () => {
+   const f = await fixture();
+   const ctx = await grantPerformanceReports(f);
+   await withTenant(db, f.org, async tx => {
      const finance = new FinanceRepository(tx, f.org);
      const claim = await finance.ensureLedgerAccount({ code: "OWNER_PAYABLE", name: "Original claim", accountType: "CLAIM_OWNERSHIP", normalSide: "CREDIT" });
      const dimensions = { property_id: f.property.id };
@@ -67,12 +80,7 @@ describe("actual property-attributed finance and immutable mortgage history",()=
        nights: 1, idempotencyKey: randomUUID() } });
      await tx.calendarBlock.create({ data: { organizationId: f.org, propertyId: f.property.id, kind: "MAINTENANCE", source: "MANUAL",
        checkIn: new Date("2026-03-09"), checkOut: new Date("2026-03-10"), idempotencyKey: randomUUID() } });
-     await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.accountant_exports", scopeType: "organization",
-       effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id, reason: "Authorize original report file generation",
-       value: { source: "ORIGINAL_POSTED_FINANCIAL_SOURCES", reports: ["TRANSACTIONS"], formats: ["CSV", "EXCEL", "PDF"],
-         classifications: {}, capacity: { CSV: 100, EXCEL: 100, PDF: 100 }, rate_limit: { requests: 20, window_seconds: 60 } } });
    });
-   const ctx = { ...f.ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
    const filter = { propertyId: f.property.id, fromOn: "2026-03-08", toOn: "2026-03-10", currency: "MAD" };
    const original = await financial(f), report = await getPropertyPerformanceReport(ctx, filter, { db });
    expect(report).toMatchObject({ occupied: "1", available: "2", blocked: "1", conflicts: "0", occupancy: "50.00" });
@@ -94,6 +102,61 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    }
    const unrelated = await fixture();
    await expect(getPropertyPerformanceReport(unrelated.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
+   expect(await financial(f)).toEqual(original);
+ });
+
+ it("separates company profit and portfolio performance from location and owner claim balances", async () => {
+   const f = await fixture(), ctx = await grantPerformanceReports(f);
+   await withTenant(db, f.org, async tx => {
+     await tx.property.update({ where: { id: f.property.id }, data: { status: "ACTIVE" } });
+     const finance = new FinanceRepository(tx, f.org);
+     const company = (code: string, normalSide: "CREDIT" | "DEBIT") =>
+       finance.ensureLedgerAccount({ code, name: code, normalSide, accountType: "ALVILLAS_OWN" });
+     const location = (code: string) => finance.ensureLedgerAccount({ code, name: code, normalSide: "DEBIT", accountType: "ASSET_LOCATION" });
+     const [commission, expense, bank, cash, custody, clearing, claim] = await Promise.all([
+       company("ALVILLAS_COMMISSION_REVENUE", "CREDIT"),
+       company("ALVILLAS_EXPENSE", "DEBIT"), location("BANK_MAIN"), location("CASH_MAIN"), location("CASH_CUSTODY_PERSON"),
+       location("OTA_CLEARING_BOOKING"), finance.ensureLedgerAccount({ code: "OWNER_PAYABLE", name: "Private owner payable",
+         normalSide: "CREDIT", accountType: "CLAIM_OWNERSHIP" })
+     ]);
+     const record = async (debit: string, credit: string, amount: string, propertyId?: string, currency = "MAD") => {
+       const value = Money.of(amount, currency), dimensions = propertyId ? { property_id: propertyId } : {};
+       await finance.createFinancialTransaction({ reference: randomUUID(), description: "Native source of company performance",
+         idempotencyKey: randomUUID(), occurredAt: new Date("2026-03-08T12:00:00Z"), createdBy: f.account.id, postings: [
+           { ledgerAccountId: debit, side: "DEBIT", amount: value, bucket: "REPORT_TEST", dimensions },
+           { ledgerAccountId: credit, side: "CREDIT", amount: value, bucket: "REPORT_TEST", dimensions }
+         ] });
+     };
+     await record(bank.id, commission.id, "1000.01", f.property.id);
+     await record(cash.id, bank.id, "20.00");
+     await record(expense.id, bank.id, "250.11", f.property.id);
+     await record(expense.id, bank.id, "9.99");
+     await record(bank.id, claim.id, "777.77", f.property.id);
+     await record(custody.id, claim.id, "100.00", f.property.id);
+     await record(clearing.id, claim.id, "200.00", f.property.id);
+     await record(bank.id, commission.id, "55.25", f.property.id, "EUR");
+     await tx.reservation.create({ data: { organizationId: f.org, propertyId: f.property.id, reference: randomUUID(),
+       source: "DIRECT", status: "CHECKED_OUT", guestName: "Private individual", checkIn: new Date("2026-03-08"), checkOut: new Date("2026-03-09"),
+       nights: 1, idempotencyKey: randomUUID() } });
+   });
+   const filter = { fromOn: "2026-03-08", toOn: "2026-03-09", currency: "MAD" };
+   const original = await financial(f), report = await getCompanyPerformanceReport(ctx, filter, { db });
+   expect(report.revenue.toJSON().amount).toBe("1000.01");
+   expect(report.profit.toJSON().amount).toBe("739.91");
+   expect(report.cashPosition.toJSON().amount).toBe("1517.68");
+   expect(report.outsidePortfolio.toJSON().amount).toBe("-9.99");
+   expect(report.margin).toBe("73.99");
+   expect(report.properties[0]).toMatchObject({ propertyId: f.property.id, occupied: "1", available: "2", occupancy: "50.00" });
+   const eur = await getCompanyPerformanceReport(ctx, { ...filter, currency: "EUR" }, { db });
+   expect(eur.revenue.toJSON().amount).toBe("55.25");
+   expect(JSON.stringify(report)).not.toMatch(/BANK_MAIN|Private individual|Private owner payable/u);
+   const bytes = await exportCompanyPerformanceReport(ctx, filter, { format: "CSV", render: (original, policy) => {
+     const metrics = companyReportMetrics(original);
+     return performanceReportFile({ ...original, organizationId: f.org, kind: "COMPANY_PERFORMANCE", propertyId: null,
+       metrics: [...metrics.financial, ...metrics.cash] }, "CSV", "en", policy, "companyTitle");
+   } }, { db });
+   expect(new TextDecoder().decode(bytes)).toContain("1517.68");
+   await expect(getCompanyPerformanceReport(f.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
    expect(await financial(f)).toEqual(original);
  });
 

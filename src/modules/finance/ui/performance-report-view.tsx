@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { formatCurrency, formatPercentageAmount } from "@/i18n/format";
 import type { AppLocale } from "@/i18n/routing";
@@ -22,9 +21,9 @@ export async function PerformanceReportFilters({ report, locale, download }: { r
       <button className="primary-button" type="submit">{t("apply")}</button>
     </form>
     {formats.length ? <nav className="form-actions" aria-label={t("exports")}>
-      {formats.map(format => <Link key={format} prefetch={false} className="secondary-button" href={download + "/" + format + "?" + query.toString()}>
+      {formats.map(format => <a key={format} download className="secondary-button" href={download + "/" + format + "?" + query.toString()}>
         {t("download." + format)}
-      </Link>)}
+      </a>)}
     </nav> : null}
   </>;
 }

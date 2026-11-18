@@ -3,8 +3,9 @@ import { calendarDateAt } from "@/i18n/format";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { prisma } from "@/platform/db/client";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { canViewCompletePropertyFinance, propertyFinanceAuthorityChecks } from "@/platform/authz/property-finance-resource";
+import { authorize } from "@/platform/authz/authorize";
 import type { CurrentAuthorityCheck } from "@/platform/authz/current-authority";
-import { propertyFinanceAuthorityChecks } from "@/platform/authz/property-finance-resource";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { consumeRateLimit } from "@/platform/rate-limit/postgres-rate-limiter";
@@ -38,7 +39,8 @@ async function loadPropertyReport<T>(actor: FinanceActorContext, raw: unknown, d
     const checks: CurrentAuthorityCheck[] = [
       { action: "view" as const, resource },
       { action, resource },
-      ...propertyFinanceAuthorityChecks(resource, action),
+      ...propertyFinanceAuthorityChecks(resource),
+      ...(output ? propertyFinanceAuthorityChecks(resource, "export") : []),
       { action: "view" as const, resource: { ...resource, type: "reservation", dataClass: "operational" as const }, unconditional: true }
     ];
     const now = await clock();
@@ -77,7 +79,8 @@ async function loadPropertyReport<T>(actor: FinanceActorContext, raw: unknown, d
     const sourceFingerprint = commandFingerprint({ propertyId, fromOn, toOn, timezone, currency, source });
     const report = { ...propertyReportTotals(currency, source.postings, source.nights), propertyId, propertyName: property.name,
       fromOn, toOn, today, timezone, currency, currencies: settings.currencies.map(row => row.code), sourceFingerprint,
-      generatedAt: now.toISOString(), formats: exportPolicy?.formats ?? [] };
+      generatedAt: now.toISOString(), formats: authorize(actor.authContext, "export", resource, now) &&
+        canViewCompletePropertyFinance(actor.authContext, resource, now, "export") ? exportPolicy?.formats ?? [] : [] };
 
     const result = output && rule && exportPolicy
       ? await output.render(report, { id: rule.id, version: rule.version, capacity: exportPolicy.capacity[output.format] })

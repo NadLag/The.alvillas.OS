@@ -1236,10 +1236,25 @@
       "conflicts": "Nuits en conflit",
       "occupancy": "Taux d’occupation",
       "adr": "Tarif journalier moyen (ADR)",
-      "revpar": "Revenu par nuit disponible (RevPAR)"
-    }
+      "revpar": "Revenu par nuit disponible (RevPAR)",
+      "companyRevenue": "Revenus ALVILLAS",
+      "companyProfit": "Résultat d’exploitation ALVILLAS",
+      "companyMargin": "Marge d’exploitation",
+      "outsidePortfolio": "Résultat hors portefeuille actif",
+      "bankBalance": "Soldes bancaires",
+      "cashBalance": "Soldes de caisse",
+      "cashPosition": "Total banque et caisse"
+    },
+    "reportsBack": "Espace des rapports",
+    "cashLocations": "Comptes bancaires et de caisse",
+    "cashBasis": "Les montants correspondent aux soldes comptables à la date du rapport. Ils peuvent inclure des fonds détenus pour le compte de tiers.",
+    "portfolio": "Portefeuille actif",
+    "emptyPortfolio": "Aucune propriété active à présenter.",
+    "previous": "Propriétés précédentes",
+    "next": "Propriétés suivantes"
   },
   "ReportsWorkspace": {
+    "companyReports": "Rapports ALVILLAS",
     "propertyReports": "Rapports par propriété",
     "eyebrow": "Performance",
     "title": "Rapports",

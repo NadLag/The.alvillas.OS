@@ -305,7 +305,7 @@ F-OWN-13 | IN-PROGRESS | Scoped native invitations and account activation verifi
 F-RPT-01 | IN-PROGRESS | Reports workspace exposes authorized native financial exports with PDF, CSV and Excel and owner property reports. Targeted checks passed; mandatory CI and staging acceptance pending.
 F-RPT-02 | IN-PROGRESS | Owner annual and monthly reporting includes exact verified receipts, transfers, payable and native forecast when available. PostgreSQL passed. Owner-attributed custody evidence, payout stack and acceptance gates remain open.
 F-RPT-03 | IN-PROGRESS | Property ledgers and original stay calendars drive the localized P&L and performance report with audited CSV, Excel and PDF. Targeted PostgreSQL passed. Mandatory CI and staging acceptance pending.
-F-RPT-04 | TODO |
+F-RPT-04 | IN-PROGRESS | Company P&L, bank and cash locations, and active portfolio performance use original sealed postings and reservation data. Exact currency, custody separation, and native service PostgreSQL checks passed. CI and hosted acceptance pending.
 F-RPT-05 | TODO |
 F-RPT-06 | TODO |
 F-RPT-07 | TODO |

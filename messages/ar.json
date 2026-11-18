@@ -1236,10 +1236,25 @@
       "conflicts": "الليالي المتعارضة",
       "occupancy": "الإشغال",
       "adr": "متوسط السعر اليومي (ADR)",
-      "revpar": "الإيراد لكل ليلة متاحة (RevPAR)"
-    }
+      "revpar": "الإيراد لكل ليلة متاحة (RevPAR)",
+      "companyRevenue": "إيرادات ALVILLAS",
+      "companyProfit": "نتيجة تشغيل ALVILLAS",
+      "companyMargin": "هامش التشغيل",
+      "outsidePortfolio": "النتيجة خارج المحفظة النشطة",
+      "bankBalance": "الأرصدة المصرفية",
+      "cashBalance": "الأرصدة النقدية",
+      "cashPosition": "إجمالي الأرصدة المصرفية والنقدية"
+    },
+    "reportsBack": "مساحة التقارير",
+    "cashLocations": "الحسابات المصرفية والنقدية",
+    "cashBasis": "المبالغ هي أرصدة الحسابات المصرفية والنقدية في تاريخ التقرير وقد تشمل أموالاً محتفظاً بها لحساب الغير.",
+    "portfolio": "المحفظة النشطة",
+    "emptyPortfolio": "لا توجد عقارات نشطة لعرضها.",
+    "previous": "العقارات السابقة",
+    "next": "العقارات التالية"
   },
   "ReportsWorkspace": {
+    "companyReports": "?????? ALVILLAS",
     "propertyReports": "تقارير العقارات",
     "eyebrow": "الأداء",
     "title": "التقارير",

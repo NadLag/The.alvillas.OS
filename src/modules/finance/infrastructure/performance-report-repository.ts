@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { PropertyFinanceRepository } from "./property-finance-repository";
-import type { PropertyNightTotals, PropertyPostingTotal } from "../domain/performance-report";
+import type { CompanyPostingTotal, PortfolioNights, PropertyPostingTotal } from "../domain/performance-report";
 
 export class PerformanceReportRepository extends PropertyFinanceRepository {
   propertyPostings(input: { propertyId: string; currency: string; startsAt: Date; endsAt: Date }) {
@@ -38,12 +38,40 @@ export class PerformanceReportRepository extends PropertyFinanceRepository {
     return result;
   }
 
+  portfolioNights(fromOn: string, toOn: string) {
+    return this.nights(fromOn, toOn);
+  }
+
+  companyPostings(input: { currency: string; startsAt: Date; endsAt: Date }) {
+    return this.tx.$queryRaw<CompanyPostingTotal[]>(Prisma.sql`
+      WITH classified AS (
+        SELECT CASE
+          WHEN a.account_type = 'ALVILLAS_OWN' AND a.code = 'ALVILLAS_COMMISSION_REVENUE' THEN 'commission'
+          WHEN a.account_type = 'ALVILLAS_OWN' AND a.code = 'ALVILLAS_SERVICE_REVENUE' THEN 'companyServiceRevenue'
+          WHEN a.account_type = 'ALVILLAS_OWN' AND a.code = 'ALVILLAS_EXPENSE' THEN 'operatingCosts'
+          WHEN a.account_type = 'ASSET_LOCATION' AND a.normal_side = 'DEBIT' AND a.code ~ '^BANK($|_)' THEN 'bankBalance'
+          WHEN a.account_type = 'ASSET_LOCATION' AND a.normal_side = 'DEBIT' AND a.code ~ '^CASH($|_)'
+            AND a.code !~ '^CASH_CUSTODY($|[_:])' THEN 'cashBalance'
+        END AS key, property.id AS property_id, p.amount, p.side, t.occurred_at
+        FROM posting p
+        JOIN financial_transaction t ON t.organization_id = p.organization_id AND t.id = p.transaction_id
+        JOIN ledger_account a ON a.organization_id = p.organization_id AND a.id = p.ledger_account_id
+        LEFT JOIN property ON property.organization_id = p.organization_id AND property.id::text = p.dimensions->>'property_id'
+        WHERE p.organization_id = ${this.organizationId}::uuid AND p.currency = ${input.currency}
+          AND t.sealed AND t.occurred_at < ${input.endsAt}
+          AND (a.account_type = 'ASSET_LOCATION' OR t.occurred_at >= ${input.startsAt})
+      )
+      SELECT key, CASE WHEN key IN ('cashBalance','bankBalance') THEN NULL ELSE property_id END AS "propertyId",
+        sum(CASE WHEN (side = 'DEBIT') = (key IN ('operatingCosts','bankBalance','cashBalance')) THEN amount ELSE -amount END)::text AS amount
+      FROM classified WHERE key IS NOT NULL GROUP BY key, "propertyId" ORDER BY key, "propertyId"`);
+  }
+
   protected nights(fromOn: string, toOn: string, propertyId?: string) {
-    return this.tx.$queryRaw<(PropertyNightTotals & { propertyId: string; propertyName: string })[]>(Prisma.sql`
+    return this.tx.$queryRaw<PortfolioNights[]>(Prisma.sql`
       WITH properties AS (
         SELECT id, name, daterange(${fromOn}::date, ${toOn}::date + 1, '[)') AS period
         FROM property WHERE organization_id = ${this.organizationId}::uuid
-        ${propertyId ? Prisma.sql`AND id = ${propertyId}::uuid` : Prisma.sql`AND archived_at IS NULL`}
+        ${propertyId ? Prisma.sql`AND id = ${propertyId}::uuid` : Prisma.sql`AND archived_at IS NULL AND status = 'ACTIVE'`}
       ), reservation_nights AS (
         SELECT r.property_id, range_agg(daterange(r.check_in, r.check_out, '[)') * p.period) AS nights,
           sum(upper(daterange(r.check_in, r.check_out, '[)') * p.period)
