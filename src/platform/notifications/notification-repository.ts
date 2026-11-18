@@ -1,3 +1,5 @@
+import { SupplierAlertRepository } from "@/modules/finance/infrastructure/supplier-alert-repository";
+import { canReadSupplierAlert, supplierAlertResource } from "@/modules/finance/domain/supplier-alert";
 import { AssetRepository } from "@/modules/assets/infrastructure/asset-repository";
 import { canReadAssetWarrantyAlert } from "@/modules/assets/domain/warranty-alerts";
 import {leadReminderContext} from "./lead-work-source";
@@ -148,6 +150,8 @@ export class NotificationRepository {
       if(input.kind==="receivable_reminder"&&!canReadReceivableReminder(ctx,target,current!.now))continue;
       if(input.kind==="ledger_integrity_failed"&&!canReadLedgerIntegrityFailure(ctx,target,current!.now))continue;
       if (!identity && !current&&securityEnrollment({ ...candidate, roleAssignments: assignments }, observation!.now).setupRequired) continue;
+      if ((input.kind === "supplier_prices_changed" || input.kind === "supplier_performance_alert") &&
+        !canReadSupplierAlert(ctx, input.kind, target, observation?.now)) continue;
       if (input.kind === "asset_warranty_expiring" && !canReadAssetWarrantyAlert(ctx, target, observation?.now)) continue;
       if (!identity && !authorizeApprovalResource(ctx, "view", target,current?.now ?? observation?.now)) continue;
       if (approval && !authorizeApprovalResource(ctx, "approve", target, current?.now ?? observation?.now) && !authorizeApprovalResource(ctx, "reject", target, current?.now ?? observation?.now)) continue;
@@ -436,7 +440,7 @@ export class NotificationRepository {
     ] });
     // A financial failure audience is configured explicitly. Reading its form
     // must not persist an invalid empty rule or invent recipients/channels.
-    if (kind === "ledger_integrity_failed" || kind === "lead_reminder" || kind === "asset_warranty_expiring") return resolved ? (kind === "ledger_integrity_failed" ? ledgerIntegrityRoutingSchema : explicitNotificationRoutingSchema).parse(resolved.parsedValue) : { roles: [], people: [], assigned: false, channels: [] };
+    if (kind === "ledger_integrity_failed" || kind === "lead_reminder" || kind === "asset_warranty_expiring" || kind === "supplier_prices_changed" || kind === "supplier_performance_alert") return resolved ? (kind === "ledger_integrity_failed" ? ledgerIntegrityRoutingSchema : explicitNotificationRoutingSchema).parse(resolved.parsedValue) : { roles: [], people: [], assigned: false, channels: [] };
     if (!resolved) {
       // A single tenant lock makes concurrent first-use initialization retry-safe.
       await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + key}, 0))::text`);
@@ -546,9 +550,18 @@ export class NotificationRepository {
       propertyId: task.propertyId, region: task.property.regionId, city: task.property.cityId,
       status: task.state, assignedUserAccountId: task.assignedToUserAccountId
     }]));
+    const alerts = new SupplierAlertRepository(this.tx, this.organizationId);
+    const [prices, contractors] = await Promise.all([
+      alerts.prices(new Date(), undefined, rows.filter(row => row.kind === "supplier_prices_changed").map(row => row.targetId)),
+      alerts.contractors(new Date(), undefined, rows.filter(row => row.kind === "supplier_performance_alert").map(row => row.targetId))
+    ]);
+    for (const row of [...prices, ...contractors]) targets.set(row.id, {
+      ...supplierAlertResource(this.organizationId, row), notificationEventId: row.id
+    });
     const warrantyIds = rows.filter(row => row.kind === "asset_warranty_expiring").map(row => row.targetId);
     for (const row of await new AssetRepository(this.tx, this.organizationId).warrantyTargets(warrantyIds)) {
       targets.set(row.referenceId, { type: "asset", id: row.assetId, organizationId: this.organizationId,
+        notificationEventId: row.referenceId,
         propertyId: row.propertyId, city: row.cityId, region: row.regionId, dataClass: "operational" });
     }
     for (const row of rows) if (row.kind === "language_updated" || row.kind === "security_session_revoked") targets.set(row.targetId, { type: "identity", organizationId: this.organizationId, id: row.targetId });

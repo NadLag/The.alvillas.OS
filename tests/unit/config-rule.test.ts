@@ -105,6 +105,8 @@ describe("config rule registry", () => {
       "notification.routing.reservation_created",
       "notification.routing.security_session_revoked",
       "notification.routing.staff_document_expiring",
+      "notification.routing.supplier_performance_alert",
+      "notification.routing.supplier_prices_changed",
       "notification.routing.task_assigned",
       "notification.routing.task_completed",
       "notification.routing.task_overdue",

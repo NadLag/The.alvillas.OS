@@ -1302,6 +1302,8 @@
       "approval_requested": "An approval needs your decision.",
       "approval_decided": "An approval decision was recorded.",
       "staff_document_expiring": "A staff document is expiring.",
+      "supplier_prices_changed": "A supplier’s effective prices changed.",
+      "supplier_performance_alert": "A contractor missed a maintenance service target.",
       "asset_warranty_expiring": "An asset warranty is expiring.",
       "task_overdue": "An assigned task is overdue.",
       "expense_emergency": "Emergency expense approval exception",

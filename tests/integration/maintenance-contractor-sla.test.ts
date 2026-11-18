@@ -1,3 +1,7 @@
+import { tickSupplierAlerts } from "@/platform/notifications/supplier-alerts";
+import { supplierPriceListKey } from "@/platform/config/supplier-price-list-policy";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { notificationDestination } from "@/platform/notifications/notification";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -89,6 +93,38 @@ it("retains the original supplier, configured SLA, replay outcome and departure 
   expect(assigned.contractor.id).toBe(f.supplier.id);
   expect(assigned.response.state).toBe("PENDING");
   expect(new Date(assigned.response.dueAt).getTime() - new Date(assigned.at).getTime()).toBe(15 * 60_000);
+  await withTenant(db, f.organizationId, async tx => {
+    const rules = new ConfigRuleRepository(tx, f.organizationId);
+    const identity = { createdBy: f.account.id, reason: "Configure scoped contractor and price alerts" };
+    const routing = { roles: [], people: [f.person.id], assigned: false, channels: ["in_app"] };
+    await rules.createVersion({ ...identity, key: "notification.routing.supplier_performance_alert", scopeType: "property",
+      scopeId: f.property.id, effectiveFrom: new Date("2020-01-01"), value: routing });
+    await rules.createVersion({ ...identity, key: "notification.routing.supplier_prices_changed", scopeType: "organization",
+      effectiveFrom: new Date("2020-01-01"), value: routing });
+    for (const price of [{ date: "2020-01-01", rate: "105.00" }, { date: "2021-01-01", rate: "110.03" }]) {
+      await rules.createVersion({ ...identity, key: supplierPriceListKey(f.supplier.id), scopeType: "organization",
+        effectiveFrom: new Date(price.date), value: { currency: "MAD", items: [{ code: "REPAIR", name: "Equipment repair", unit: "visit", amount: price.rate }] } });
+    }
+    await tx.notificationPreference.upsert({
+      where: { organizationId_userAccountId: { organizationId: f.organizationId, userAccountId: f.account.id } },
+      create: { organizationId: f.organizationId, userAccountId: f.account.id, inAppEnabled: true, inAppOperations: true },
+      update: { inAppEnabled: true, inAppOperations: true }
+    });
+  });
+  const observed = new Date(new Date(assigned.response.dueAt).getTime() + 1000);
+  expect(await tickSupplierAlerts(f.organizationId, db, observed)).toBe(2);
+  expect(await tickSupplierAlerts(f.organizationId, db, observed)).toBe(0);
+  await withTenant(db, f.organizationId, async tx => {
+    const notices = await tx.notification.findMany({ where: { organizationId: f.organizationId, recipientId: f.account.id,
+      kind: { in: ["supplier_performance_alert", "supplier_prices_changed"] } } });
+    expect(notices.map(notice => notice.kind).sort()).toEqual(["supplier_performance_alert", "supplier_prices_changed"]);
+    const targets = await new NotificationRepository(tx, f.organizationId).targets(notices);
+    for (const notice of notices) {
+      const kind = notice.kind === "supplier_prices_changed" ? notice.kind : "supplier_performance_alert";
+      expect(notificationDestination(actor.authContext, { kind, recipientId: f.account.id, targetId: notice.targetId },
+        targets.get(notice.targetId) ?? null, "en")).toBe("/en/app/finance/suppliers/" + f.supplier.id);
+    }
+  });
   const clear = { taskId, contractorId: null, expectedRevision: 1, idempotencyKey: randomUUID(),
     reason: "Retain the completed record of the contractor assignment" };
   await changeMaintenanceContractor(actor, clear, f.deps);

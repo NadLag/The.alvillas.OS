@@ -1,3 +1,5 @@
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { notificationDestination } from "@/platform/notifications/notification";
 import { readAssetLifecycle, recordAssetLifecycle } from "@/modules/assets/application/asset-lifecycle";
 import { generateRecurringOperations } from "@/modules/reservations/application/operation-automation";
 import { readAssetPreventiveSchedule, saveAssetPreventiveSchedule } from "@/modules/assets/application/preventive-schedule";
@@ -242,9 +244,17 @@ it("registers and links canonical property assets with exact cost, unchanged sou
   expect(await tickAssetWarrantyReminders(external.organizationId, db)).toBe(0);
   expect(await tickAssetWarrantyReminders(f.organizationId, db)).toBe(1);
   expect(await tickAssetWarrantyReminders(f.organizationId, db)).toBe(0);
-  expect(await withTenant(db, f.organizationId, tx => tx.notification.count({ where: {
-    organizationId: f.organizationId, recipientId: f.account.id, kind: "asset_warranty_expiring"
-  } }))).toBe(1);
+  await withTenant(db, f.organizationId, async tx => {
+    const matching = await tx.notification.findMany({ where: {
+      organizationId: f.organizationId, recipientId: f.account.id, kind: "asset_warranty_expiring"
+    } });
+    expect(matching).toHaveLength(1);
+    const [notice] = matching;
+    const target = (await new NotificationRepository(tx, f.organizationId).targets([notice])).get(notice.targetId)!;
+    expect(notificationDestination(f.actor.authContext, {
+      kind: "asset_warranty_expiring", recipientId: f.account.id, targetId: notice.targetId
+    }, target, "en")).toBe("/en/app/assets/" + asset.id);
+  });
 
 
   const now = new Date(), today = now.toISOString().slice(0, 10);

@@ -315,6 +315,8 @@ export const configRuleSchemas = {
   "notification.routing.staff_document_expiring": notificationRoutingSchema,
   "notification.routing.task_assigned": notificationRoutingSchema,
   "notification.routing.task_completed": notificationRoutingSchema,
+  "notification.routing.supplier_performance_alert": explicitNotificationRoutingSchema,
+  "notification.routing.supplier_prices_changed": explicitNotificationRoutingSchema,
   "notification.routing.asset_warranty_expiring": explicitNotificationRoutingSchema,
   "notification.routing.task_overdue": notificationRoutingSchema,
   "notification.routing.reservation_created": notificationRoutingSchema,
