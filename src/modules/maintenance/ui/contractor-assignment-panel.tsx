@@ -111,7 +111,7 @@ export function ContractorAssignmentPanel({ taskId, locale, scope, authorization
     }}>{c("close")}</button> : <button type="button" className="secondary-button" onClick={() => {
       setOpen(true); void run(signal => load(signal));
     }}>{c("open")}</button>}
-    {open && busy ? <p role="status">{t("loading")}</p> : null}
+    {open && busy ? <p role="status">{t("states.loading")}</p> : null}
     {open && state !== "ready" && !busy ? <div role="alert">
       <p>{t("states." + state)}</p>
       {view === null ? <button type="button" className="secondary-button" onClick={() => void run(signal => load(signal))}>{t("refresh")}</button> : null}
