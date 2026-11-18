@@ -17,6 +17,8 @@ type OwnerLedgerPostingRow = {
   locationName: string | null;
   locationCode: string | null;
   propertyName: string | null;
+  reservationId: string | null;
+  reversal: boolean;
 };
 
 function jsonObject(value: Prisma.JsonValue | null): Record<string, unknown> | null {
@@ -50,6 +52,8 @@ export class OwnerStatementRepository {
         p.bucket,
         p.dimensions,
         property.name AS "propertyName",
+        reservation.id AS "reservationId",
+        ft.reverses_transaction_id IS NOT NULL AS reversal,
         ${input.includeLocations === false ? Prisma.sql`NULL::text AS "locationName", NULL::text AS "locationCode"` : Prisma.sql`location.name AS "locationName", location.code AS "locationCode"`}
       FROM posting p
       INNER JOIN ledger_account owner_account
@@ -60,6 +64,8 @@ export class OwnerStatementRepository {
        AND ft.organization_id = p.organization_id
       LEFT JOIN employee_compensation_recognition_line employee_link ON employee_link.organization_id=ft.organization_id AND employee_link.transaction_id=ft.id
       LEFT JOIN employee_compensation_cost employee_cost ON employee_cost.organization_id=employee_link.organization_id AND employee_cost.id=employee_link.cost_id
+      LEFT JOIN reservation ON reservation.organization_id=p.organization_id AND reservation.id::text=p.dimensions->>'reservation_id'
+        AND reservation.property_id::text=p.dimensions->>'property_id' AND reservation.archived_at IS NULL
       LEFT JOIN property ON property.organization_id=p.organization_id AND property.id::text=p.dimensions->>'property_id'
       ${input.includeLocations === false ? Prisma.empty : Prisma.sql`LEFT JOIN LATERAL (
         SELECT location_account.name, location_account.code

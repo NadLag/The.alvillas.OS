@@ -1192,6 +1192,18 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "activity": {
+      "title": "Revenue and expenses",
+      "statement": "Open statement",
+      "category": "Activity type",
+      "all": "All activity",
+      "details": "Posted transaction",
+      "reversal": "Reversal of a posted entry",
+      "reservation": "Open related reservation",
+      "empty": "No posted activity matches these dates and filters.",
+      "previous": "Previous transactions",
+      "next": "Next transactions"
+    },
     "reservationList": {
       "title": "Reservations",
       "back": "Back to properties",

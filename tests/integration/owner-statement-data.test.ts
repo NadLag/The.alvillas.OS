@@ -1,3 +1,4 @@
+import { getOwnerFinancialActivity } from "@/modules/owner-portal/application/owner-financial-activity";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -149,5 +150,13 @@ describe("native shared statement generation", () => {
     expect(statement.currency).toBe("EUR"); expect(statement.openingBalance.toJSON().amount).toBe("0.00");
     expect(statement.periodCreditTotal.toJSON().amount).toBe("9007199254740993.07"); expect(statement.closingBalance.toJSON().amount).toBe("9007199254740993.07");
     expect(statement.lines).toHaveLength(1); expect(statement.lines[0].amount.toJSON().currency).toBe("EUR"); expect(await facts(f.org)).toEqual(original);
+    const deps = { db, requestId: randomUUID() };
+    const activity = await getOwnerFinancialActivity(f.ctx, f.property.id, { ...input, posting: statement.lines[0].postingId }, deps);
+    expect(activity.rows.map(row => row.amount.toJSON())).toEqual([{ currency: "EUR", amount: "9007199254740993.07" }]);
+    expect(activity.detail).toMatchObject({ category: "OWNER_REVENUE", reference: statement.lines[0].reference });
+    expect(Object.keys(activity.detail ?? {})).not.toContain("description");
+    await expect(getOwnerFinancialActivity(f.ctx, f.property.id, { ...input, currency: "MAD", posting: statement.lines[0].postingId }, deps)).rejects.toThrow();
+    await expect(getOwnerFinancialActivity(f.ctx, randomUUID(), input, deps)).rejects.toThrow();
+    expect(await facts(f.org)).toEqual(original);
   });
 });

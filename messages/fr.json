@@ -1192,6 +1192,18 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "activity": {
+      "title": "Revenus et dépenses",
+      "statement": "Ouvrir le relevé",
+      "category": "Type de mouvement",
+      "all": "Tous les mouvements",
+      "details": "Opération comptabilisée",
+      "reversal": "Contrepassation d’une écriture",
+      "reservation": "Ouvrir la réservation associée",
+      "empty": "Aucun mouvement comptabilisé ne correspond à ces dates et filtres.",
+      "previous": "Opérations précédentes",
+      "next": "Opérations suivantes"
+    },
     "reservationList": {
       "title": "Réservations",
       "back": "Retour aux propriétés",

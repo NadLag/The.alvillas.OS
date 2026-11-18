@@ -93,6 +93,9 @@ export default async function OwnerStatementPage({
           <Link className="secondary-button" href={`/${appLocale}/app/owner-portal`}>
             {t("backToProperties")}
           </Link>
+          <Link className="secondary-button" href={`/${appLocale}/app/owner-portal/properties/${propertyId}/activity?from=${statement.fromOn}&to=${statement.toOn}&currency=${statement.currency}`}>
+            {t("activity.title")}
+          </Link>
           <LocaleSwitch
             compact
             currentLocale={appLocale}

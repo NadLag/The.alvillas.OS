@@ -16,7 +16,7 @@ const visibleStatus = {
 
 export const ownerReservationQuery = z.strictObject({
   propertyId: z.uuid(), from: z.iso.date().optional(), until: z.iso.date().optional(),
-  cursorDay: z.iso.date().optional(), cursorId: z.uuid().optional()
+  cursorDay: z.iso.date().optional(), cursorId: z.uuid().optional(), reservationId: z.uuid().optional()
 }).refine(input => Boolean(input.cursorDay) === Boolean(input.cursorId) && (!input.from || !input.until || input.until >= input.from));
 
 export async function listOwnerReservations(ctx: OwnerPortalActorContext, raw: unknown, db: TenantTransactionRunner = prisma) {
@@ -32,7 +32,7 @@ export async function listOwnerReservations(ctx: OwnerPortalActorContext, raw: u
     const from = input.from ?? calendarDateAt(calendar.now, calendar.timezone);
     if (input.until && input.until < from) throw new RangeError("Invalid reservation calendar range");
     const rows = await repository.reservations(input.propertyId, utc(from), input.until ? utc(input.until) : undefined,
-      input.cursorDay && input.cursorId ? { day: utc(input.cursorDay), id: input.cursorId } : undefined);
+      input.cursorDay && input.cursorId ? { day: utc(input.cursorDay), id: input.cursorId } : undefined, input.reservationId);
     if (!await repository.findOwnerPropertyAccess(ctx.actorId, input.propertyId)) throw new OwnerPortalNotFoundError();
     const day = (value: Date) => value.toISOString().slice(0, 10);
     const cursor = rows.length > 30 ? { cursorDay: day(rows[29].checkIn), cursorId: rows[29].id } : undefined;
