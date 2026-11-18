@@ -1192,6 +1192,50 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "payouts": {
+      "title": "Payout history and forecast",
+      "forecast": "Forecast amount",
+      "confirmed": "Verified transfers",
+      "estimate": "Forecasts reflect submitted payout plans and may change until settlement is verified.",
+      "frequency": "Frequency",
+      "method": "Payment method",
+      "eligible": "Earliest eligible date",
+      "expected": "Expected platform settlement",
+      "scheduled": "Scheduled transfer",
+      "paidOn": "Verified paid date",
+      "reference": "Masked settlement reference",
+      "approval": "Approval requirements",
+      "steps": "{count, plural, one {# required step} other {# required steps}}",
+      "empty": "No payout records for these dates.",
+      "unavailable": "Payout history and forecast are unavailable. Verified ledger movements remain visible under Money movements.",
+      "states": {
+        "PENDING_APPROVAL": "Pending approval",
+        "APPROVED": "Approved",
+        "SCHEDULED": "Scheduled",
+        "PAID": "Paid",
+        "RECONCILED": "Reconciled",
+        "FAILED": "Failed",
+        "CANCELLED": "Cancelled",
+        "AWAITING_EVIDENCE": "Awaiting payment evidence"
+      },
+      "cadences": {
+        "AFTER_CHECKOUT": "After checkout",
+        "PER_BOOKING": "Per booking",
+        "WEEKLY": "Weekly",
+        "FIFTEEN_DAY": "Every 15 days",
+        "MONTHLY": "Monthly",
+        "CUSTOM_CRON": "Custom schedule",
+        "OTA_SPLIT_EXPECTED_SETTLEMENT": "Expected platform split settlement"
+      },
+      "methods": {
+        "BANK_TRANSFER": "Bank transfer",
+        "CASH": "Cash",
+        "CHEQUE": "Cheque",
+        "PAYPAL": "PayPal",
+        "MOBILE_MONEY": "Mobile money",
+        "OTHER": "Other"
+      }
+    },
     "funds": {
       "title": "Money movements",
       "transferred": "Transfers by ALVILLAS",

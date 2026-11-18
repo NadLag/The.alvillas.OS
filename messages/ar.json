@@ -1192,6 +1192,50 @@
     "draftSaved": "تم حفظ تغييراتك على هذا الجهاز."
   },
   "OwnerPortal": {
+    "payouts": {
+      "title": "سجل المدفوعات المتوقعة والفعلية",
+      "forecast": "المبلغ المتوقع",
+      "confirmed": "التحويلات المؤكدة",
+      "estimate": "تستند التوقعات إلى خطط الدفع المقدمة وقد تتغير حتى التحقق من التسوية.",
+      "frequency": "التكرار",
+      "method": "طريقة الدفع",
+      "eligible": "أقرب تاريخ استحقاق",
+      "expected": "التسوية المتوقعة من المنصة",
+      "scheduled": "التحويل المجدول",
+      "paidOn": "تاريخ الدفع المؤكد",
+      "reference": "مرجع التسوية المحجوب",
+      "approval": "متطلبات الموافقة",
+      "steps": "{count, number} خطوة مطلوبة",
+      "empty": "لا توجد سجلات دفع لهذه التواريخ.",
+      "unavailable": "سجل الدفعات والتوقعات غير متاح. يمكن الاطلاع على الحركات المؤكدة ضمن حركات الأموال.",
+      "states": {
+        "PENDING_APPROVAL": "بانتظار الموافقة",
+        "APPROVED": "معتمد",
+        "SCHEDULED": "مجدول",
+        "PAID": "مدفوع",
+        "RECONCILED": "تمت المطابقة",
+        "FAILED": "تعذر الدفع",
+        "CANCELLED": "ملغى",
+        "AWAITING_EVIDENCE": "بانتظار دليل الدفع"
+      },
+      "cadences": {
+        "AFTER_CHECKOUT": "بعد المغادرة",
+        "PER_BOOKING": "لكل حجز",
+        "WEEKLY": "أسبوعي",
+        "FIFTEEN_DAY": "كل 15 يوما",
+        "MONTHLY": "شهري",
+        "CUSTOM_CRON": "جدول مخصص",
+        "OTA_SPLIT_EXPECTED_SETTLEMENT": "تسوية المنصة المجزأة المتوقعة"
+      },
+      "methods": {
+        "BANK_TRANSFER": "تحويل مصرفي",
+        "CASH": "نقدا",
+        "CHEQUE": "شيك",
+        "PAYPAL": "PayPal",
+        "MOBILE_MONEY": "دفع عبر الهاتف",
+        "OTHER": "أخرى"
+      }
+    },
     "funds": {
       "title": "حركات الأموال",
       "transferred": "تحويلات ALVILLAS",

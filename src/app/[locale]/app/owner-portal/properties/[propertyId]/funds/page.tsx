@@ -33,6 +33,7 @@ export default async function OwnerFundsPage({ params, searchParams }: {
     <ShellHeader title={t("title")} eyebrow={value.propertyName} actions={<Link className="secondary-button" href={property + "?" + period}>
       {owner("activity.statement")}
     </Link>} />
+    <div className="form-actions"><Link className="secondary-button" href={property + "/payouts?" + period}>{owner("payouts.title")}</Link></div>
     <form className="statement-filters" method="get">
       <label className="field"><span>{owner("periodFrom")}</span><input type="date" name="from" defaultValue={value.from} required/></label>
       <label className="field"><span>{owner("periodTo")}</span><input type="date" name="to" defaultValue={value.to} required/></label>

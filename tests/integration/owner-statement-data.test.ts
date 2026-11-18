@@ -1,3 +1,4 @@
+import { getOwnerPayoutHistory } from "@/modules/owner-portal/application/owner-payout-history";
 import { getOwnerMoneyMovements } from "@/modules/owner-portal/application/owner-money-movements";
 import { getOwnerFinancialActivity } from "@/modules/owner-portal/application/owner-financial-activity";
 import { randomUUID } from "node:crypto";
@@ -88,7 +89,7 @@ describe("native shared statement generation", () => {
       const dims = { owner_id: f.owner.id, property_id: f.property.id }, payout = { ...dims, source: "OWNER_PAYOUT", payout_id: randomUUID() };
       const booked = Money.of("125.01", "MAD"), paid = Money.of("45.02", "MAD");
       const post = (postings: Parameters<typeof finance.createFinancialTransaction>[0]["postings"]) => finance.createFinancialTransaction({
-        reference: "OWNER-SOURCE:" + randomUUID(), occurredAt: at, createdBy: f.account.id, idempotencyKey: randomUUID(), postings
+        reference: "OWNER-SOURCE:" + randomUUID(), occurredAt: at, description: "Original owner money movement", createdBy: f.account.id, idempotencyKey: randomUUID(), postings
       });
       await post([
         { ledgerAccountId: f.bank.id, side: "DEBIT", amount: booked, bucket: "OWNER_REVENUE", dimensions: { posting_kind: "accommodation_revenue_received" } },
@@ -106,6 +107,9 @@ describe("native shared statement generation", () => {
     expect(value.payments.toJSON().amount).toBe("45.02");
     expect(value.collected.map(([rail, amount]) => [rail, amount.toJSON().amount])).toEqual([["BOOKING_RECEIPT", "125.01"]]);
     expect(value.movements).toHaveLength(2);
+    const payouts = await getOwnerPayoutHistory(f.ctx, f.property.id, { from: "2026-11-02", to: "2026-11-02", currency: "MAD" }, 1, { db, requestId: randomUUID() });
+    expect(payouts.rows).toEqual([]);
+    expect(payouts.plannedTotal.toJSON().amount).toBe("0.00");
     expect(await facts(f.org)).toEqual(before);
   });
 

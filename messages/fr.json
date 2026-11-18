@@ -1192,6 +1192,50 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "payouts": {
+      "title": "Historique et prévision des versements",
+      "forecast": "Montant prévisionnel",
+      "confirmed": "Virements vérifiés",
+      "estimate": "Les prévisions reposent sur les versements soumis et peuvent changer avant la vérification du règlement.",
+      "frequency": "Fréquence",
+      "method": "Mode de paiement",
+      "eligible": "Première date admissible",
+      "expected": "Règlement prévu de la plateforme",
+      "scheduled": "Virement planifié",
+      "paidOn": "Date de paiement vérifiée",
+      "reference": "Référence de règlement masquée",
+      "approval": "Conditions d’approbation",
+      "steps": "{count, plural, one {# étape requise} other {# étapes requises}}",
+      "empty": "Aucun versement pour ces dates.",
+      "unavailable": "L’historique et les prévisions sont indisponibles. Les mouvements comptabilisés restent visibles dans les mouvements de fonds.",
+      "states": {
+        "PENDING_APPROVAL": "En attente d’approbation",
+        "APPROVED": "Approuvé",
+        "SCHEDULED": "Planifié",
+        "PAID": "Payé",
+        "RECONCILED": "Rapproché",
+        "FAILED": "Échec",
+        "CANCELLED": "Annulé",
+        "AWAITING_EVIDENCE": "En attente de justificatif de paiement"
+      },
+      "cadences": {
+        "AFTER_CHECKOUT": "Après le départ",
+        "PER_BOOKING": "Par réservation",
+        "WEEKLY": "Hebdomadaire",
+        "FIFTEEN_DAY": "Tous les 15 jours",
+        "MONTHLY": "Mensuel",
+        "CUSTOM_CRON": "Calendrier personnalisé",
+        "OTA_SPLIT_EXPECTED_SETTLEMENT": "Règlement différencié prévu par la plateforme"
+      },
+      "methods": {
+        "BANK_TRANSFER": "Virement bancaire",
+        "CASH": "Espèces",
+        "CHEQUE": "Chèque",
+        "PAYPAL": "PayPal",
+        "MOBILE_MONEY": "Paiement mobile",
+        "OTHER": "Autre"
+      }
+    },
     "funds": {
       "title": "Mouvements de fonds",
       "transferred": "Virements effectués par ALVILLAS",
