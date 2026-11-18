@@ -1,4 +1,20 @@
 {
+  "CommandToday": {
+    "title": "Today’s operations",
+    "arrivals": "Arrivals",
+    "departures": "Departures",
+    "turnovers": "Turnovers",
+    "incomplete": "Incomplete jobs",
+    "arrivalsCount": "{count, plural, one {# arrival} other {# arrivals}}",
+    "departuresCount": "{count, plural, one {# departure} other {# departures}}",
+    "turnoversCount": "{count, plural, one {# turnover} other {# turnovers}}",
+    "incompleteCount": "{count, plural, one {# incomplete job} other {# incomplete jobs}}",
+    "back": "Back to dashboard",
+    "empty": "No items for today.",
+    "job": "Job",
+    "previous": "Previous page",
+    "next": "Next page"
+  },
   "Metadata": {
     "title": "ALVILLAS OS",
     "description": "Private operating system for ALVILLAS SARL"

@@ -1,3 +1,4 @@
+import { CommandCenterTodaySummary } from "@/modules/reservations/ui/command-center-today";
 import { ReservationCommandExceptions } from "@/modules/reservations/ui/command-exceptions";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import { getTranslations, setRequestLocale } from "next-intl/server";
@@ -177,7 +178,10 @@ export default async function AppPage({
           <p className="panel-label">{t("todayLabel")}</p>
           <h2>{t("welcome", { name: session.user?.name ?? session.user?.email ?? t("fallbackName") })}</h2>
           <p>{t("summary")}</p>
-          {reservationContext ? <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} /> : null}
+          {reservationContext ? <>
+            <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} />
+            <CommandCenterTodaySummary actor={reservationContext} locale={appLocale} />
+          </> : null}
         </section>
         <aside className="workspace-side" aria-label={t("sessionLabel")}>
           <form

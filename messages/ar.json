@@ -1,4 +1,20 @@
 {
+  "CommandToday": {
+    "title": "عمليات اليوم",
+    "arrivals": "الوصول",
+    "departures": "المغادرة",
+    "turnovers": "تبديل الإقامات",
+    "incomplete": "المهام غير المكتملة",
+    "arrivalsCount": "الوصول ({count, number})",
+    "departuresCount": "المغادرة ({count, number})",
+    "turnoversCount": "تبديل الإقامات ({count, number})",
+    "incompleteCount": "المهام غير المكتملة ({count, number})",
+    "back": "العودة إلى لوحة التحكم",
+    "empty": "لا توجد عناصر لليوم.",
+    "job": "مهمة",
+    "previous": "الصفحة السابقة",
+    "next": "الصفحة التالية"
+  },
   "Metadata": {
     "title": "ALVILLAS OS",
     "description": "Private operating system for ALVILLAS SARL"

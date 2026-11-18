@@ -1,3 +1,4 @@
+import { getCommandCenterToday } from "@/modules/reservations/application/command-center-today";
 import { tickScheduledReports } from "@/modules/finance/application/scheduled-report-job";
 import { ScheduledReportRepository } from "@/modules/finance/infrastructure/scheduled-report-repository";
 import { notificationDestination } from "@/platform/notifications/notification";
@@ -178,6 +179,32 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(await withTenant(db, other.org, tx => new ScheduledReportRepository(tx, other.org).targets([result.id], other.account.id))).toEqual([]);
    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
    expect(notificationDestination(await authContextForAccount(f.org, f.account.id, { db }), input, result.scope, "en")).toBeNull();
+ });
+
+ it("shows local-day turnover and due work only from authorized native records", async () => {
+   const f = await fixture(), other = await fixture();
+   const authContext = await grantPerformanceReports(f);
+   await withTenant(db, f.org, async tx => {
+     await tx.property.update({ where: { id: f.property.id }, data: { timezone: "Pacific/Kiritimati" } });
+     const stay = { organizationId: f.org, propertyId: f.property.id, source: "DIRECT", guestName: "Private arrival name", nights: 1 };
+     await tx.reservation.create({ data: { ...stay, reference: "TODAY-OUT", checkIn: new Date("2026-03-08"),
+       checkOut: new Date("2026-03-09"), status: "CHECKED_OUT", idempotencyKey: randomUUID() } });
+     await tx.reservation.create({ data: { ...stay, reference: "TODAY-IN", checkIn: new Date("2026-03-09"),
+       checkOut: new Date("2026-03-10"), status: "CONFIRMED", idempotencyKey: randomUUID() } });
+     const task = { organizationId: f.org, propertyId: f.property.id, type: "TRANSFER",
+       titleTranslations: { en: "Actual transfer", fr: "Transfert réel" } };
+     await tx.operationTask.create({ data: { ...task, dueDate: new Date("2026-03-09"), state: "PLANNED", idempotencyKey: randomUUID() } });
+     await tx.operationTask.create({ data: { ...task, dueDate: new Date("2026-03-08"), state: "PLANNED", idempotencyKey: randomUUID() } });
+   });
+   const now = new Date("2026-03-08T12:00:00Z");
+   const actor = { ...authContext, personId: f.person.id };
+   const report = await getCommandCenterToday(actor, { db, now });
+   expect(report).toMatchObject({ arrivals: [{ reference: "TODAY-IN", date: "2026-03-09" }],
+     departures: [{ reference: "TODAY-OUT" }], turnovers: [{ propertyId: f.property.id }], incomplete: [{ date: "2026-03-09" }] });
+   expect(JSON.stringify(report)).not.toContain("Private arrival name");
+   expect(await getCommandCenterToday({ ...other.ctx, personId: other.person.id }, { db, now })).toBeNull();
+   await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { validTo: new Date("2026-02-28") } }));
+   expect(await getCommandCenterToday(actor, { db, now })).toBeNull();
  });
 
  it("separates company profit and portfolio performance from location and owner claim balances", async () => {

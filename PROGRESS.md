@@ -311,7 +311,7 @@ F-RPT-06 | IN-PROGRESS | Native inventory and stocktake quantities, procurement 
 F-RPT-07 | IN-PROGRESS | KPI workspace, calendar and source filters, exact metrics and exports implemented. Verified owner custody attribution and integration/hosted acceptance remain pending.
 F-RPT-08 | IN-PROGRESS | Tenant-scoped materialized calendar with revision invalidation, repeatable refresh jobs and live-source fallback. Integration and hosted acceptance pending.
 F-RPT-09 | IN-PROGRESS | Configured weekly/monthly report delivery uses immutable runs, native notifications and current recipient access. Integration and hosted acceptance pending.
-F-CMD-01 | TODO |
+F-CMD-01 | IN-PROGRESS | Local-day arrivals, departures, turnovers and incomplete jobs with current role grants and EN/FR/AR navigation. Integration and hosted acceptance pending.
 F-CMD-02 | TODO |
 F-CMD-03 | TODO |
 F-CMD-04 | TODO |

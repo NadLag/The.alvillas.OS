@@ -1,4 +1,20 @@
 {
+  "CommandToday": {
+    "title": "Opérations du jour",
+    "arrivals": "Arrivées",
+    "departures": "Départs",
+    "turnovers": "Rotations",
+    "incomplete": "Tâches inachevées",
+    "arrivalsCount": "{count, plural, one {# arrivée} other {# arrivées}}",
+    "departuresCount": "{count, plural, one {# départ} other {# départs}}",
+    "turnoversCount": "{count, plural, one {# rotation} other {# rotations}}",
+    "incompleteCount": "{count, plural, one {# tâche inachevée} other {# tâches inachevées}}",
+    "back": "Retour au tableau de bord",
+    "empty": "Aucun élément pour aujourd’hui.",
+    "job": "Tâche",
+    "previous": "Page précédente",
+    "next": "Page suivante"
+  },
   "Metadata": {
     "title": "ALVILLAS OS",
     "description": "Systeme d'exploitation prive pour ALVILLAS SARL"
