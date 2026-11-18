@@ -37,6 +37,9 @@ type IdentityAdminProps = {
   people: PersonProfileSummary[];
   invitationProfiles: Pick<PersonProfileSummary, "id" | "displayName" | "email" | "phone" | "preferredLocale" | "accountCount">[];
   initialPersonId?: string;
+  portalInvite?: { ownerId: string; representative: boolean; displayName: string; email: string;
+    phone: string | null; preferredLocale: string };
+
   duplicateContacts: DuplicateContactSummary[];
   accounts: IdentityAccountSummary[];
   invitations: Array<InvitationSummary & { expiresAtLabel: string }>;
@@ -814,6 +817,7 @@ export function IdentityAdmin({
   people,
   invitationProfiles,
   initialPersonId,
+  portalInvite,
   duplicateContacts,
   accounts:initialAccounts,
   invitations,
@@ -836,8 +840,12 @@ export function IdentityAdmin({
     return()=>{disposed=true;};
   },[accountFilter,accountAfter,initialAccounts,locale,accountReadVersion]);
   const accounts=accountFilter===null?initialAccounts:accountPage?.accounts??[],dateLabels=accountFilter===null?initialDateLabels:accountPage?.dateLabels??{};
-  const [invitationPersonId, setInvitationPersonId] = useState(initialPersonId ?? "");
+  const initialInviteProfile = portalInvite
+    ? invitationProfiles.find(person => person.email?.toLowerCase() === portalInvite.email.toLowerCase())?.id
+    : initialPersonId;
+  const [invitationPersonId, setInvitationPersonId] = useState(initialInviteProfile ?? "");
   const invitationPerson = invitationProfiles.find(person => person.id === invitationPersonId);
+  const inviteContact = invitationPerson ?? portalInvite;
   const [state, formAction, pending] = useActionState(
     createInvitationAction.bind(null, locale),
     initialState
@@ -864,26 +872,26 @@ export function IdentityAdmin({
             <Fragment key={invitationPersonId}>
             <label className="field">
               <span>{labels.displayName}</span>
-              <input data-testid="invite-display-name" name="displayName" required defaultValue={invitationPerson?.displayName ?? ""} readOnly={Boolean(invitationPerson)} />
+              <input data-testid="invite-display-name" name="displayName" required defaultValue={inviteContact?.displayName ?? ""} readOnly={Boolean(invitationPerson)} />
             </label>
             <label className="field">
               <span>{labels.email}</span>
-              <input data-testid="invite-email" name="email" type="email" defaultValue={invitationPerson?.email ?? ""} readOnly={Boolean(invitationPerson)} />
+              <input data-testid="invite-email" name="email" type="email" defaultValue={inviteContact?.email ?? ""} readOnly={Boolean(invitationPerson)} />
             </label>
             <label className="field">
               <span>{labels.phone}</span>
-              <input data-testid="invite-phone" name="phone" type="tel" defaultValue={invitationPerson?.phone ?? ""} readOnly={Boolean(invitationPerson)} />
+              <input data-testid="invite-phone" name="phone" type="tel" defaultValue={inviteContact?.phone ?? ""} readOnly={Boolean(invitationPerson)} />
             </label>
             <label className="field">
               <span>{labels.preferredLocale}</span>
-              <select data-testid="invite-preferred-locale" name="preferredLocale" defaultValue={invitationPerson?.preferredLocale ?? locale} disabled={Boolean(invitationPerson)}>
+              <select data-testid="invite-preferred-locale" name="preferredLocale" defaultValue={inviteContact?.preferredLocale ?? locale} disabled={Boolean(invitationPerson)}>
                 {profileLocales.map((profileLocale) => <option key={profileLocale} value={profileLocale}>{profileLocale.toUpperCase()}</option>)}
               </select>
             </label>
             </Fragment>
             <label className="field">
               <span>{labels.role}</span>
-              <select data-testid="invite-role" name="roleKey" required>
+              <select data-testid="invite-role" name="roleKey" defaultValue={portalInvite ? (portalInvite.representative ? "owner_representative" : "owner") : undefined} required>
                 {roles.map((role) => (
                   <option key={role.id} value={role.key}>
                     {roleDisplayName(role, labels)}
@@ -893,7 +901,7 @@ export function IdentityAdmin({
             </label>
             <label className="field">
               <span>{labels.scope}</span>
-              <select data-testid="invite-scope-type" name="scopeType">
+              <select data-testid="invite-scope-type" name="scopeType" defaultValue={portalInvite ? "owner" : undefined}>
                 {assignmentScopeTypes.map((scopeType) => (
                   <option key={scopeType} value={scopeType}>
                     {scopeLabel(scopeType, labels)}
@@ -903,7 +911,7 @@ export function IdentityAdmin({
             </label>
             <label className="field">
               <span>{labels.scopeId}</span>
-              <input data-testid="invite-scope-id" name="scopeId" />
+              <input data-testid="invite-scope-id" name="scopeId" defaultValue={portalInvite?.ownerId} />
             </label>
             <label className="field">
               <span>{labels.expires}</span>

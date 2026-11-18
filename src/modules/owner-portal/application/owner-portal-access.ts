@@ -54,18 +54,16 @@ export async function ownerPortalActorContextFromSession(
         permissions: ownerPortalPermissions,
         scopes: [
           { organizationId: user.organizationId, resourceType: "owner_portal" },
-          ...access.propertyIds.flatMap((propertyId) => [
-            {
-              organizationId: user.organizationId,
-              resourceType: "owner_portal_property",
-              resourceId: propertyId
-            },
-            {
-              organizationId: user.organizationId,
-              resourceType: "owner_statement",
-              resourceId: propertyId
-            }
-          ])
+          ...access.propertyIds.map((propertyId) => ({
+            organizationId: user.organizationId,
+            resourceType: "owner_portal_property",
+            resourceId: propertyId
+          })),
+          ...access.financialPropertyIds.map((propertyId) => ({
+            organizationId: user.organizationId,
+            resourceType: "owner_statement",
+            resourceId: propertyId
+          }))
         ]
       }
     };

@@ -24,7 +24,7 @@ test.describe("owner portal live balance and statement", () => {
   test("shows only authorized owner properties with ledger-derived EN and FR statements", async ({
     page
   }, testInfo) => {
-    test.setTimeout(120000);
+    test.setTimeout(240000);
     const suffix = `own-${testInfo.project.name}-${Date.now()}`
       .toLowerCase()
       .replace(/[^a-z0-9]+/gu, "-");
@@ -82,6 +82,18 @@ test.describe("owner portal live balance and statement", () => {
     await expect(page.getByText(scenario.bankCode)).toHaveCount(0);
     await expect(page.getByText("ALVILLAS_COMMISSION")).toHaveCount(0);
 
+    const propertyPath = "/en/app/owner-portal/properties/" + scenario.propertyId;
+    const csv = await page.request.get(propertyPath + "/statement-download?" + periodQuery + "&currency=MAD&format=csv");
+    expect(csv.ok()).toBe(true);
+    expect(await csv.text()).toContain(totals.closing);
+    for (const [path, marker] of [["activity", "owner-financial-activity"], ["funds", "owner-funds"],
+      ["payouts", "owner-payouts"], ["approvals", "owner-approvals"], ["documents", "owner-documents"], ["reports", "owner-reports"]]) {
+      await page.goto(propertyPath + "/" + path + (["activity", "funds", "payouts"].includes(path) ? "?" + periodQuery : ""));
+      await expect(page.getByTestId(marker)).toBeVisible();
+      await expect(page.getByText(scenario.bankCode)).toHaveCount(0);
+    }
+    const denied = await page.request.get("/en/app/owner-portal/properties/" + scenario.otherPropertyId + "/statement-download?" + periodQuery + "&format=csv");
+    expect(denied.status()).toBe(404);
     await page.goto(`/fr/app/owner-portal/properties/${scenario.propertyId}?${periodQuery}`);
     await expect(page.getByTestId("owner-statement-page")).toBeVisible();
     await expect(page.getByText("Releve en direct")).toBeVisible();
@@ -97,6 +109,15 @@ test.describe("owner portal live balance and statement", () => {
 
     await page.goto("/en/app/owner-portal/properties/" + scenario.otherPropertyId + "/reservations");
     await expect(page.locator("body")).toContainText(/404|not found/i);
+
+    await page.goto("/en/app/owner-portal");
+    await page.getByRole("link", { name: en.OwnerPortal.preferences.notifications }).click();
+    await expect(page.getByTestId("notification-settings-page")).toBeVisible();
+    await page.getByRole("link", { name: en.Notifications.settings.back, exact: true }).click();
+    await page.getByLabel(en.AppShell.languagePreference).selectOption("fr");
+    await page.getByRole("button", { name: en.AppShell.saveLanguagePreference, exact: true }).click();
+    await expect(page).toHaveURL(/\/fr\/app\/owner-portal$/u);
+    await expect(page.getByRole("heading", { name: fr.OwnerPortal.title, exact: true })).toBeVisible();
 
     await page.context().clearCookies();
     await login(page, scenario.tenantEmail);

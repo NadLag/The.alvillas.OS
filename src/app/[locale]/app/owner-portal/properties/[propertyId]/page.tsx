@@ -81,6 +81,10 @@ export default async function OwnerStatementPage({
     throw error;
   }
 
+  const statementPath = `/${appLocale}/app/owner-portal/properties/${propertyId}`;
+  const periodSearch = new URLSearchParams({ from: statement.fromOn, to: statement.toOn, currency: statement.currency }).toString();
+  const annual = new URLSearchParams({ from: statement.fromOn.slice(0, 4) + "-01-01",
+    to: statement.fromOn.slice(0, 4) + "-12-31", currency: statement.currency }).toString();
   const nonZeroBuckets = Object.entries(statement.bucketTotals).filter(
     ([, amount]) => !amount.amount.eq(0)
   ) as Array<[OwnerStatementBucket, (typeof statement.bucketTotals)[OwnerStatementBucket]]>;
@@ -99,6 +103,9 @@ export default async function OwnerStatementPage({
           <Link className="secondary-button" href={`/${appLocale}/app/owner-portal/properties/${propertyId}/funds?from=${statement.fromOn}&to=${statement.toOn}&currency=${statement.currency}`}>
             {t("funds.title")}
           </Link>
+          <Link className="secondary-button" href={statementPath + "/approvals"}>{t("approvals.title")}</Link>
+          <Link className="secondary-button" href={statementPath + "/documents"}>{t("documents.title")}</Link>
+          <Link className="secondary-button" href={statementPath + "/reports?year=" + statement.fromOn.slice(0, 4) + "&currency=" + statement.currency}>{t("reports.title")}</Link>
           <LocaleSwitch
             compact
             currentLocale={appLocale}
@@ -125,6 +132,12 @@ export default async function OwnerStatementPage({
         <button type="submit" className="primary-button" data-testid="owner-statement-apply">{t("applyPeriod")}</button>
       </form>
 
+      <nav className="form-actions" aria-label={t("exports.title")}>
+        <Link className="secondary-button" href={statementPath + "?currency=" + statement.currency}>{t("exports.month")}</Link>
+        <Link className="secondary-button" href={statementPath + "?" + annual}>{t("exports.year")}</Link>
+        <a className="secondary-button" href={statementPath + "/statement-download?" + periodSearch + "&format=csv"}>{t("exports.csv")}</a>
+        <a className="secondary-button" href={statementPath + "/statement-download?" + periodSearch + "&format=pdf"}>{t("exports.pdf")}</a>
+      </nav>
       <section className="statement-summary" aria-label={t("balanceSummary")}>
         <div>
           <span>{t("openingBalance")}</span>

@@ -287,6 +287,7 @@
       "signInAgain": "???? ?????? ??? ??? ??? ??????"
     },
     "activation": {
+      "portalPassword": "إنشاء كلمة مرور للبوابة",
       "eyebrow": "Account activation",
       "title": "Activate your account",
       "subtitle": "Verify the invited phone number and choose your field PIN. Add a password if this account also uses the web workspace.",
@@ -546,6 +547,9 @@
       "generic": "The record could not be saved. Try again."
     },
     "owners": {
+      "revokeRepresentative": "إلغاء وصول الممثل",
+      "inviteOwner": "دعوة المالك إلى البوابة",
+      "inviteRepresentative": "دعوة الممثل",
       "eyebrow": "Core domain",
       "title": "Owners",
       "subtitle": "Create and review owner contacts inside the current organization scope.",
@@ -1192,6 +1196,53 @@
     "draftSaved": "تم حفظ تغييراتك على هذا الجهاز."
   },
   "OwnerPortal": {
+    "preferences": {
+      "title": "تفضيلات البوابة",
+      "notifications": "إعدادات الإشعارات"
+    },
+    "reports": {
+      "title": "التقارير المالية",
+      "year": "السنة",
+      "annual": "المجاميع السنوية",
+      "monthly": "النشاط الشهري",
+      "empty": "لا توجد حركات مسجلة لهذه السنة.",
+      "columns": {
+        "accommodation": "الإقامة",
+        "services": "الخدمات",
+        "commission": "العمولة",
+        "platform": "رسوم المنصة",
+        "expenses": "مصروفات المالك",
+        "reimbursements": "المبالغ المستردة",
+        "payouts": "قيود الدفعات",
+        "adjustments": "التسويات"
+      }
+    },
+    "documents": {
+      "title": "المستندات",
+      "back": "العودة إلى العقار",
+      "open": "فتح الأرشيف الخاص",
+      "empty": "لا توجد مستندات متاحة ضمن صلاحياتك."
+    },
+    "approvals": {
+      "title": "الموافقات المعلقة",
+      "back": "رجوع",
+      "empty": "لا توجد طلبات معلقة مسندة إليك لهذا العقار.",
+      "review": "اتخذ قرارا بشأن المبلغ المسند إليك.",
+      "next": "الموافقات التالية",
+      "sources": {
+        "maintenance": "الصيانة",
+        "expense": "مصروف",
+        "invoice": "فاتورة مورد"
+      }
+    },
+    "exports": {
+      "title": "فترات كشف الحساب والتنزيلات",
+      "month": "هذا الشهر",
+      "year": "السنة المحددة",
+      "csv": "تنزيل CSV",
+      "pdf": "تنزيل PDF",
+      "unavailable": "تنزيل كشف الحساب غير متاح حاليا."
+    },
     "payouts": {
       "title": "سجل المدفوعات المتوقعة والفعلية",
       "forecast": "المبلغ المتوقع",

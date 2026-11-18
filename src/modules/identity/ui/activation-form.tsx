@@ -8,6 +8,7 @@ import {
 } from "@/modules/identity/application/identity-actions";
 
 type ActivationFormProps = {
+  passwordRequired?: boolean;
   locale: string;
   code: string;
   labels: {
@@ -52,7 +53,7 @@ function message(
   }
 }
 
-export function ActivationForm({ locale, code, labels }: ActivationFormProps) {
+export function ActivationForm({ locale, code, labels, passwordRequired }: ActivationFormProps) {
   const [state, formAction, pending] = useActionState(
     activateInvitationAction.bind(null, locale, code),
     initialState
@@ -71,7 +72,7 @@ export function ActivationForm({ locale, code, labels }: ActivationFormProps) {
       </label>
       <label className="field">
         <span>{labels.password}</span>
-        <input autoComplete="new-password" data-testid="activation-password" name="password" type="password" />
+        <input autoComplete="new-password" data-testid="activation-password" name="password" type="password" required={passwordRequired} />
       </label>
       {formMessage ? (
         <p className="form-error" data-testid="identity-form-error" role="alert">

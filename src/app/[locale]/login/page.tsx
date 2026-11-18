@@ -22,13 +22,14 @@ export default async function LoginPage({
   const { locale } = await params;
   const appLocale = safeLocale(locale);
   setRequestLocale(appLocale);
-  const surface = (await searchParams).surface === "field" ? "field" : undefined;
+  const requested = (await searchParams).surface;
+  const surface = requested === "field" || requested === "owner" ? requested : undefined;
 
   const session = await auth();
 
   if (session?.user?.id) {
     if (session.user.securitySetupRequired) redirect(`/${safeLocale(session.user.preferredLocale)}/app/security`);
-    redirect(`/${safeLocale(session.user.preferredLocale)}/app${surface === "field" ? "/field" : ""}`);
+    redirect(`/${safeLocale(session.user.preferredLocale)}/app${surface === "field" ? "/field" : surface === "owner" ? "/owner-portal" : ""}`);
   }
 
   const t = await getTranslations("Login");
@@ -39,7 +40,7 @@ export default async function LoginPage({
         <Link className="secondary-button" href={`/${appLocale}`}>
           {t("publicSite")}
         </Link>
-        <LocaleSwitch currentLocale={appLocale} label={t("language")} path={`/login${surface === "field" ? "?surface=field" : ""}`} />
+        <LocaleSwitch currentLocale={appLocale} label={t("language")} path={`/login${surface ? "?surface=" + surface : ""}`} />
       </div>
       <div className="auth-panel">
         <div className="auth-panel-header">

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import type { ZodError } from "zod";
+import { z, type ZodError } from "zod";
 import { agreementActorContextFromSession, coreActorContextFromSession } from "@/modules/core/application/core-access";
 import {
   amendManagementAgreement,
@@ -20,6 +20,7 @@ import {
   parsePropertyOperatingProfileInput,
   parsePropertyInput,
   parsePropertyOwnershipInput,
+  revokeOwnerRepresentative,
   transitionPropertyLifecycle,
   updatePropertyOperatingProfile,
   updatePropertyOwnership,
@@ -547,4 +548,14 @@ export async function amendManagementAgreementAction(
   revalidatePath(`/${appLocale}/app/properties`);
 
   return { status: "success" };
+}
+
+
+export async function revokeOwnerRepresentativeAction(locale: string, ownerId: string, representativeId: string) {
+  const appLocale = safeLocale(locale);
+  const ctx = await coreActorContextFromSession(await auth());
+  if (!ctx) redirect(`/${appLocale}/login`);
+  const id = z.uuid();
+  await revokeOwnerRepresentative(ctx, id.parse(ownerId), id.parse(representativeId));
+  revalidatePath(`/${appLocale}/app/owners/${ownerId}`);
 }

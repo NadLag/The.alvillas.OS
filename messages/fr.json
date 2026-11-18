@@ -287,6 +287,7 @@
       "signInAgain": "Se reconnecter apr?s avoir conserv? ces codes"
     },
     "activation": {
+      "portalPassword": "Créer un mot de passe pour le portail",
       "eyebrow": "Activation du compte",
       "title": "Activez votre compte",
       "subtitle": "Verifiez le telephone invite et choisissez votre PIN terrain. Ajoutez un mot de passe si ce compte utilise aussi l'espace web.",
@@ -546,6 +547,9 @@
       "generic": "Le dossier n'a pas pu etre enregistre. Reessayez."
     },
     "owners": {
+      "revokeRepresentative": "Révoquer l’accès du représentant",
+      "inviteOwner": "Inviter le propriétaire au portail",
+      "inviteRepresentative": "Inviter le représentant",
       "eyebrow": "Domaine coeur",
       "title": "Proprietaires",
       "subtitle": "Creez et consultez les contacts proprietaires dans la portee de l'organisation.",
@@ -1192,6 +1196,53 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "preferences": {
+      "title": "Préférences du portail",
+      "notifications": "Paramètres des notifications"
+    },
+    "reports": {
+      "title": "Rapports financiers",
+      "year": "Année",
+      "annual": "Totaux annuels",
+      "monthly": "Activité mensuelle",
+      "empty": "Aucune activité comptabilisée pour cette année.",
+      "columns": {
+        "accommodation": "Hébergement",
+        "services": "Services",
+        "commission": "Commission",
+        "platform": "Frais de plateforme",
+        "expenses": "Dépenses du propriétaire",
+        "reimbursements": "Remboursements",
+        "payouts": "Écritures de versement",
+        "adjustments": "Ajustements"
+      }
+    },
+    "documents": {
+      "title": "Documents",
+      "back": "Retour au logement",
+      "open": "Ouvrir les archives privées",
+      "empty": "Aucun document n’est accessible avec vos droits."
+    },
+    "approvals": {
+      "title": "Approbations en attente",
+      "back": "Retour",
+      "empty": "Aucune demande en attente ne vous est attribuée pour ce logement.",
+      "review": "Décidez du montant qui vous est attribué.",
+      "next": "Approbations suivantes",
+      "sources": {
+        "maintenance": "Maintenance",
+        "expense": "Dépense",
+        "invoice": "Facture fournisseur"
+      }
+    },
+    "exports": {
+      "title": "Périodes et téléchargements du relevé",
+      "month": "Ce mois-ci",
+      "year": "Année sélectionnée",
+      "csv": "Télécharger le CSV",
+      "pdf": "Télécharger le PDF",
+      "unavailable": "Le téléchargement de ce relevé est actuellement indisponible."
+    },
     "payouts": {
       "title": "Historique et prévision des versements",
       "forecast": "Montant prévisionnel",

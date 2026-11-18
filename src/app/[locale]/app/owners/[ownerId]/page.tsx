@@ -5,6 +5,8 @@ import { z } from "zod";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
 import { CoreAuthorizationError, CoreNotFoundError, getOwner } from "@/modules/core/application/core-service";
+import { revokeOwnerRepresentativeAction } from "@/modules/core/application/core-actions";
+import { authorize } from "@/platform/authz/authorize";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -51,13 +53,24 @@ export default async function OwnerDetailPage({
     throw error;
   }
 
+  const canInvite = authorize(ctx.authContext, "create", { type: "identity", organizationId: ctx.organizationId });
+  const canRevoke = authorize(ctx.authContext, "edit", { type: "owner", organizationId: ctx.organizationId,
+    id: owner.id, ownerId: owner.id });
+
   return (
     <AdminShell className="resource-page" testId="owner-detail-page">
       <ShellHeader
         actions={
-        <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
-          {t("owners.backToOwners")}
-        </Link>
+          <>
+            <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
+              {t("owners.backToOwners")}
+            </Link>
+            {canInvite && owner.email ? (
+              <Link className="secondary-button" href={`/${appLocale}/app/identity?ownerId=${owner.id}`}>
+                {t("owners.inviteOwner")}
+              </Link>
+            ) : null}
+          </>
         }
         eyebrow={t("owners.detailEyebrow")}
         subtitle={owner.legalName ?? t("owners.noLegalName")}
@@ -104,6 +117,16 @@ export default async function OwnerDetailPage({
                     {[representative.email, representative.phone, representative.status]
                       .filter(Boolean)
                       .join(" | ")}
+                    {canInvite && representative.email && representative.status === "ACTIVE" ? (
+                      <Link className="secondary-button" href={`/${appLocale}/app/identity?ownerId=${owner.id}&representativeId=${representative.id}`}>
+                        {t("owners.inviteRepresentative")}
+                      </Link>
+                    ) : null}
+                    {canRevoke && representative.status !== "REVOKED" ? (
+                      <form action={revokeOwnerRepresentativeAction.bind(null, appLocale, owner.id, representative.id)}>
+                        <button className="secondary-button" type="submit">{t("owners.revokeRepresentative")}</button>
+                      </form>
+                    ) : null}
                   </dd>
                 </div>
               ))}

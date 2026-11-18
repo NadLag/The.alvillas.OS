@@ -1,19 +1,24 @@
+import { getOwnerFinancialReport } from "@/modules/owner-portal/application/owner-financial-report";
+import { downloadOwnerStatement } from "@/modules/owner-portal/application/owner-statement-download";
 import { getOwnerPayoutHistory } from "@/modules/owner-portal/application/owner-payout-history";
 import { getOwnerMoneyMovements } from "@/modules/owner-portal/application/owner-money-movements";
 import { getOwnerFinancialActivity } from "@/modules/owner-portal/application/owner-financial-activity";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { renderIdentityEmail } from "@/platform/email/identity-templates";
+import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
+import { revokeOwnerRepresentative } from "@/modules/core/application/core-service";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { Money } from "@/platform/money/money";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
-import { getOwnerStatement } from "@/modules/owner-portal/application/owner-portal-service";
+import { getOwnerStatement, listOwnerPortalProperties, OwnerPortalAuthorizationError } from "@/modules/owner-portal/application/owner-portal-service";
 import { provisionIntegrationRole } from "./support/database-role";
 import { buildOwnerStatement, statementPeriodDates } from "@/platform/ledger/owner-statement";
 import { OwnerStatementRepository } from "@/platform/ledger/owner-statement-repository";
-import { ensureStandardIdentitySetup, startTotpEnrollment, confirmTotpEnrollment } from "@/modules/identity/application/identity-service";
+import { activateInvitation, createInvitation, ensureStandardIdentitySetup, startTotpEnrollment, confirmTotpEnrollment } from "@/modules/identity/application/identity-service";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { totpCode } from "@/platform/auth/totp";
@@ -36,8 +41,8 @@ beforeAll(async () => {
 });
 afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
 
-async function fixture(timezone = "Europe/Paris") {
-  const org = randomUUID(); await admin.organization.create({ data: { id: org, name: "Original statement data acceptance", baseCurrency: "MAD" } });
+async function fixture(timezone = "Europe/Paris", org = randomUUID()) {
+  await admin.organization.upsert({ where: { id: org }, update: {}, create: { id: org, name: "Original statement data acceptance", baseCurrency: "MAD" } });
   const f = await withTenant(db, org, async tx => {
     const person = await tx.person.create({ data: { organizationId: org, displayName: "Actual statement owner" } }),
       account = await tx.userAccount.create({ data: { organizationId: org, personId: person.id, email: "statement-" + randomUUID() + "@example.test" } }),
@@ -45,7 +50,7 @@ async function fixture(timezone = "Europe/Paris") {
       property = await tx.property.create({ data: { organizationId: org, name: "Original statement villa", addressLine1: "Native statement acceptance", city: "Marrakech", propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] } });
     await tx.propertyOwner.create({ data: { organizationId: org, propertyId: property.id, ownerId: owner.id, shareBps: 10000, isPrimary: true } });
     await tx.ownerPortalAccess.create({ data: { organizationId: org, userAccountId: account.id, ownerId: owner.id } });
-    await new ConfigRuleRepository(tx, org).createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2000-01-01"), createdBy: account.id,
+    if (org !== bootstrapOrganizationId) await new ConfigRuleRepository(tx, org).createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2000-01-01"), createdBy: account.id,
       value: { timezone, allow_early_close: false, max_reopen_seconds: 60 }, reason: "Explicit original financial statement calendar" });
     const finance = new FinanceRepository(tx, org), bank = await finance.ensureLedgerAccount({ code: "STATEMENT_BANK", name: "Original custody", accountType: "ASSET_LOCATION", normalSide: "DEBIT" }),
       claim = await finance.ensureLedgerAccount({ code: "OWNER_PAYABLE", name: "Original owner claim", accountType: "CLAIM_OWNERSHIP", normalSide: "CREDIT" });
@@ -82,6 +87,76 @@ async function exporter(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("native shared statement generation", () => {
+  it("onboards an invited owner only while canonical contact and scope match", async () => {
+    const f = await fixture("Europe/Paris", bootstrapOrganizationId);
+    const email = "owner-onboarding-" + randomUUID() + "@example.test", phone = "+2127" + Date.now().toString().slice(-8);
+    const setEmail = (value: string) => withTenant(db, f.org, tx => tx.owner.update({ where: { id: f.owner.id }, data: { email: value } }));
+    await setEmail(email);
+    const actor = { organizationId: f.org, actorId: f.account.id, personId: f.person.id, authContext: {
+      organizationId: f.org, permissions: new Set(["identity:create", "role:assign", "role:override", "owner:view"]),
+      scopes: [{ organizationId: f.org, scopeType: "organization" as const }]
+    } };
+    const input = { displayName: f.owner.displayName, email, phone, roleKey: "owner", preferredLocale: "ar" as const,
+      scopeType: "owner" as const, scopeId: f.owner.id, expiresInHours: 1 };
+    const deps = { db, origin: "http://localhost:3000", requestId: randomUUID() };
+    await expect(createInvitation(actor, { ...input, email: "other-" + email }, deps)).rejects.toThrow("not found");
+    const invitation = await createInvitation(actor, input, deps);
+    const activationUrl = deps.origin + "/ar/activate/" + invitation.code + "?surface=owner";
+    expect(renderIdentityEmail("identity.invitation.delivery_requested", {
+      toEmail: email, locale: input.preferredLocale, channel: "email", expiresAt: invitation.expiresAt.toISOString(),
+      activationCode: invitation.code, activationUrl, roleKey: input.roleKey
+    }, deps.origin).text).toContain(activationUrl);
+    const activation = { code: invitation.code, phone, pin: "732170", password: "OwnerAcceptance#871" };
+    await expect(activateInvitation({ ...activation, password: undefined }, deps)).rejects.toThrow("requires a password");
+    await setEmail("replaced-" + email);
+    await expect(activateInvitation(activation, deps)).rejects.toThrow("not found");
+    await setEmail(email);
+    const active = await activateInvitation(activation, deps);
+    expect(active.ownerPortal).toBe(true);
+    const activeAccount = await withTenant(db, f.org, tx => tx.userAccount.findUniqueOrThrow({ where: { id: active.userAccountId }, select: { id: true, personId: true } }));
+    const scope = await ownerPortalActorContextFromSession({ user: { id: activeAccount.id, personId: activeAccount.personId,
+      organizationId: f.org, email, preferredLocale: "ar", sessionId: randomUUID(), sessionRevoked: false, securitySetupRequired: false },
+      expires: new Date(Date.now() + 3600000).toISOString() }, { db });
+    if (!scope) throw new Error("Activated owner cannot access the portal");
+    expect(await listOwnerPortalProperties(scope, { db })).toEqual([expect.objectContaining({ propertyId: f.property.id, canViewFinances: true })]);
+    await expect(activateInvitation(activation, deps)).rejects.toThrow("already used");
+  });
+
+  it("activates only a recorded representative and revokes access without granting owner finances", async () => {
+    const f = await fixture("Europe/Paris", bootstrapOrganizationId);
+    const other = await fixture();
+    const email = "owner-rep-" + randomUUID() + "@example.test", phone = "+2126" + Date.now().toString().slice(-8);
+    const representative = await withTenant(db, f.org, tx => tx.ownerRepresentative.create({ data: {
+      organizationId: f.org, ownerId: f.owner.id, displayName: "Recorded representative", email, phone
+    } }));
+    const actor = { organizationId: f.org, actorId: f.account.id, personId: f.person.id, authContext: {
+      organizationId: f.org, permissions: new Set(["identity:create", "role:assign", "role:override", "owner:view", "owner:edit"]),
+      scopes: [{ organizationId: f.org, scopeType: "organization" as const }]
+    } };
+    const input = { displayName: representative.displayName, email, phone, roleKey: "owner_representative",
+      scopeType: "owner" as const, scopeId: f.owner.id, expiresInHours: 1 };
+    const deps = { db, origin: "http://localhost:3000", requestId: randomUUID() };
+    await expect(createInvitation(actor, { ...input, scopeId: other.owner.id }, deps)).rejects.toThrow("not found");
+    const invitation = await createInvitation(actor, input, deps);
+    const active = await activateInvitation({ code: invitation.code, phone, pin: "573911", password: "RepresentativeAcceptance#542" }, deps);
+    const activeAccount = await withTenant(db, f.org, tx => tx.userAccount.findUniqueOrThrow({ where: { id: active.userAccountId } }));
+    const session = { user: { id: activeAccount.id, personId: activeAccount.personId, organizationId: f.org, email,
+      preferredLocale: "en", sessionId: randomUUID(), sessionRevoked: false, securitySetupRequired: false },
+      expires: new Date(Date.now() + 3600000).toISOString() };
+    const scope = await ownerPortalActorContextFromSession(session, { db });
+    if (!scope) throw new Error("Activated representative cannot access the portal");
+    expect(await listOwnerPortalProperties(scope, { db }, { includeCondition: true })).toEqual([
+      expect.objectContaining({ propertyId: f.property.id, canViewFinances: false, condition: "CLEAR" })
+    ]);
+    await expect(getOwnerStatement(scope, f.property.id, {}, { db, requestId: randomUUID() })).rejects.toThrow(OwnerPortalAuthorizationError);
+    await revokeOwnerRepresentative(actor, f.owner.id, representative.id, deps);
+    expect(await ownerPortalActorContextFromSession(session, { db })).toBeNull();
+    expect(await listOwnerPortalProperties(scope, { db })).toEqual([]);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: {
+      action: "owner.representative.revoke", resourceId: f.owner.id
+    } }))).toBe(1);
+  });
+
   it("separates owner-attributed receipt and settlement custody evidence from the remaining payable", async () => {
     const f = await fixture(), at = new Date("2026-11-02T12:00:00Z");
     await withTenant(db, f.org, async tx => {
@@ -188,6 +263,19 @@ describe("native shared statement generation", () => {
     expect(activity.rows.map(row => row.amount.toJSON())).toEqual([{ currency: "EUR", amount: "9007199254740993.07" }]);
     expect(activity.detail).toMatchObject({ category: "OWNER_REVENUE", reference: statement.lines[0].reference });
     expect(Object.keys(activity.detail ?? {})).not.toContain("description");
+    const labels = { date: "Date", bucket: "Category", reference: "Reference", amount: "Amount", currency: "Currency",
+      opening: "Opening", credits: "Credits", debits: "Debits", closing: "Closing", bucketName: (bucket: string) => bucket };
+    const [csv, pdf] = await Promise.all([
+      downloadOwnerStatement(f.ctx, f.property.id, input, "en", "csv", labels, deps),
+      downloadOwnerStatement(f.ctx, f.property.id, input, "fr", "pdf", labels, deps)
+    ]);
+    expect(csv.filename).toBe("statement-2026-11-02-2026-11-02-EUR.csv");
+    expect(new TextDecoder().decode(csv.bytes)).toContain("9007199254740993.07");
+    expect(new TextDecoder().decode(pdf.bytes.slice(0, 5))).toBe("%PDF-");
+    const report = await getOwnerFinancialReport(f.ctx, f.property.id, "2026", "EUR", deps);
+    expect(report.rows.map(row => [row.month, row.amount.accommodation.toJSON().amount])).toEqual([["2026-11", "9007199254740993.07"]]);
+    expect(report.totals.find(row => row.key === "accommodation")?.amount.toJSON()).toEqual({ amount: "9007199254740993.07", currency: "EUR" });
+    await expect(downloadOwnerStatement(f.ctx, randomUUID(), input, "en", "csv", labels, deps)).rejects.toThrow();
     await expect(getOwnerFinancialActivity(f.ctx, f.property.id, { ...input, currency: "MAD", posting: statement.lines[0].postingId }, deps)).rejects.toThrow();
     await expect(getOwnerFinancialActivity(f.ctx, randomUUID(), input, deps)).rejects.toThrow();
     expect(await facts(f.org)).toEqual(original);

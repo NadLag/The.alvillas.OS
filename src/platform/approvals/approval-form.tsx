@@ -9,7 +9,10 @@ import type { getApproval } from "./approval-service";
 import { formatCurrencyAmount, formatDate } from "@/i18n/format";
 import { safeLocale } from "@/i18n/routing";
 
-export function ApprovalForm({ propertyId, approval }: { propertyId?: string; approval?: Awaited<ReturnType<typeof getApproval>> }) {
+export function ApprovalForm({ propertyId, approval, decisionAction = approvalDecisionAction, decisionHref }: {
+  propertyId?: string; approval?: Awaited<ReturnType<typeof getApproval>>;
+  decisionAction?: typeof approvalDecisionAction; decisionHref?: string;
+}) {
   const t = useTranslations("Approvals"); const locale = useLocale(); const router = useRouter();
   const expenseText = useTranslations("Expenses");
   const [pending, startTransition] = useTransition(); const [offline, setOffline] = useState(false); const [error, setError] = useState(false);
@@ -35,7 +38,7 @@ export function ApprovalForm({ propertyId, approval }: { propertyId?: string; ap
       if (!input.success) { setError(true); return; }
       startTransition(async () => {
         try {
-          if (approval) { const result = await approvalDecisionAction(input.data); if (!result.ok) setError(true); else router.refresh(); }
+          if (approval) { const result = await decisionAction(input.data); if (!result.ok) setError(true); else if (decisionHref) router.replace(decisionHref); else router.refresh(); }
           else { const result = await approvalRequestAction(input.data); if (!result.ok) setError(true); else router.push(`/${locale}/app/approvals/${result.data.id}`); }
         } catch { setError(true); }
       });

@@ -375,6 +375,23 @@ export async function getOwner(
   return owner;
 }
 
+export async function revokeOwnerRepresentative(ctx: CoreActorContext, ownerId: string, representativeId: string,
+  deps: CoreServiceDeps = {}) {
+  assertAllowed(ctx, "edit", "owner", ownerId);
+  const meta = await auditMeta(deps);
+  return withTenant(db(deps), ctx.organizationId, async tx => {
+    const before = await new CoreRepository(tx, ctx.organizationId).revokeOwnerRepresentative(ownerId, representativeId);
+    if (!before) throw new CoreNotFoundError();
+    if (!before.changed) return;
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId, actorId: ctx.actorId, action: "owner.representative.revoke",
+      resourceType: "owner", resourceId: ownerId, ipAddress: meta.ipAddress,
+      before: { representativeId, status: before.status }, after: { representativeId, status: "REVOKED" },
+      reason: "Owner representative delegation revoked", requestId: meta.requestId, occurredAt: new Date()
+    });
+  });
+}
+
 export async function createProperty(
   ctx: CoreActorContext,
   input: PropertyInput,

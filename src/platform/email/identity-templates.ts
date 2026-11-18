@@ -17,6 +17,7 @@ const deliverySchema = z.object({
 const invitationSchema = deliverySchema.extend({
   activationCode: z.string().regex(/^[A-Za-z0-9_-]{16,200}$/u),
   activationUrl: z.string().url(),
+  roleKey: z.string().optional(),
 });
 const recoverySchema = deliverySchema.extend({
   recoveryCode: z.string().regex(/^[A-Za-z0-9_-]{8,200}$/u),
@@ -35,7 +36,10 @@ export function renderIdentityEmail(type: string, payload: unknown, appUrl: stri
     const url = new URL("activationUrl" in data ? data.activationUrl : data.recoveryUrl);
     const origin = new URL(appUrl);
     const localHttp = origin.protocol === "http:" && ["localhost", "127.0.0.1"].includes(origin.hostname);
-    if ((origin.protocol !== "https:" && !localHttp) || url.origin !== origin.origin || url.username || url.password || url.search || url.hash) throw new EmailDeliveryValidationError();
+    const portalLink = "roleKey" in data && (data.roleKey === "owner" || data.roleKey === "owner_representative")
+      && url.search === "?surface=owner";
+    if ((origin.protocol !== "https:" && !localHttp) || url.origin !== origin.origin || url.username || url.password ||
+      (url.search && !portalLink) || url.hash) throw new EmailDeliveryValidationError();
     const expectedPath = invitation ? `/${data.locale}/activate/${"activationCode" in data ? data.activationCode : ""}` : `/${data.locale}/recover`;
     if (url.pathname !== expectedPath || new Date(data.expiresAt) <= now) throw new EmailDeliveryValidationError();
     const labels = catalogs[data.locale].emailTemplates[invitation ? "invitation" : "recovery"];

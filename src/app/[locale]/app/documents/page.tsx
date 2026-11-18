@@ -12,8 +12,8 @@ export default async function Page({params,searchParams}:{params:Promise<{locale
   const locale=safeLocale((await params).locale);setRequestLocale(locale);
   const[session,t]=await Promise.all([auth(),getTranslations("DocumentArchive")]),actor=await accountActorContextFromSession(session);if(!actor)redirect(`/${locale}/login`);
   const scope=actor.organizationId+"."+actor.actorId,query=await searchParams,reference=z.object({documentId:z.uuid(),number:z.coerce.number().int().positive().max(2147483646)}).safeParse({documentId:query.document,number:query.version}),initialReference=reference.success?reference.data:undefined;
-  const lead = z.uuid().safeParse(query.lead), property = z.uuid().safeParse(query.property), supplier = z.uuid().safeParse(query.supplier);
+  const lead = z.uuid().safeParse(query.lead), property = z.uuid().safeParse(query.property), supplier = z.uuid().safeParse(query.supplier), owner = z.uuid().safeParse(query.owner);
   const initialSource = lead.success ? { kind: "LEAD" as const, id: lead.data } : property.success
-    ? { kind: "PROPERTY" as const, id: property.data } : supplier.success ? { kind: "SUPPLIER" as const, id: supplier.data } : undefined;
+    ? { kind: "PROPERTY" as const, id: property.data } : supplier.success ? { kind: "SUPPLIER" as const, id: supplier.data } : owner.success ? { kind: "OWNER" as const, id: owner.data } : undefined;
   return <AdminShell className="resource-page attachment-page document-archive-page" testId="document-archive-page"><ShellHeader eyebrow={t("eyebrow")} title={t("title")} subtitle={t("guidance")}/><DocumentArchiveWorkspace key={scope+":"+(initialReference?.documentId??"")+":"+(initialReference?.number??"")+":"+(initialSource?.kind??"")+":"+(initialSource?.id??"")} locale={locale} scope={scope} initialReference={initialReference} initialSource={initialSource}/></AdminShell>;
 }

@@ -287,6 +287,7 @@
       "signInAgain": "Sign in after saving these codes"
     },
     "activation": {
+      "portalPassword": "Create a portal password",
       "eyebrow": "Account activation",
       "title": "Activate your account",
       "subtitle": "Verify the invited phone number and choose your field PIN. Add a password if this account also uses the web workspace.",
@@ -546,6 +547,9 @@
       "generic": "The record could not be saved. Try again."
     },
     "owners": {
+      "revokeRepresentative": "Revoke representative access",
+      "inviteOwner": "Invite owner to the portal",
+      "inviteRepresentative": "Invite representative",
       "eyebrow": "Core domain",
       "title": "Owners",
       "subtitle": "Create and review owner contacts inside the current organization scope.",
@@ -1192,6 +1196,53 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "preferences": {
+      "title": "Portal preferences",
+      "notifications": "Notification settings"
+    },
+    "reports": {
+      "title": "Financial reports",
+      "year": "Year",
+      "annual": "Annual totals",
+      "monthly": "Monthly activity",
+      "empty": "No posted activity for this year.",
+      "columns": {
+        "accommodation": "Accommodation",
+        "services": "Services",
+        "commission": "Commission",
+        "platform": "Platform fees",
+        "expenses": "Owner expenses",
+        "reimbursements": "Reimbursements",
+        "payouts": "Payout entries",
+        "adjustments": "Adjustments"
+      }
+    },
+    "documents": {
+      "title": "Documents",
+      "back": "Back to property",
+      "open": "Open private archive",
+      "empty": "No documents are available for your access."
+    },
+    "approvals": {
+      "title": "Pending approvals",
+      "back": "Back",
+      "empty": "No pending requests assigned to you for this property.",
+      "review": "Make a decision on the amount assigned to you.",
+      "next": "Next approvals",
+      "sources": {
+        "maintenance": "Maintenance",
+        "expense": "Expense",
+        "invoice": "Supplier invoice"
+      }
+    },
+    "exports": {
+      "title": "Statement periods and downloads",
+      "month": "This month",
+      "year": "Selected year",
+      "csv": "Download CSV",
+      "pdf": "Download PDF",
+      "unavailable": "This statement download is currently unavailable."
+    },
     "payouts": {
       "title": "Payout history and forecast",
       "forecast": "Forecast amount",
