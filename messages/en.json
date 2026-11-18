@@ -1192,6 +1192,14 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "exports": {
+      "title": "Statement periods and downloads",
+      "month": "This month",
+      "year": "Selected year",
+      "csv": "Download CSV",
+      "pdf": "Download PDF",
+      "unavailable": "This statement download is currently unavailable."
+    },
     "payouts": {
       "title": "Payout history and forecast",
       "forecast": "Forecast amount",

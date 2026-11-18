@@ -1192,6 +1192,14 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "exports": {
+      "title": "Périodes et téléchargements du relevé",
+      "month": "Ce mois-ci",
+      "year": "Année sélectionnée",
+      "csv": "Télécharger le CSV",
+      "pdf": "Télécharger le PDF",
+      "unavailable": "Le téléchargement de ce relevé est actuellement indisponible."
+    },
     "payouts": {
       "title": "Historique et prévision des versements",
       "forecast": "Montant prévisionnel",

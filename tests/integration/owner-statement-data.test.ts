@@ -1,3 +1,4 @@
+import { downloadOwnerStatement } from "@/modules/owner-portal/application/owner-statement-download";
 import { getOwnerPayoutHistory } from "@/modules/owner-portal/application/owner-payout-history";
 import { getOwnerMoneyMovements } from "@/modules/owner-portal/application/owner-money-movements";
 import { getOwnerFinancialActivity } from "@/modules/owner-portal/application/owner-financial-activity";
@@ -188,6 +189,16 @@ describe("native shared statement generation", () => {
     expect(activity.rows.map(row => row.amount.toJSON())).toEqual([{ currency: "EUR", amount: "9007199254740993.07" }]);
     expect(activity.detail).toMatchObject({ category: "OWNER_REVENUE", reference: statement.lines[0].reference });
     expect(Object.keys(activity.detail ?? {})).not.toContain("description");
+    const labels = { date: "Date", bucket: "Category", reference: "Reference", amount: "Amount", currency: "Currency",
+      opening: "Opening", credits: "Credits", debits: "Debits", closing: "Closing", bucketName: (bucket: string) => bucket };
+    const [csv, pdf] = await Promise.all([
+      downloadOwnerStatement(f.ctx, f.property.id, input, "en", "csv", labels, deps),
+      downloadOwnerStatement(f.ctx, f.property.id, input, "fr", "pdf", labels, deps)
+    ]);
+    expect(csv.filename).toBe("statement-2026-11-02-2026-11-02-EUR.csv");
+    expect(new TextDecoder().decode(csv.bytes)).toContain("9007199254740993.07");
+    expect(new TextDecoder().decode(pdf.bytes.slice(0, 5))).toBe("%PDF-");
+    await expect(downloadOwnerStatement(f.ctx, randomUUID(), input, "en", "csv", labels, deps)).rejects.toThrow();
     await expect(getOwnerFinancialActivity(f.ctx, f.property.id, { ...input, currency: "MAD", posting: statement.lines[0].postingId }, deps)).rejects.toThrow();
     await expect(getOwnerFinancialActivity(f.ctx, randomUUID(), input, deps)).rejects.toThrow();
     expect(await facts(f.org)).toEqual(original);
