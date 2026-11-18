@@ -84,6 +84,7 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     if(!(purchase?.fundingKind==="PERSONAL"?funding.code==="EMPLOYEE_PAYABLE"&&funding.accountType==="CLAIM_OWNERSHIP"&&funding.normalSide==="CREDIT"&&!funding.archivedAt:isExpenseFundingAccount(funding)))throw new ExpenseConfigurationError("Expense funding account is unavailable");
     if(row.state!=="APPROVED"||row.version!==input.expectedVersion||!row.submission||
       row.approval&&row.approval.state!=="APPROVED"||row.approval?.financialStages.some(stage=>stage.state!=="APPROVED"))throw new ExpenseConflictError();
+    if (!await expenses.maintenanceWorkAllowsPosting(row.id)) throw new ExpenseConflictError();
     const frozen=snapshotSchema.safeParse(row.submission.snapshot);if(!frozen.success)throw new ExpenseConfigurationError("Submitted expense allocation is unavailable");
     let sourcePeriod:Awaited<ReturnType<AccountingPeriodRepository["postingPeriod"]>>=null;
     if(input.currentPeriod){

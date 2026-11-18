@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { authorize,type Action,type AuthContext,type Resource } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
+import { expenseResource } from "@/platform/authz/expense-resource";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { employeeCompensationCostResource } from "@/modules/finance/domain/employee-compensation-cost-resource";
 
@@ -22,12 +23,35 @@ export const invoiceApprovalSourceSnapshotSchema = z.object({ lineId: z.uuid(), 
 export type InvoiceApprovalStageSource = { invoiceLineId: string | null; propertyId: string | null; reservationId: string | null; ownerId: string | null;
   amount: { toString(): string }; currency: string; sourceSnapshot: unknown; property?: { cityId: string | null; regionId: string | null } | null;
   employeeCostId?:string|null;employeeCost?:{id:string;submissionId:string;propertyId:string|null;reservationId:string|null;category:string;note:string;timezone:string;currency:string}|null };
+export const maintenanceApprovalSnapshotSchema = z.object({
+  detail: z.object({ fields: z.object({ purpose: z.string(), category: z.string(), occurredOn: z.iso.date() }) }),
+  policy: z.object({ timezone: z.string().min(1), reservationId: z.uuid().nullable() })
+});
+
 type ApprovalSource = { id: string; organizationId: string; propertyId: string | null; state: string;
   property: { regionId: string | null; cityId: string | null; timezone?: string } | null; expenseId?: string | null;
   invoiceSubmissionId?: string | null; invoiceSubmission?: { id: string; invoice: { id: string; state: string; currentSubmissionId: string | null } } | null;
   employeeSubmissionId?:string|null;employeeSubmission?:{id:string;submittedBy:string;costOn:Date;withdrawal:{id:string}|null}|null;
+  maintenanceEstimateId?: string | null;
+  maintenanceEstimate?: { id: string; taskId: string; actorId: string; snapshot: unknown; estimateRevision: number | null;
+    workOrder: { task: { archivedAt: Date | null; propertyId: string; reservationId: string | null } } } | null;
   expense?: { id: string; state: string; amount: { toString(): string }; reservationId: string | null; occurredOn: Date; createdBy: string } | null };
 export function approvalResource(row: ApprovalSource, ownerId?: string | null, stage?: InvoiceApprovalStageSource): Resource {
+  if (row.maintenanceEstimateId) {
+    const estimate = row.maintenanceEstimate;
+    const snapshot = maintenanceApprovalSnapshotSchema.safeParse(estimate?.snapshot);
+    if (!estimate?.estimateRevision || estimate.workOrder.task.archivedAt || !row.propertyId || !row.property || !stage ||
+        row.propertyId !== estimate.workOrder.task.propertyId || !snapshot.success ||
+        snapshot.data.policy.reservationId !== estimate.workOrder.task.reservationId) throw new ApprovalAccessError();
+    const resource = expenseResource(row.organizationId, {
+      id: row.propertyId, cityId: row.property.cityId, regionId: row.property.regionId, timezone: snapshot.data.policy.timezone
+    }, {
+      id: estimate.id, amount: stage.amount.toString(), reservationId: snapshot.data.policy.reservationId,
+      state: row.state === "PENDING" ? "PENDING_APPROVAL" : row.state,
+      occurredOn: new Date(snapshot.data.detail.fields.occurredOn), createdBy: estimate.actorId
+    }, stage.ownerId);
+    return { ...resource, approvalId: row.id };
+  }
   if(row.employeeSubmissionId){
     const source=stage&&invoiceApprovalSourceSnapshotSchema.safeParse(stage.sourceSnapshot),cost=stage?.employeeCost,submission=row.employeeSubmission;
     if(!submission||!stage?.employeeCostId||!cost||cost.id!==stage.employeeCostId||cost.submissionId!==submission.id||!source?.success||source.data.lineId!==cost.id||

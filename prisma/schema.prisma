@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderOrganization")
   maintenanceIssueContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextOrganization")
   actualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryOrganization")
@@ -857,6 +858,7 @@ model Person {
 }
 
 model UserAccount {
+  maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderActor")
   maintenanceIssueContexts MaintenanceIssueContext[] @relation("MaintenanceIssueContextActor")
   createdActualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryCreator")
@@ -2388,6 +2390,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   actualLaundryInvoices LaundryActualInvoice[]
   laundryExpectedInvoices LaundryExpectedInvoice[]
   supplierPriceListVersions SupplierPriceListVersion[]
@@ -2871,6 +2874,8 @@ model AuditLog {
 }
 
 model ApprovalRequest {
+  maintenanceEstimateId String? @map("maintenance_estimate_id") @db.Uuid
+  maintenanceEstimate MaintenanceWorkOrderFinance? @relation(fields: [organizationId, maintenanceEstimateId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_maintenance_estimate_fk")
   employeeSubmissionId String?                         @map("employee_submission_id") @db.Uuid
   employeeSubmission   EmployeeCompensationSubmission? @relation(fields: [organizationId, employeeSubmissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   invoiceSubmissionId String?                    @map("invoice_submission_id") @db.Uuid
@@ -2897,6 +2902,7 @@ model ApprovalRequest {
   decider             UserAccount?               @relation("ApprovalDecider", fields: [organizationId, decidedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_decider_tenant_fk")
   recipients          ApprovalRecipient[]
 
+  @@unique([organizationId, maintenanceEstimateId], map: "approval_request_maintenance_estimate_unique")
   @@unique([organizationId, expenseId], map: "approval_request_org_expense_unique")
   @@unique([organizationId, employeeSubmissionId], map: "approval_request_org_employee_submission_unique")
   @@unique([organizationId, invoiceSubmissionId], map: "approval_request_org_invoice_submission_unique")
@@ -3398,6 +3404,7 @@ model AccountingPeriodAdjustment {
 }
 
 model Expense {
+  maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   externalPaymentRefundFeeSource ExternalPaymentRefundFee? @relation("RefundFeeOriginalExpense")
   externalPaymentRefundFeeCorrection ExternalPaymentRefundFee? @relation("RefundFeeCorrectionExpense")
   externalPaymentFee ExternalPaymentFee?
@@ -3573,6 +3580,7 @@ model Supplier {
 }
 
 model SupplierInvoice {
+  maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   laundryAssociations LaundryActualInvoice[] @relation("ActualLaundryInvoice")
   recognitionRequests SupplierInvoiceRecognitionRequest[]
   recognition         SupplierInvoiceRecognition?
@@ -6880,6 +6888,7 @@ model MaintenanceIssueContext {
 }
 
 model MaintenanceWorkOrder {
+  maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   id String @id @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   issueId String @map("issue_id") @db.Uuid
@@ -6900,4 +6909,37 @@ model MaintenanceWorkOrder {
   @@unique([organizationId,actorId,idempotencyKey],map:"maintenance_work_order_actor_nonce")
   @@index([organizationId,issueId,createdAt(sort:Desc)],map:"maintenance_work_order_issue_history")
   @@map("maintenance_work_order")
+}
+
+model MaintenanceWorkOrderFinance {
+  approval ApprovalRequest?
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  taskId String @map("task_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  estimateRevision Int? @map("estimate_revision")
+  expenseId String? @map("expense_id") @db.Uuid
+  invoiceId String? @map("invoice_id") @db.Uuid
+  sourceVersion Int? @map("source_version")
+  amount Decimal @db.Decimal(18, 2)
+  currency String @db.Char(3)
+  reason String @db.VarChar(1000)
+  snapshot Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  workOrder MaintenanceWorkOrder @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "maintenance_finance_task_fk")
+  actor UserAccount @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "maintenance_finance_actor_fk")
+  expense Expense? @relation(fields: [organizationId, expenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "maintenance_finance_expense_fk")
+  invoice SupplierInvoice? @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "maintenance_finance_invoice_fk")
+  moneyCurrency Currency @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id], map: "maintenance_finance_org_id")
+  @@unique([organizationId, actorId, idempotencyKey], map: "maintenance_finance_actor_nonce")
+  @@unique([organizationId, taskId, estimateRevision], map: "maintenance_finance_estimate_revision")
+  @@unique([organizationId, expenseId, sourceVersion], map: "maintenance_finance_expense_version")
+  @@unique([organizationId, invoiceId, sourceVersion], map: "maintenance_finance_invoice_version")
+  @@index([organizationId, taskId, id(sort: Desc)], map: "maintenance_finance_history")
+  @@map("maintenance_work_order_finance")
 }
