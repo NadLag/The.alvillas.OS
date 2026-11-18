@@ -1,4 +1,26 @@
 {
+  "CommandDashboard": {
+    "loading": "Loading Command Center",
+    "error": "Command Center could not load.",
+    "retry": "Retry",
+    "title": "Command Center",
+    "manager": "Manager dashboard",
+    "operations": "Operations dashboard",
+    "finance": "Finance dashboard",
+    "back": "Back to app",
+    "operating": "Operations",
+    "ready": "Properties ready",
+    "delayed": "Delayed tasks",
+    "risk": "Tasks at risk",
+    "readyTotal": "{ready, number} of {total, number}",
+    "total": "{count, number}",
+    "noReadiness": "No property readiness data is visible.",
+    "openOperations": "Open operations overview",
+    "openFinance": "Open financial overview",
+    "ledger": "ALVILLAS ledger balance",
+    "openLedger": "Open company ledger",
+    "noFinance": "The financial position is unavailable."
+  },
   "CommandSearch": {
     "title": "Search",
     "back": "Back to dashboard",

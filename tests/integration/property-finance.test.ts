@@ -1,3 +1,4 @@
+import { dashboardAccess } from "@/platform/command-center/dashboard";
 import { searchCommandCenter } from "@/platform/command-center/search";
 import { operationManagement } from "@/modules/reservations/application/operation-management";
 import { getCommandFinance } from "@/modules/finance/application/command-center-finance";
@@ -288,6 +289,9 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(report.profit.toJSON().amount).toBe("739.91");
    expect(report.cashPosition.toJSON().amount).toBe("1517.68");
    expect(report.outsidePortfolio.toJSON().amount).toBe("-9.99");
+   const asRole = (roleKey: string) => ({ ...ctx.authContext, assignments: ctx.authContext.assignments?.map(grant => ({ ...grant, roleKey })) });
+   expect(dashboardAccess(asRole("finance")).profiles).toEqual(["finance"]);
+   expect(dashboardAccess(asRole("operations_manager")).profiles).toEqual(["manager", "operations"]);
    const dashboard = await getCommandFinance(ctx, filter, { db });
    expect([dashboard.revenue, dashboard.expenses, dashboard.cash, dashboard.ownerPayable, dashboard.companyBalance]
      .map(value => value.toJSON().amount)).toEqual(["1000.01", "260.10", "1517.68", "1077.77", "739.91"]);

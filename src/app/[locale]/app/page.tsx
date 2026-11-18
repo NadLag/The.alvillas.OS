@@ -1,3 +1,4 @@
+import { dashboardAccess } from "@/platform/command-center/dashboard";
 import { commandSearchKinds } from "@/platform/command-center/search";
 import { canViewCommandFinance } from "@/modules/finance/application/command-center-finance";
 import { CommandCenterExceptionsLink } from "@/platform/command-center/exceptions-link";
@@ -182,6 +183,8 @@ export default async function AppPage({
           <h2>{t("welcome", { name: session.user?.name ?? session.user?.email ?? t("fallbackName") })}</h2>
           <p>{t("summary")}</p>
           {reservationContext ? <>
+            {dashboardAccess(reservationContext.authContext).profiles.length ?
+              <Link className="secondary-button" href={`/${appLocale}/app/command-center/dashboard`}>{(await getTranslations("CommandDashboard"))("title")}</Link> : null}
             <CommandCenterExceptionsLink context={reservationContext.authContext} locale={appLocale} />
             <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} />
             <CommandCenterTodaySummary actor={reservationContext} locale={appLocale} />

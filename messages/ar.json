@@ -1,4 +1,26 @@
 {
+  "CommandDashboard": {
+    "loading": "جارٍ تحميل مركز القيادة",
+    "error": "تعذر تحميل مركز القيادة.",
+    "retry": "إعادة المحاولة",
+    "title": "مركز القيادة",
+    "manager": "لوحة المدير",
+    "operations": "لوحة العمليات",
+    "finance": "لوحة المالية",
+    "back": "العودة إلى التطبيق",
+    "operating": "العمليات",
+    "ready": "العقارات الجاهزة",
+    "delayed": "المهام المتأخرة",
+    "risk": "المهام المعرّضة للتأخر",
+    "readyTotal": "{ready, number} من {total, number}",
+    "total": "{count, number}",
+    "noReadiness": "لا تظهر بيانات جاهزية العقارات.",
+    "openOperations": "فتح النظرة التشغيلية",
+    "openFinance": "فتح النظرة المالية",
+    "ledger": "رصيد دفتر ألفيلاس",
+    "openLedger": "فتح دفتر الشركة",
+    "noFinance": "المركز المالي غير متاح."
+  },
   "CommandSearch": {
     "title": "بحث",
     "back": "العودة إلى لوحة التحكم",

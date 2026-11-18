@@ -1,4 +1,26 @@
 {
+  "CommandDashboard": {
+    "loading": "Chargement du centre de pilotage",
+    "error": "Impossible de charger le centre de pilotage.",
+    "retry": "Réessayer",
+    "title": "Centre de pilotage",
+    "manager": "Tableau de bord de gestion",
+    "operations": "Tableau de bord des opérations",
+    "finance": "Tableau de bord financier",
+    "back": "Retour à l’application",
+    "operating": "Opérations",
+    "ready": "Propriétés prêtes",
+    "delayed": "Tâches en retard",
+    "risk": "Tâches à risque",
+    "readyTotal": "{ready, number} sur {total, number}",
+    "total": "{count, number}",
+    "noReadiness": "Aucune donnée de préparation des propriétés n’est visible.",
+    "openOperations": "Ouvrir la vue opérationnelle",
+    "openFinance": "Ouvrir la vue financière",
+    "ledger": "Solde du grand livre ALVILLAS",
+    "openLedger": "Ouvrir le grand livre de la société",
+    "noFinance": "La situation financière est indisponible."
+  },
   "CommandSearch": {
     "title": "Rechercher",
     "back": "Retour au tableau de bord",

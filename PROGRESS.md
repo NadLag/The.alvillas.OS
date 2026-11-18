@@ -316,7 +316,7 @@ F-CMD-02 | IN-PROGRESS | Authorized exception queues with native review routes f
 F-CMD-03 | IN-PROGRESS | Currency-specific ledger view separates revenue and expenses from bank and cash balances, owner payable and the ALVILLAS ledger position. Hosted acceptance pending.
 F-CMD-04 | IN-PROGRESS | Operations tabs show native workload, property readiness and delayed tasks with scoped filters and links. Hosted acceptance pending.
 F-CMD-05 | IN-PROGRESS | Indexed PostgreSQL full-text and trigram search across authorized operational records and the native document archive. Hosted acceptance pending.
-F-CMD-06 | TODO |
+F-CMD-06 | IN-PROGRESS | Manager, operations and finance dashboards use authorized native sections and default to the active account role. Hosted acceptance pending.
 F-WEB-01 | TODO |
 F-WEB-02 | TODO |
 F-WEB-03 | TODO |
