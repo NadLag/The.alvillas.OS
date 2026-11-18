@@ -10,6 +10,8 @@ import { previewWorkOrderRegistration, publishWorkOrderRegistration } from "@/mo
 import { WorkOrderAccessError, WorkOrderConflictError } from "@/modules/maintenance/domain/work-order";
 import { reportOperationIssue } from "@/modules/reservations/application/operation-evidence";
 import { createOperationTask } from "@/modules/reservations/application/operation-service";
+import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
+import { getOwnerPropertyCondition, listOwnerPortalProperties, OwnerPortalNotFoundError } from "@/modules/owner-portal/application/owner-portal-service";
 import { nativeSupplierPriceFixture } from "./support/laundry-pricing-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
 
@@ -43,11 +45,24 @@ it("retains the original supplier, configured SLA, replay outcome and departure 
       ] }] } });
   });
   const actor = { ...f.actor, authContext: await authContextForAccount(f.organizationId, f.account.id, { db }) };
+  const access = await withTenant(db, f.organizationId, async tx => {
+    const owner = await tx.owner.create({ data: { organizationId: f.organizationId, displayName: "Original contractor test villa owner" } });
+    await tx.propertyOwner.create({ data: { organizationId: f.organizationId, propertyId: f.property.id, ownerId: owner.id } });
+    return tx.ownerPortalAccess.create({ data: { organizationId: f.organizationId, userAccountId: f.account.id, ownerId: owner.id } });
+  });
+  const owner = await ownerPortalActorContextFromSession({
+    user: { id: f.account.id, personId: f.person.id, organizationId: f.organizationId, preferredLocale: "en", sessionId: randomUUID(), sessionRevoked: false, securitySetupRequired: false }, expires: "2032-12-31T23:59:59.000Z"
+  }, { db });
+  if (!owner) throw new Error("Expected the linked owner portal account");
+  await expect(getOwnerPropertyCondition(owner, f.property.id, { db })).resolves.toBe("CLEAR");
   const nativeTask = await withTenant(db, f.organizationId, tx => tx.operationTask.findFirstOrThrow({
     where: { organizationId: f.organizationId, reservationId: f.reservation.id }
   }));
   const issueId = await reportOperationIssue(actor, { taskId: nativeTask.id, title: "Dedicated contractor repair",
     description: "A native issue needs the contractor's scheduled repair", severity: "HIGH", idempotencyKey: randomUUID() }, f.deps);
+  const condition = await listOwnerPortalProperties(owner, { db }, { includeCondition: true });
+  expect(condition.find(property => property.propertyId === f.property.id)?.condition).toBe("ATTENTION");
+  expect(JSON.stringify(condition)).not.toContain("A native issue needs");
   const task = await createOperationTask(actor, { propertyId: f.property.id, type: "MAINTENANCE", priority: "HIGH",
     title: { en: "Contractor repair", fr: "Réparation par le prestataire" }, dueDate: "2031-05-02",
     checklistTemplateKey: "contractor", reason: "Create the actual Operations repair work order", idempotencyKey: randomUUID() }, f.deps);
@@ -85,6 +100,10 @@ it("retains the original supplier, configured SLA, replay outcome and departure 
     where: { id: f.grants["supplier:view"] }, data: { archivedAt: new Date() }
   }));
   expect((await readMaintenanceContractor(actor, { taskId }, f.deps)).history[1]).toEqual({ state: "MASKED" });
+  await withTenant(db, f.organizationId, tx => tx.ownerPortalAccess.update({
+    where: { id: access.id }, data: { archivedAt: new Date() }
+  }));
+  await expect(getOwnerPropertyCondition(owner, f.property.id, { db })).rejects.toBeInstanceOf(OwnerPortalNotFoundError);
   expect(await withTenant(db, f.organizationId, tx => tx.auditLog.count({
     where: { organizationId: f.organizationId, resourceId: taskId, action: "maintenance.work_order.contractor_changed" }
   }))).toBe(2);

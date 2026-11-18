@@ -94,7 +94,8 @@ async function prepare(actor: AccountActorContext, tx: TenantTransaction, intent
       throw new WorkOrderConflictError();
   }
   const detail = data?.detail ?? { kind: intent.kind, source };
-  const money = data?.money ?? source.money;
+  const money = data?.money ?? source?.money;
+  if (!money) throw new WorkOrderConflictError();
   const fingerprint = jsonbFingerprint({ stamp, source: order.fingerprint, intent, detail, policy: data?.plan.snapshot });
   await order.recheck();
   if (stamp !== await maintenanceAuthorityStamp(actor, tx)) throw new WorkOrderConflictError();

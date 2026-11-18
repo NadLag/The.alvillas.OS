@@ -36,7 +36,7 @@ export default async function OwnerPortalPage({
 
   const [t, properties] = await Promise.all([
     getTranslations("OwnerPortal"),
-    listOwnerPortalProperties(ctx)
+    listOwnerPortalProperties(ctx, {}, { includeCondition: true })
   ]);
 
   return (
@@ -73,6 +73,7 @@ export default async function OwnerPortalPage({
                 <span>
                   <strong>{property.propertyName}</strong>
                   <small>{t("propertyMeta", { city: property.city, owner: property.ownerName })}</small>
+                  {property.condition ? <small data-testid="owner-property-condition">{t("condition.states." + property.condition)}</small> : null}
                 </span>
                 <span>{t("openStatement")}</span>
               </Link>

@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import en from "../../messages/en.json" with { type: "json" };
+import fr from "../../messages/fr.json" with { type: "json" };
 import {
   ensureOwnerPortalScenario,
   ownerStatementTotalsFromPostgres
@@ -44,6 +46,7 @@ test.describe("owner portal live balance and statement", () => {
     await expect(page.getByTestId("owner-property-row")).toHaveCount(1);
     await expect(page.getByTestId("owner-property-row")).toContainText(scenario.propertyName);
     await expect(page.getByText(scenario.otherPropertyName)).toHaveCount(0);
+    await expect(page.getByTestId("owner-property-condition")).toHaveText(en.OwnerPortal.condition.states.CLEAR);
 
     await page.getByTestId("owner-property-row").click();
     await expect(page.getByTestId("owner-statement-page")).toBeVisible();
@@ -76,6 +79,7 @@ test.describe("owner portal live balance and statement", () => {
     await expect(page.getByTestId("owner-statement-page")).toBeVisible();
     await expect(page.getByText("Releve en direct")).toBeVisible();
     await expect(page.getByText("Solde initial")).toBeVisible();
+    await expect(page.getByTestId("owner-property-condition")).toContainText(fr.OwnerPortal.condition.states.CLEAR);
     await expect(page.getByTestId("owner-statement-closing")).toHaveAttribute(
       "data-amount",
       totals.closing

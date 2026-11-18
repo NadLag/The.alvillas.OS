@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { OwnerStatementRepository } from "@/platform/ledger/owner-statement-repository";
 import type { RawOwnerLedgerPosting } from "@/modules/owner-portal/domain/owner-statement";
 import { LedgerCalendarRepository } from "@/platform/ledger/ledger-calendar-repository";
@@ -65,6 +66,37 @@ export class OwnerPortalRepository extends LedgerCalendarRepository {
   ): Promise<OwnerPropertyRow | null> {
     const rows = await this.ownerPropertyAccessRows(userAccountId);
     return rows.find((row) => row.propertyId === propertyId) ?? null;
+  }
+
+
+  async conditionSignals(userAccountId: string, propertyIds: readonly string[]) {
+    if (!propertyIds.length) return [];
+    return this.tx.$queryRaw<Array<{ propertyId: string; openIssue: boolean; waitingForWork: boolean }>>(Prisma.sql`
+      WITH permitted AS (
+        SELECT DISTINCT p.id
+        FROM property p
+        JOIN property_owner po ON po.organization_id = p.organization_id AND po.property_id = p.id AND po.archived_at IS NULL
+        JOIN owner o ON o.organization_id = p.organization_id AND o.id = po.owner_id AND o.archived_at IS NULL
+        JOIN owner_portal_access a ON a.organization_id = p.organization_id AND a.owner_id = o.id AND a.archived_at IS NULL
+        JOIN user_account u ON u.organization_id = a.organization_id AND u.id = a.user_account_id AND u.status = 'ACTIVE'
+        WHERE p.organization_id = ${this.organizationId}::uuid AND p.archived_at IS NULL
+          AND a.user_account_id = ${userAccountId}::uuid AND p.id = ANY(${[...propertyIds]}::uuid[])
+      ), issue_signals AS (
+        SELECT i.property_id, bool_or(NOT EXISTS (
+          SELECT 1 FROM maintenance_work_order w
+          JOIN operation_task repair ON repair.organization_id = w.organization_id AND repair.id = w.id
+          WHERE w.organization_id = i.organization_id AND w.issue_id = i.id
+            AND repair.property_id = i.property_id AND repair.type = 'MAINTENANCE'
+            AND repair.archived_at IS NULL AND repair.state = 'IN_PROGRESS'
+        )) AS awaiting
+        FROM permitted p JOIN operation_issue i ON i.property_id = p.id
+        JOIN operation_task t ON t.organization_id = i.organization_id AND t.id = i.task_id AND t.archived_at IS NULL
+        WHERE i.organization_id = ${this.organizationId}::uuid AND i.state IN ('OPEN', 'IN_PROGRESS')
+        GROUP BY i.property_id
+      )
+      SELECT p.id AS "propertyId", i.property_id IS NOT NULL AS "openIssue",
+        coalesce(i.awaiting, false) AS "waitingForWork"
+      FROM permitted p LEFT JOIN issue_signals i ON i.property_id = p.id`);
   }
 
   listOwnerLedgerPostings(input:Parameters<OwnerStatementRepository["listOwnerLedgerPostings"]>[0]):Promise<RawOwnerLedgerPosting[]>{return new OwnerStatementRepository(this.tx,this.organizationId).listOwnerLedgerPostings(input)}

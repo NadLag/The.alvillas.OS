@@ -16,7 +16,8 @@ import {
 import { OwnerPortalRepository } from "@/modules/owner-portal/infrastructure/owner-portal-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type DataClass } from "@/platform/authz/authorize";
-import type { PresentationContext } from "@/platform/authz/present";
+import { present, type PresentationContext } from "@/platform/authz/present";
+import { ownerPropertyCondition, type OwnerPropertyCondition } from "../domain/property-condition";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
@@ -41,6 +42,7 @@ export type OwnerPortalPropertySummary = {
   propertyName: string;
   city: string;
   shareBps: number;
+  condition?: OwnerPropertyCondition;
 };
 
 type OwnerPortalServiceDeps = {
@@ -139,7 +141,8 @@ function statementHash(statement: OwnerStatementView): string {
 
 export async function listOwnerPortalProperties(
   ctx: OwnerPortalActorContext,
-  deps: OwnerPortalServiceDeps = {}
+  deps: OwnerPortalServiceDeps = {},
+  options: { includeCondition?: boolean } = {}
 ): Promise<OwnerPortalPropertySummary[]> {
   assertAllowed(ctx, "owner_portal");
 
@@ -147,13 +150,36 @@ export async function listOwnerPortalProperties(
     const repository = new OwnerPortalRepository(tx, ctx.organizationId);
     const rows = await repository.listOwnerProperties(ctx.actorId);
 
-    return rows.filter((row) =>
+    const available = rows.filter((row) =>
       authorize(ctx.authContext, "view", {
         type: "owner_portal_property",
         organizationId: ctx.organizationId,
         id: row.propertyId
       })
     );
+    if (!options.includeCondition) return available;
+    const signals = await repository.conditionSignals(ctx.actorId, [...new Set(available.map(row => row.propertyId))]);
+    const conditions = new Map(signals.map(signal => [signal.propertyId, presentsCondition(ctx, signal)]));
+    return available.map(row => ({ ...row, condition: conditions.get(row.propertyId) }));
+  });
+}
+
+function presentsCondition(ctx: OwnerPortalActorContext, signal: { propertyId: string; openIssue: boolean; waitingForWork: boolean }) {
+  const shown = present(ownerPresentationContext(ctx), "view", {
+    type: "owner_portal_property", organizationId: ctx.organizationId, id: signal.propertyId,
+    dataClass: "operational", data: { condition: ownerPropertyCondition(signal) }
+  }, { condition: { dataClass: "operational", mask: "omit" } });
+  if (!shown.condition) throw new OwnerPortalAuthorizationError();
+  return shown.condition;
+}
+
+export async function getOwnerPropertyCondition(ctx: OwnerPortalActorContext, propertyId: string, deps: OwnerPortalServiceDeps = {}) {
+  assertAllowed(ctx, "owner_portal_property", propertyId);
+  return withTenant(db(deps), ctx.organizationId, async tx => {
+    const repository = new OwnerPortalRepository(tx, ctx.organizationId);
+    const [signal] = await repository.conditionSignals(ctx.actorId, [propertyId]);
+    if (!signal) throw new OwnerPortalNotFoundError();
+    return presentsCondition(ctx, signal);
   });
 }
 

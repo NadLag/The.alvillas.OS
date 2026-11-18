@@ -1192,6 +1192,14 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "condition": {
+      "title": "Property condition",
+      "states": {
+        "CLEAR": "No open maintenance issues",
+        "ATTENTION": "Maintenance needs attention",
+        "WORK_UNDERWAY": "Maintenance work underway"
+      }
+    },
     "switch": {
       "en": "EN",
       "fr": "FR",

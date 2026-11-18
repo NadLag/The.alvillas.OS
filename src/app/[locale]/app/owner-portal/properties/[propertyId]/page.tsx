@@ -13,6 +13,7 @@ import {
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import {
   getOwnerStatement,
+  getOwnerPropertyCondition,
   OwnerPortalAuthorizationError,
   OwnerPortalNotFoundError
 } from "@/modules/owner-portal/application/owner-portal-service";
@@ -65,9 +66,10 @@ export default async function OwnerStatementPage({
   const parsedPeriod = periodFromSearch(rawSearchParams), period = parsedPeriod.success ? parsedPeriod.data : {};
   const t = await getTranslations("OwnerPortal");
   let statement: Awaited<ReturnType<typeof getOwnerStatement>>;
+  let condition: Awaited<ReturnType<typeof getOwnerPropertyCondition>>;
 
   try {
-    statement = await getOwnerStatement(ctx, propertyId, period);
+    [statement, condition] = await Promise.all([getOwnerStatement(ctx, propertyId, period), getOwnerPropertyCondition(ctx, propertyId)]);
   } catch (error) {
     if (
       error instanceof OwnerPortalAuthorizationError ||
@@ -225,6 +227,10 @@ export default async function OwnerStatementPage({
           </div>
         </aside>
       </div>
+      <section className="panel" data-testid="owner-property-condition">
+        <h2>{t("condition.title")}</h2>
+        <p>{t("condition.states." + condition)}</p>
+      </section>
     </OwnerShell>
   );
 }

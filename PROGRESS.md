@@ -278,7 +278,7 @@ F-MNT-01 | IN-PROGRESS | Canonical OperationIssue intake/offline photo capture n
 F-MNT-02 | IN-PROGRESS | Registered native task with immutable estimate revisions and expense and supplier invoice versions. Finance policy resolves the owner and ALVILLAS allocation. EN, FR and AR workspace uses native operations, finance and approval records. Asset linking depends on F-AST-01. Exact-head browser, mandatory CI and restricted staging acceptance remain open.
 F-MNT-03 | IN-PROGRESS | Estimate revisions create ordered shared approvals from configured thresholds. Pending or rejected estimates gate native work and linked expense posting requires completed work. Original Finance records own expense submission, posting and corrections. Local migration drift check passed. Latest extended PostgreSQL and browser verification, mandatory CI and restricted staging acceptance remain open.
 F-MNT-04 | IN-PROGRESS | Contractor assignment uses active native suppliers and scoped task authority. Versioned priority SLA targets and original Operations milestones drive EN, FR and AR status. Targeted unit and PostgreSQL checks passed. Stacked browser, mandatory CI and restricted staging acceptance remain open.
-F-MNT-05 | TODO |
+F-MNT-05 | IN-PROGRESS | The owner portfolio and statement expose a localized aggregate condition from native issues and work orders. Targeted PostgreSQL verifies current owner access, open-condition projection and masking on access withdrawal. Owner browser acceptance, mandatory CI and restricted staging acceptance remain open.
 F-AST-01 | TODO |
 F-AST-02 | TODO |
 F-AST-03 | TODO |
