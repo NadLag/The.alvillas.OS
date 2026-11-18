@@ -1,3 +1,4 @@
+import { commandSearchKinds } from "@/platform/command-center/search";
 import { canViewCommandFinance } from "@/modules/finance/application/command-center-finance";
 import { CommandCenterExceptionsLink } from "@/platform/command-center/exceptions-link";
 import { CommandCenterTodaySummary } from "@/modules/reservations/ui/command-center-today";
@@ -184,6 +185,8 @@ export default async function AppPage({
             <CommandCenterExceptionsLink context={reservationContext.authContext} locale={appLocale} />
             <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} />
             <CommandCenterTodaySummary actor={reservationContext} locale={appLocale} />
+            {commandSearchKinds(reservationContext.authContext).length ?
+              <Link className="secondary-button" href={`/${appLocale}/app/command-center/search`}>{(await getTranslations("CommandSearch"))("title")}</Link> : null}
             {authorizeCollection(reservationContext.authContext, "view", "task") ?
               <Link className="secondary-button" href={`/${appLocale}/app/command-center/operations`}>{(await getTranslations("CommandOperations"))("title")}</Link> : null}
             {canViewCommandFinance(reservationContext.authContext) ?

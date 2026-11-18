@@ -1,4 +1,27 @@
 {
+  "CommandSearch": {
+    "title": "Search",
+    "back": "Back to dashboard",
+    "query": "Search terms",
+    "resource": "Record type",
+    "all": "All records",
+    "next": "Next page",
+    "allIn": "All results in {kind}",
+    "changed": "Search access changed.",
+    "reset": "Start over",
+    "empty": "No matching records.",
+    "invalid": "Enter at least two characters.",
+    "kind": {
+      "property": "Properties",
+      "reservation": "Reservations",
+      "task": "Tasks",
+      "issue": "Maintenance issues",
+      "asset": "Assets",
+      "owner": "Owners",
+      "supplier": "Suppliers",
+      "document": "Documents"
+    }
+  },
   "CommandOperations": {
     "title": "Operations overview",
     "back": "Back to dashboard",

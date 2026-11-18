@@ -1,3 +1,4 @@
+import { searchCommandCenter } from "@/platform/command-center/search";
 import { operationManagement } from "@/modules/reservations/application/operation-management";
 import { getCommandFinance } from "@/modules/finance/application/command-center-finance";
 import { commandExceptionsPage } from "@/platform/command-center/exceptions";
@@ -231,6 +232,20 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(await commandExceptionsPage({ ...other.ctx, personId: other.person.id }, { kind: "conflicts" }, db)).toEqual({ state: "denied" });
    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
    expect(await commandExceptionsPage(actor, { kind: "conflicts" }, db)).toEqual({ state: "denied" });
+ });
+
+ it("finds original records through full-text and trigram search under current tenant grants", async () => {
+   const f = await fixture(), other = await fixture(), actor = await grantPerformanceReports(f);
+   const fullText = await searchCommandCenter(actor, { q: "Actual property" }, "en", db);
+   expect(fullText.find(group => group.kind === "property")?.items).toEqual([
+     { id: f.property.id, title: f.property.name, href: "/properties/" + f.property.id }
+   ]);
+   const typo = await searchCommandCenter(actor, { q: "Actual morgtage property", kind: "property" }, "fr", db);
+   expect(typo[0].items.map(item => item.id)).toEqual([f.property.id]);
+   const foreign = await searchCommandCenter(other.ctx, { q: "Actual property", kind: "property" }, "ar", db);
+   expect(foreign[0].items.map(item => item.id)).toEqual([other.property.id]);
+   await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+   expect(await searchCommandCenter(actor, { q: "Actual property", kind: "property" }, "en", db)).toEqual([]);
  });
 
  it("separates company profit and portfolio performance from location and owner claim balances", async () => {
