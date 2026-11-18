@@ -93,8 +93,8 @@ export function presentAuditHistoryRow(
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
   const inventoryAutomation=row.resourceType==="automation"&&Boolean(row.after&&typeof row.after==="object"&&!Array.isArray(row.after)&&Object.hasOwn(row.after,"inventorySource"));
-  if(row.resourceType==="laundry_expected_invoice"||row.resourceType==="laundry_expected_invoice_command"){
-    const now=new Date(),source=financialResource,command=row.resourceType==="laundry_expected_invoice_command",verbs=["view",action]as const,allowed=["inventory_movement","inventory_item","inventory_location"].every(type=>verbs.every(permission=>authorizeOrganizationSource(ctx.authContext,permission,{type,organizationId:ctx.organizationId,dataClass:"operational"},now)))&&verbs.every(permission=>authorizeOrganizationSource(ctx.authContext,permission,{type:"supplier_invoice",organizationId:ctx.organizationId,dataClass:"financial"},now))&&(command||source?.type===row.resourceType&&source.id===row.resourceId&&source.organizationId===ctx.organizationId&&Boolean(source.sourceRecordId)&&Boolean(source.inventorySources)&&Boolean(source.laundryCostChecks)&&source.inventorySources!.every(original=>verbs.every(permission=>authorizeUnconditionalSource(ctx.authContext,permission,original,now)))&&source.laundryCostChecks!.every(check=>verbs.every(permission=>(check.organizationOnly?authorizeOrganizationSource:check.unconditional?authorizeUnconditionalSource:authorize)(ctx.authContext,permission,check.resource,now))));
+  if(["laundry_expected_invoice","laundry_expected_invoice_command","laundry_actual_invoice","laundry_actual_invoice_command"].includes(row.resourceType)){
+    const now=new Date(),source=financialResource,command=row.resourceType.endsWith("_command"),verbs=["view",action]as const,allowed=["inventory_movement","inventory_item","inventory_location"].every(type=>verbs.every(permission=>authorizeOrganizationSource(ctx.authContext,permission,{type,organizationId:ctx.organizationId,dataClass:"operational"},now)))&&verbs.every(permission=>authorizeOrganizationSource(ctx.authContext,permission,{type:"supplier_invoice",organizationId:ctx.organizationId,dataClass:"financial"},now))&&(command||source?.type===row.resourceType&&source.id===row.resourceId&&source.organizationId===ctx.organizationId&&Boolean(source.sourceRecordId)&&Boolean(source.inventorySources)&&Boolean(source.laundryCostChecks)&&source.inventorySources!.every(original=>verbs.every(permission=>authorizeUnconditionalSource(ctx.authContext,permission,original,now)))&&source.laundryCostChecks!.every(check=>verbs.every(permission=>(check.organizationOnly?authorizeOrganizationSource:check.unconditional?authorizeUnconditionalSource:authorize)(ctx.authContext,permission,check.resource,now))));
     return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
   }
   if(["laundry_batch","laundry_batch_event","laundry_batch_command"].includes(row.resourceType)){
@@ -332,7 +332,7 @@ export function parseAuditFilters(input: AuditFilterInput): AuditHistoryFilters 
   return auditFilterSchema.parse(input);
 }
 
-async function financialAuditResources(repository: AuditRepository, rows: AuditHistoryRow[], organizationId: string): Promise<Map<string, FinancialAuditResource>> {
+async function financialAuditResources(repository: AuditRepository, rows: AuditHistoryRow[], organizationId: string, actor:AuditActorContext): Promise<Map<string, FinancialAuditResource>> {
   const read = <T extends Resource>(type: string, load: (ids: string[]) => Promise<Map<string, T>>) => {
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, T>());
@@ -356,7 +356,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     repository.propertyFinanceResources([...new Set(settingRows.flatMap(row => row.propertyScopeId ? [row.propertyScopeId] : []))])
   ]);
   const inventoryLocations = await read("inventory_location",ids=>repository.inventoryLocationResources(ids));
-  const expectedLaundry=await read("laundry_expected_invoice",ids=>repository.expectedLaundryResources(ids));
+  const expectedLaundry=await read("laundry_expected_invoice",ids=>repository.expectedLaundryResources(ids)),actualLaundry=await read("laundry_actual_invoice",ids=>repository.actualLaundryResources(ids,actor));
   const inventoryMovements = await read("inventory_movement",ids=>repository.inventoryMovementResources(ids));
   const laundryBatches=await read("laundry_batch",ids=>repository.laundryBatchResources(ids,"laundry_batch")),laundryEvents=await read("laundry_batch_event",ids=>repository.laundryBatchResources(ids,"laundry_batch_event"));
   const inventoryReorders = await read("inventory_reorder",ids=>repository.inventoryReorderResources(ids));
@@ -369,6 +369,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
   }
   return new Map([
     ...[...expectedLaundry].map(([id,resource])=>["laundry_expected_invoice:"+id,resource]as const),
+    ...[...actualLaundry].map(([id,resource])=>["laundry_actual_invoice:"+id,resource]as const),
     ...[...laundryBatches].map(([id,resource])=>["laundry_batch:"+id,resource]as const),
     ...[...laundryEvents].map(([id,resource])=>["laundry_batch_event:"+id,resource]as const),
     ...[...inventoryAutomations].map(([id,resource])=>["automation:"+id,resource]as const),
@@ -416,16 +417,17 @@ export async function listAuditHistory(
 
 /** A caller's retained restrictions and the final stored authority must both permit disclosure. */
 async function presentCurrentAuditRows(ctx:AuditActorContext,tx:TenantTransaction,repository:AuditRepository,rows:AuditHistoryRow[],action:"view"|"export"){
-  const resources=await financialAuditResources(repository,rows,ctx.organizationId),authContext=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),current={...ctx,authContext};
+  const resources=await financialAuditResources(repository,rows,ctx.organizationId,ctx),authContext=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),current={...ctx,authContext};
   if(authContext.organizationId!==ctx.organizationId||authContext.userAccountId!==ctx.actorId)throw new AuditAuthorizationError();assertAllowed(ctx,action);assertAllowed(current,action);
   const locationIds=[...new Set(rows.filter(row=>row.resourceType==="inventory_location").flatMap(row=>row.resourceId?[row.resourceId]:[]))],locations=locationIds.length?await repository.inventoryLocationResources(locationIds):new Map<string,FinancialAuditResource>();
   const movementIds=[...new Set(rows.filter(row=>row.resourceType==="inventory_movement").flatMap(row=>row.resourceId?[row.resourceId]:[]))],movements=movementIds.length?await repository.inventoryMovementResources(movementIds):new Map<string,FinancialAuditResource>();
   const reorderIds=[...new Set(rows.filter(row=>row.resourceType==="inventory_reorder").flatMap(row=>row.resourceId?[row.resourceId]:[]))],reorders=reorderIds.length?await repository.inventoryReorderResources(reorderIds):new Map<string,FinancialAuditResource>();
   const laundryCurrent=new Map<string,FinancialAuditResource>();for(const type of["laundry_batch","laundry_batch_event"]as const){const ids=[...new Set(rows.filter(row=>row.resourceType===type).flatMap(row=>row.resourceId?[row.resourceId]:[]))];for(const[id,source]of await repository.laundryBatchResources(ids,type))laundryCurrent.set(type+":"+id,source);}
   const expectedIds=[...new Set(rows.filter(row=>row.resourceType==="laundry_expected_invoice").flatMap(row=>row.resourceId?[row.resourceId]:[]))],expectedCurrent=await repository.expectedLaundryResources(expectedIds);
+  const actualIds=rows.filter(row=>row.resourceType==="laundry_actual_invoice").flatMap(row=>row.resourceId?[row.resourceId]:[]),actualCurrent=await repository.actualLaundryResources(actualIds,ctx);
   const automationIds=rows.filter(row=>row.resourceType==="automation").map(row=>row.id),automations=automationIds.length?await repository.inventoryAutomationResources(automationIds):new Map<string,FinancialAuditResource>();
   const finalAuthority={...ctx,authContext:await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId)};assertAllowed(finalAuthority,action);
-  return rows.map(row=>{let source=row.resourceType==="automation"?resources.get("automation:"+row.id):row.resourceId?resources.get(`${row.resourceType}:${row.resourceId}`):undefined;if(row.resourceType==="laundry_expected_invoice"&&!isDeepStrictEqual(source,expectedCurrent.get(row.resourceId??"")))source=undefined;if(["laundry_batch","laundry_batch_event"].includes(row.resourceType)&&!isDeepStrictEqual(source,laundryCurrent.get(row.resourceType+":"+row.resourceId)))source=undefined;if(row.resourceType==="inventory_location"&&!isDeepStrictEqual(source,locations.get(row.resourceId??"")))source=undefined;if(row.resourceType==="inventory_movement"&&!isDeepStrictEqual(source,movements.get(row.resourceId??"")))source=undefined;if(row.resourceType==="inventory_reorder"&&!isDeepStrictEqual(source,reorders.get(row.resourceId??"")))source=undefined;if(row.resourceType==="automation"&&!isDeepStrictEqual(source,automations.get(row.id)))source=undefined;return presentAuditHistoryRow(finalAuthority,presentAuditHistoryRow(current,presentAuditHistoryRow(ctx,row,action,source),action,source),action,source);});
+  return rows.map(row=>{let source=row.resourceType==="automation"?resources.get("automation:"+row.id):row.resourceId?resources.get(`${row.resourceType}:${row.resourceId}`):undefined;if(row.resourceType==="laundry_expected_invoice"&&!isDeepStrictEqual(source,expectedCurrent.get(row.resourceId??"")))source=undefined;if(row.resourceType==="laundry_actual_invoice"&&!isDeepStrictEqual(source,actualCurrent.get(row.resourceId??"")))source=undefined;if(["laundry_batch","laundry_batch_event"].includes(row.resourceType)&&!isDeepStrictEqual(source,laundryCurrent.get(row.resourceType+":"+row.resourceId)))source=undefined;if(row.resourceType==="inventory_location"&&!isDeepStrictEqual(source,locations.get(row.resourceId??"")))source=undefined;if(row.resourceType==="inventory_movement"&&!isDeepStrictEqual(source,movements.get(row.resourceId??"")))source=undefined;if(row.resourceType==="inventory_reorder"&&!isDeepStrictEqual(source,reorders.get(row.resourceId??"")))source=undefined;if(row.resourceType==="automation"&&!isDeepStrictEqual(source,automations.get(row.id)))source=undefined;return presentAuditHistoryRow(finalAuthority,presentAuditHistoryRow(current,presentAuditHistoryRow(ctx,row,action,source),action,source),action,source);});
 }
 
 function csvCell(value: unknown): string {

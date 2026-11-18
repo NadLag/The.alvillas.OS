@@ -15,6 +15,8 @@ import {nativeInventoryLocationResources} from "@/platform/inventory/location-re
 import {nativeInventoryMovementResources} from "@/platform/inventory/movement-resource";
 import {nativeLaundryBatchResources} from "@/platform/inventory/laundry-resource";
 import {nativeExpectedLaundryResources} from "@/platform/inventory/expected-laundry-resource";
+import {nativeActualLaundryResources} from "@/platform/inventory/actual-laundry-resource";
+import type {AccountActorContext} from "@/platform/authz/session-context";
 import {nativeInventoryReorderResources,nativeInventoryAutomationAuditResources} from "@/platform/inventory/reorder-resource";
 
 export type FinancialAuditResource = NativeFinancialResource & { inventorySources?:readonly Resource[]; laundryCostChecks?:readonly CurrentAuthorityCheck[]; laundrySupplier?:Resource; attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
@@ -79,6 +81,7 @@ function whereFor(organizationId: string, filters: AuditHistoryFilters): Prisma.
 }
 
 export class AuditRepository {
+  actualLaundryResources(ids:string[],actor:AccountActorContext){return nativeActualLaundryResources(this.tx,this.organizationId,ids,actor);}
   expectedLaundryResources(ids:string[]){return nativeExpectedLaundryResources(this.tx,this.organizationId,ids);}
   inventoryAutomationResources(ids:string[]){return nativeInventoryAutomationAuditResources(this.tx,this.organizationId,ids);}
   inventoryReorderResources(ids:string[]){return nativeInventoryReorderResources(this.tx,this.organizationId,ids);}
