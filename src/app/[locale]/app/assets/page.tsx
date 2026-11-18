@@ -28,10 +28,10 @@ export default async function AssetListPage({ params, searchParams }: {
     </form>
     {assets.items.length ? <ul className="resource-list">{assets.items.map(asset => <li key={asset.id}>
       <Link className="resource-row" href={base + "/" + asset.id}>
-        <span><strong dir="auto">{asset.name}</strong><small dir="auto">{asset.tag} ? {asset.propertyName} ? {asset.category}</small></span>
-        <span>{t("conditions." + asset.condition)}</span>
+        <span><strong dir="auto">{asset.name}</strong><small dir="auto">{asset.tag}{" \u00b7 "}{asset.propertyName}{" \u00b7 "}{asset.category}</small></span>
+        <span>{asset.retirement ? t("lifecycle.events." + asset.retirement) : t("conditions." + asset.condition)}</span>
       </Link>
     </li>)}</ul> : <EmptyState>{t("empty")}</EmptyState>}
-    {assets.next ? <Link className="secondary-button" href={base + "?" + new URLSearchParams({ q: selected.data.query, cursor: assets.next })}>{t("next")}</Link> : null}
+    {assets.next ? <Link className="secondary-button" href={base + "?" + new URLSearchParams({ q: selected.data.query, cursor: assets.next }).toString()}>{t("next")}</Link> : null}
   </AdminShell>;
 }

@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  assetLifecycleEvents AssetLifecycleEvent[]
   workOrderAssetRevisions MaintenanceWorkOrderAsset[]
   assets Asset[]
   assetRevisions AssetRevision[]
@@ -862,6 +863,7 @@ model Person {
 }
 
 model UserAccount {
+  assetLifecycleEvents AssetLifecycleEvent[]
   workOrderAssetRevisions MaintenanceWorkOrderAsset[]
   assetRevisions AssetRevision[]
   maintenanceContractorAssignments MaintenanceContractorAssignment[]
@@ -2398,6 +2400,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  assetLifecycleEvents AssetLifecycleEvent[]
   assetRevisions AssetRevision[]
   maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   actualLaundryInvoices LaundryActualInvoice[]
@@ -6984,6 +6987,8 @@ model MaintenanceContractorAssignment {
 }
 
 model Asset {
+  lifecycleEvents AssetLifecycleEvent[] @relation("LifecycleAsset")
+  predecessorEvents AssetLifecycleEvent[] @relation("LifecycleSuccessor")
   workOrderAssetRevisions MaintenanceWorkOrderAsset[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -7050,4 +7055,32 @@ model MaintenanceWorkOrderAsset {
   @@unique([organizationId, taskId, number(sort: Desc)], map: "work_order_asset_number")
   @@unique([organizationId, actorId, idempotencyKey], map: "work_order_asset_nonce")
   @@map("maintenance_work_order_asset")
+}
+
+model AssetLifecycleEvent {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  assetId String @map("asset_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  number Int
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  kind String @db.VarChar(12)
+  effectiveOn DateTime? @map("effective_on") @db.Date
+  successorId String? @map("successor_id") @db.Uuid
+  method String? @db.VarChar(12)
+  reference String? @db.VarChar(160)
+  plannedAmount Decimal? @map("planned_amount") @db.Decimal(18, 2)
+  currency String? @db.Char(3)
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  asset Asset @relation("LifecycleAsset", fields: [organizationId, assetId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_lifecycle_asset_tenant_fk")
+  successor Asset? @relation("LifecycleSuccessor", fields: [organizationId, successorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_lifecycle_successor_tenant_fk")
+  actor UserAccount @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_lifecycle_actor_tenant_fk")
+  budgetCurrency Currency? @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([organizationId, assetId, number(sort: Desc)], map: "asset_lifecycle_number")
+  @@unique([organizationId, actorId, idempotencyKey], map: "asset_lifecycle_nonce")
+  @@unique([organizationId, successorId], map: "asset_lifecycle_successor")
+  @@map("asset_lifecycle_event")
 }

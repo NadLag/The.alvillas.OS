@@ -28,7 +28,7 @@ export function AssetPreventiveEditor({ assetId, locale, data }: { assetId: stri
     event.preventDefault();
     setStatus("saving");
     const form = new FormData(event.currentTarget);
-    const string = (key: string) => String(form.get(key) ?? "");
+    const string = (key: string) => { const value = form.get(key); return typeof value === "string" ? value : ""; };
     const [hours, minutes] = string("time").split(":").map(Number);
     try {
       const result = await saveAssetPreventiveScheduleAction({ assetId, expectedVersion: version, reason: string("reason"),

@@ -1,3 +1,4 @@
+import { readAssetLifecycle, recordAssetLifecycle } from "@/modules/assets/application/asset-lifecycle";
 import { generateRecurringOperations } from "@/modules/reservations/application/operation-automation";
 import { readAssetPreventiveSchedule, saveAssetPreventiveSchedule } from "@/modules/assets/application/preventive-schedule";
 import { tickAssetWarrantyReminders } from "@/modules/assets/application/warranty-alerts";
@@ -205,7 +206,7 @@ it("runs native estimate approval, task completion and expense posting with immu
 });
 
 it("registers and links canonical property assets with exact cost, unchanged sources and scoped history", async () => {
-  const keys = ["asset:view", "asset:create", "asset:edit", "asset_cost:view", "asset_cost:edit", "task:create"];
+  const keys = ["asset:view", "asset:create", "asset:edit", "asset_cost:view", "asset_cost:edit", "asset:void", "task:create"];
   const f = await fixture(keys), external = await fixture(keys);
   const data = {
     tag: "PUMP-0042", propertyId: f.property.id, idempotencyKey: randomUUID(), reason: "Record the original installed pool pump",
@@ -218,7 +219,9 @@ it("registers and links canonical property assets with exact cost, unchanged sou
   const replay = await saveAsset(f.actor, data, f.deps);
   expect(replay).toEqual(asset);
   await expect(saveAsset(f.actor, { ...data, idempotencyKey: randomUUID() }, f.deps)).rejects.toBeInstanceOf(AssetConflictError);
-  const foreign = await saveAsset(external.actor, { ...data, propertyId: external.property.id, idempotencyKey: randomUUID() }, external.deps);
+  const foreign = await saveAsset(external.actor, { ...data, tag: "FOREIGN-PUMP", propertyId: external.property.id, idempotencyKey: randomUUID() }, external.deps);
+  const successor = await saveAsset(f.actor, { ...data, tag: "PUMP-0043", idempotencyKey: randomUUID(),
+    fields: { ...data.fields, warrantyEndsOn: null, warrantyStartsOn: null } }, f.deps);
   expect((await getAsset(f.actor, { assetId: asset.id }, f.deps)).asset.cost).toEqual(data.fields.cost);
   await expect(getAsset(f.actor, { assetId: foreign.id }, f.deps)).rejects.toBeInstanceOf(AssetAccessError);
   expect((await listAssets(f.actor, { query: "PUMP-0042" }, f.deps)).items.map(row => row.id)).toEqual([asset.id]);
@@ -276,6 +279,24 @@ it("registers and links canonical property assets with exact cost, unchanged sou
   expect((await readWorkOrderAssets(f.actor, { taskId: f.task.id }, f.deps)).current).toMatchObject({ state: "LINKED", assetId: asset.id });
   await changeWorkOrderAsset(f.actor, { ...orderLink, expectedRevision: 1, assetId: null, idempotencyKey: randomUUID() }, f.deps);
   expect((await readWorkOrderAssets(f.actor, { taskId: f.task.id }, f.deps)).items).toMatchObject([{ state: "CLEARED" }, { state: "LINKED", assetId: asset.id }]);
+  const plan = { assetId: asset.id, kind: "PLAN", expectedVersion: 0, effectiveOn: today, budget: { amount: "4500.05", currency: "MAD" },
+    reason: "Plan replacement of the original installed pump", idempotencyKey: randomUUID() };
+  await expect(recordAssetLifecycle(f.actor, plan, f.deps)).resolves.toEqual({ version: 1 });
+  await expect(recordAssetLifecycle(f.actor, plan, f.deps)).resolves.toEqual({ version: 1 });
+  const replacement = { assetId: asset.id, kind: "REPLACE", expectedVersion: 1, effectiveOn: today,
+    reason: "Record installation of the original replacement pump", successorTag: "PUMP-0043", idempotencyKey: randomUUID() };
+  await expect(recordAssetLifecycle(f.actor, { ...replacement, successorTag: "FOREIGN-PUMP" }, f.deps)).rejects.toBeInstanceOf(AssetConflictError);
+  await expect(recordAssetLifecycle(f.actor, replacement, f.deps)).resolves.toEqual({ version: 2 });
+  await expect(recordAssetLifecycle(f.actor, { assetId: asset.id, kind: "DISPOSE", expectedVersion: 2, effectiveOn: today,
+    reason: "Retire the original pump using the recycling certificate", method: "RECYCLED", reference: "CERT-42", idempotencyKey: randomUUID() }, f.deps)).resolves.toEqual({ version: 3 });
+  expect(await readAssetLifecycle(f.actor, asset.id, undefined, f.deps)).toMatchObject({
+    current: "DISPOSE", items: [{ kind: "DISPOSE", method: "RECYCLED" }, { kind: "REPLACE", successor: { id: successor.id } },
+      { kind: "PLAN", budget: { amount: "4500.05", currency: "MAD" } }]
+  });
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  expect(await generateRecurringOperations(f.actor, { propertyId: f.property.id, from: tomorrow, until: tomorrow },
+    { ...f.deps, now: new Date() })).toMatchObject({ created: 0 });
+  expect(await readAssetPreventiveSchedule(f.actor, asset.id, db)).toMatchObject({ schedule: { enabled: false }, tasks: [{ state: "PLANNED" }] });
   await withTenant(db, f.organizationId, tx => tx.roleAssignment.update({
     where: { id: f.grants["asset_cost:view"] }, data: { archivedAt: new Date() }
   }));
@@ -285,6 +306,7 @@ it("registers and links canonical property assets with exact cost, unchanged sou
   const restricted = await getAsset(f.actor, { assetId: asset.id }, f.deps);
   expect(restricted.asset.canEditCost).toBe(false);
   expect(JSON.stringify(restricted)).not.toContain(cost.amount);
+  expect(JSON.stringify(await readAssetLifecycle(f.actor, asset.id, undefined, f.deps))).not.toContain("4500.05");
   await expect(withTenant(db, f.organizationId, tx => tx.$executeRawUnsafe(
     "UPDATE asset_revision SET name='changed' WHERE organization_id=$1::uuid AND asset_id=$2::uuid", f.organizationId, asset.id)))
     .rejects.toThrow(/append-only/u);

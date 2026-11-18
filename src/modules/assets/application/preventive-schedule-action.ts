@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { auth } from "@/platform/auth/session";
 import { accountActorContextFromSession } from "@/platform/authz/session-context";
-import { ReservationAuthorizationError, ReservationConflictError } from "@/modules/reservations/application/reservation-service";
+import { ReservationAuthorizationError, ReservationConflictError } from "@/platform/reservations/asset-preventive-operations";
 import { AssetAccessError, AssetConflictError } from "../domain/asset";
 import { saveAssetPreventiveSchedule } from "./preventive-schedule";
 

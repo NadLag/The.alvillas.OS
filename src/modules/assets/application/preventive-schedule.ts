@@ -4,11 +4,10 @@ import type { AccountActorContext } from "@/platform/authz/session-context";
 import { recurringTasksSchema } from "@/platform/config/operation-policy";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
-import type { OperationDeps } from "@/modules/reservations/application/operation-service";
-import { saveOperationSeries } from "@/modules/reservations/application/operation-automation";
-import { OperationRepository } from "@/modules/reservations/infrastructure/operation-repository";
+import { assetPreventiveOptions, saveOperationSeries, type OperationDeps } from "@/platform/reservations/asset-preventive-operations";
 import { AssetAccessError } from "../domain/asset";
 import { assetPreventiveKey, preventiveScheduleSchema } from "../domain/preventive-schedule";
+import { AssetLifecycleRepository } from "../infrastructure/asset-lifecycle-repository";
 import { AssetRepository } from "../infrastructure/asset-repository";
 import { readAssetSource } from "./asset-service";
 
@@ -25,19 +24,15 @@ export async function readAssetPreventiveSchedule(actor: AccountActorContext, as
       catch (error) { if (error instanceof AssetAccessError) return false; throw error; }
     };
     if (!allowed([{ action: "view", resource: task }])) return null;
-    const operations = new OperationRepository(tx, actor.organizationId);
     const key = assetPreventiveKey(assetId);
-    const rule = await operations.recurring(source.propertyId, now);
+    const active = await new AssetLifecycleRepository(tx, actor.organizationId).active(assetId, source.propertyId);
+    const baseEdit = active && allowed([{ action: "edit", resource: asset }, { action: "create", resource: task }]);
+    const { rule, checklists } = await assetPreventiveOptions(tx, actor.organizationId, source.propertyId, now, baseEdit);
     const schedule = rule ? recurringTasksSchema.parse(rule.parsedValue).series.find(series => series.key === key) : undefined;
-    const canEdit = allowed([
-      { action: "edit", resource: asset }, { action: "create", resource: task },
-      ...(schedule ? [{ action: "edit", resource: task } as const] : [])
-    ]);
-    const [tasks, catalog] = await Promise.all([
-      repo.preventiveTasks(source.propertyId, key),
-      canEdit ? operations.checklists(source.propertyId) : null
-    ]);
-    return { version: rule?.version ?? 0, schedule, canEdit, checklists: catalog?.catalog.checklists.map(({ key, name }) => ({ key, name })) ?? [],
+    const canEdit = baseEdit && (!schedule || allowed([{ action: "edit", resource: task }]));
+    const tasks = await repo.preventiveTasks(source.propertyId, key);
+    return { version: rule?.version ?? 0, schedule: schedule && { ...schedule, enabled: active && schedule.enabled },
+      canEdit, checklists: canEdit ? checklists : [],
       tasks: tasks.filter(row => allowed([{ action: "view", resource: { ...task, id: row.id, status: row.state,
         occurredAt: row.dueDate, assignedPersonId: row.assignedToPersonId, assignedUserAccountId: row.assignedToUserAccountId } }])) };
   });

@@ -8298,6 +8298,45 @@
     }
   },
   "Assets": {
+    "lifecycle": {
+      "title": "Replacement and disposal",
+      "record": "Record lifecycle change",
+      "change": "Change",
+      "plannedOn": "Planned replacement date",
+      "effectiveOn": "Effective date",
+      "budget": "Replacement budget",
+      "currency": "Currency code",
+      "replacementTag": "Replacement asset tag at this property",
+      "method": "Disposal method",
+      "chooseMethod": "Select a disposal method",
+      "reference": "Certificate or transaction reference",
+      "reason": "Reason for this change",
+      "save": "Save change",
+      "saving": "Saving change",
+      "saved": "Change saved.",
+      "empty": "No replacement or disposal history.",
+      "older": "Older changes",
+      "commands": {
+        "PLAN": "Plan replacement",
+        "CANCEL": "Cancel replacement plan",
+        "REPLACE": "Record replacement",
+        "DISPOSE": "Record disposal"
+      },
+      "events": {
+        "PLAN": "Replacement planned",
+        "CANCEL": "Replacement plan cancelled",
+        "REPLACE": "Replaced",
+        "DISPOSE": "Disposed"
+      },
+      "methods": {
+        "SOLD": "Sold",
+        "RECYCLED": "Recycled",
+        "DONATED": "Donated",
+        "SCRAPPED": "Scrapped",
+        "RETURNED": "Returned",
+        "OTHER": "Other"
+      }
+    },
     "schedule": {
       "title": "Preventive maintenance",
       "edit": "Change schedule",

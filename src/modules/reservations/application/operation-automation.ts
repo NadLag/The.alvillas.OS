@@ -1,7 +1,4 @@
-import { readAssetSource } from "@/modules/assets/application/asset-service";
-import { AssetAccessError } from "@/modules/assets/domain/asset";
-import { assetPreventivePrefix } from "@/modules/assets/domain/preventive-schedule";
-import { recheckAccountAuthorization } from "@/platform/authz/current-authority";
+import { activeAssetsForScheduling, AssetAccessError, assetPreventivePrefix, authorizeAssetScheduleChange } from "@/platform/assets/preventive-task-source";
 import { z } from "zod";
 import { OperationRepository } from "../infrastructure/operation-repository";
 import {
@@ -101,13 +98,11 @@ export async function saveOperationSeries(
     )
       throw new ReservationConflictError();
     const assetId = value.definition.key.startsWith(assetPreventivePrefix) ? value.definition.key.slice(assetPreventivePrefix.length) : null;
-    if (assetId) {
+    if (assetId !== null) {
       if (!z.uuid().safeParse(assetId).success || value.definition.type !== "MAINTENANCE") throw new AssetAccessError();
-      const source = await readAssetSource(ctx, tx, assetId, p.id);
-      await recheckAccountAuthorization(ctx, tx, new Date(), [
-        ...source.checks, { action: "edit", resource: source.checks[1].resource },
+      await authorizeAssetScheduleChange(ctx, tx, p.id, assetId, value.definition.enabled, [
         { action: "create", resource }, ...(existing ? [{ action: "edit", resource } as const] : [])
-      ], new AssetAccessError());
+      ]);
     }
     const series = before
       .filter((s) => s.key !== value.definition.key)
@@ -205,7 +200,11 @@ export async function generateRecurringOperations(
       );
     let created = 0,
       existing = 0;
-    for (const definition of series.filter((s) => s.enabled))
+    const preventiveIds = series.filter(definition => definition.enabled && definition.key.startsWith(assetPreventivePrefix))
+      .map(definition => definition.key.slice(assetPreventivePrefix.length)).filter(id => z.uuid().safeParse(id).success);
+    const activeAssets = await activeAssetsForScheduling(tx, ctx.organizationId, property.id, preventiveIds);
+    for (const definition of series.filter(definition => definition.enabled &&
+      (!definition.key.startsWith(assetPreventivePrefix) || activeAssets.has(definition.key.slice(assetPreventivePrefix.length)))))
       for (
         let stamp = first.getTime();
         stamp <= last.getTime();

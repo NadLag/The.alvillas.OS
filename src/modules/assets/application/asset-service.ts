@@ -52,7 +52,7 @@ function presentHead(actor: AccountActorContext, current: AuthContext, row: Asse
   const fields = { id: row.id, tag: row.tag, propertyId: row.propertyId, propertyName: row.propertyName, number: row.number,
     name: row.name, category: row.category, description: row.description, condition: row.condition, purchaseOn: row.purchaseOn,
     warrantyProvider: row.warrantyProvider, warrantyReference: row.warrantyReference, warrantyStartsOn: row.warrantyStartsOn,
-    warrantyEndsOn: row.warrantyEndsOn, usefulLifeMonths: row.usefulLifeMonths, updatedAt: row.createdAt.toISOString(),
+    warrantyEndsOn: row.warrantyEndsOn, retirement: row.retirement ?? null, usefulLifeMonths: row.usefulLifeMonths, updatedAt: row.createdAt.toISOString(),
     cost: canViewCost ? cost : maskedValue };
   const operational = present({ ...actor.authContext, visibleDataClasses: new Set(["operational"]) }, "view",
     { ...resource(actor, row, row.id), data: fields }, {}, now) as typeof fields;

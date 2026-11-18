@@ -36,7 +36,7 @@ for(const locale of["en","fr","ar"]as const)test("Native maintenance context, im
   const assetTag = "PUMP-" + randomUUID().slice(0, 8).toUpperCase();
   let registeredAsset = "";
   if (locale === "en") {
-    await page.goto("/en/app/assets/new?" + new URLSearchParams({ q: f.propertyLabel }));
+    await page.goto("/en/app/assets/new?" + new URLSearchParams({ q: f.propertyLabel }).toString());
     const assetForm = page.getByTestId("asset-form");
     await assetForm.locator('select[name="propertyId"]').selectOption(f.propertyId);
     await assetForm.locator('input[name="tag"]').fill(assetTag);

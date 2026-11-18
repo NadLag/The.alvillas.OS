@@ -8298,6 +8298,45 @@
     }
   },
   "Assets": {
+    "lifecycle": {
+      "title": "Remplacement et sortie du parc",
+      "record": "Consigner un changement",
+      "change": "Changement",
+      "plannedOn": "Date de remplacement prévue",
+      "effectiveOn": "Date effective",
+      "budget": "Budget de remplacement",
+      "currency": "Code devise",
+      "replacementTag": "Identifiant du bien de remplacement dans ce logement",
+      "method": "Mode de sortie",
+      "chooseMethod": "Sélectionner un mode de sortie",
+      "reference": "Référence du certificat ou de la transaction",
+      "reason": "Motif de la modification",
+      "save": "Enregistrer le changement",
+      "saving": "Enregistrement du changement",
+      "saved": "Changement enregistré.",
+      "empty": "Aucun historique de remplacement ou de sortie.",
+      "older": "Changements précédents",
+      "commands": {
+        "PLAN": "Planifier le remplacement",
+        "CANCEL": "Annuler le remplacement prévu",
+        "REPLACE": "Consigner le remplacement",
+        "DISPOSE": "Consigner la sortie"
+      },
+      "events": {
+        "PLAN": "Remplacement prévu",
+        "CANCEL": "Remplacement annulé",
+        "REPLACE": "Remplacé",
+        "DISPOSE": "Sorti du parc"
+      },
+      "methods": {
+        "SOLD": "Vendu",
+        "RECYCLED": "Recyclé",
+        "DONATED": "Donné",
+        "SCRAPPED": "Mis au rebut",
+        "RETURNED": "Retourné",
+        "OTHER": "Autre"
+      }
+    },
     "schedule": {
       "title": "Maintenance préventive",
       "edit": "Modifier le planning",

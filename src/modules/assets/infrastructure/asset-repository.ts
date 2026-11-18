@@ -5,6 +5,7 @@ import type { AssetFields } from "../domain/asset";
 export type AssetProperty = { propertyId: string; propertyName: string; cityId: string | null; regionId: string | null; timezone: string };
 export type AssetHead = AssetProperty & {
   id: string; tag: string; revisionId: string; number: number; actorId: string; name: string; category: string;
+  retirement?: "REPLACE" | "DISPOSE" | null;
   description: string; condition: AssetFields["condition"]; purchaseOn: string | null; purchaseAmount: string | null;
   currency: string | null; warrantyProvider: string | null; warrantyReference: string | null; warrantyStartsOn: string | null;
   warrantyEndsOn: string | null; usefulLifeMonths: number | null; reason: string; createdAt: Date;
@@ -18,6 +19,8 @@ const joins = Prisma.sql`FROM asset a
   JOIN property p ON p.organization_id = a.organization_id AND p.id = a.property_id AND p.archived_at IS NULL`;
 const latest = Prisma.sql`JOIN LATERAL (SELECT * FROM asset_revision r WHERE r.organization_id=a.organization_id
   AND r.asset_id=a.id ORDER BY r.number DESC LIMIT 1) r ON TRUE`;
+const operationalAsset = Prisma.sql`NOT EXISTS (SELECT 1 FROM asset_lifecycle_event e
+  WHERE e.organization_id=a.organization_id AND e.asset_id=a.id AND e.kind IN ('REPLACE','DISPOSE'))`;
 function pattern(query: string) { return "%" + query.replace(/[\\%_]/gu, value => "\\" + value) + "%"; }
 
 export class AssetRepository {
@@ -63,7 +66,9 @@ export class AssetRepository {
     const property = propertyId ? Prisma.sql`AND a.property_id=${propertyId}::uuid` : Prisma.empty;
     const cursor = after ? Prisma.sql`AND a.id < ${after}::uuid` : Prisma.empty;
     const search = pattern(query);
-    return this.tx.$queryRaw<AssetHead[]>(Prisma.sql`SELECT ${columns} ${joins} ${latest}
+    return this.tx.$queryRaw<AssetHead[]>(Prisma.sql`SELECT ${columns}, (SELECT e.kind FROM asset_lifecycle_event e
+      WHERE e.organization_id=a.organization_id AND e.asset_id=a.id AND e.kind IN ('REPLACE','DISPOSE')
+      ORDER BY e.number DESC LIMIT 1) AS retirement ${joins} ${latest}
       WHERE a.organization_id=${this.organizationId}::uuid ${property} ${cursor}
         AND (a.tag ILIKE ${search} OR r.name ILIKE ${search} OR r.category ILIKE ${search})
       ORDER BY a.id DESC LIMIT 41`);
@@ -73,7 +78,7 @@ export class AssetRepository {
     const cursor = after ? Prisma.sql`AND a.id > ${after}::uuid` : Prisma.empty;
     return this.tx.$queryRaw<AssetHead[]>(Prisma.sql`SELECT ${columns} ${joins} ${latest}
       WHERE a.organization_id=${this.organizationId}::uuid ${cursor}
-        AND r.warranty_ends_on BETWEEN timezone(p.timezone,${now}::timestamptz)::date
+        AND ${operationalAsset} AND r.warranty_ends_on BETWEEN timezone(p.timezone,${now}::timestamptz)::date
           AND timezone(p.timezone,${now}::timestamptz)::date+3660
       ORDER BY a.id LIMIT 50`);
   }
@@ -84,7 +89,7 @@ export class AssetRepository {
       SELECT ${propertyColumns}, a.id AS "assetId", original.id AS "referenceId" ${joins} ${latest}
       JOIN asset_revision original ON original.organization_id=a.organization_id AND original.asset_id=a.id
       WHERE a.organization_id=${this.organizationId}::uuid AND original.id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::uuid`))})
-        AND original.warranty_ends_on=r.warranty_ends_on`);
+        AND ${operationalAsset} AND original.warranty_ends_on=r.warranty_ends_on`);
   }
 
   async recordedWarrantyAlerts(keys: string[]) {
