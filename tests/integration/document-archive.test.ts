@@ -403,6 +403,8 @@ describe("approved document types and native party sources", () => {
   it.each(["SUPPLIER","GUEST"] as const)("archives a real tenant %s source and resolves only its authorized native template values",async kind=>{
     const f=await partyFixture(kind),original=await uploaded(f,f.ctx,content(kind),{source:f.source});
     expect((await readDocumentSources(f.ctx,{kind},{db})).items.map(item=>item.source)).toEqual([f.source]);
+    expect((await readDocumentSourceWorkspace(f.ctx, { source: f.source, kind: "FILE" }, { db })).items)
+      .toMatchObject([{ id: original.documentId, source: f.source, privacy: ["sensitive"] }]);
     const root=await withTenant(db,f.org,tx=>tx.document.findFirstOrThrow({where:{id:original.documentId}}));expect(root.supplierId).toBe(kind==="SUPPLIER"?f.source.id:null);expect(root.guestId).toBe(kind==="GUEST"?f.source.id:null);expect(root.privacy).toContain("sensitive");
     const values=await withTenant(db,f.org,async tx=>{const repository=new DocumentTemplateSourceRepository(tx,f.org),native=await repository.documentSource(f.source);if(!native)throw Error("Actual native source required");return repository.templateSourceValues(native,[kind==="SUPPLIER"?"supplier_name":"guest_name"]);});
     expect([...values.bindings.values()][0]).toMatchObject({kind:"TEXT",privacy:["sensitive"],value:kind==="SUPPLIER"?"Original supplier document source":"Original guest document source"});
@@ -413,6 +415,7 @@ describe("approved document types and native party sources", () => {
     await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.partyAssignment.id},data:{validTo:new Date("2020-01-02")}}));
     expect((await authContextForAccount(f.org,f.ctx.actorId,{db})).permissions.has("document:view")).toBe(true);
     await expect(readDocumentHistory(f.ctx,{documentId:original.documentId},{db})).rejects.toThrow("document_unavailable");
+    await expect(readDocumentSourceWorkspace(f.ctx, { source: f.source, kind: "FILE" }, { db })).rejects.toThrow("document_unavailable");
     await expect(downloadDocumentVersion(f.ctx,{versionId:original.version.id},{db,objects:objectStore()})).rejects.toThrow("document_unavailable");
     expect((await readDocumentSources(f.ctx,{kind},{db})).items).toEqual([]);
   });

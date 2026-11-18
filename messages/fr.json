@@ -2883,6 +2883,7 @@
     "snapshotAt": "Consulté le {date}"
   },
   "Suppliers": {
+    "documents": {"title": "Documents et contrats", "open": "Ouvrir les archives de ce fournisseur", "empty": "Aucun document accessible pour ce fournisseur."},
     "prices": {
       "title": "Tarifs fournisseur",
       "newVersion": "Nouvelle version des tarifs",

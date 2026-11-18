@@ -2883,6 +2883,7 @@
     "snapshotAt": "Read at {date}"
   },
   "Suppliers": {
+    "documents": {"title": "Documents and contracts", "open": "Open this supplier’s archive", "empty": "No accessible documents for this supplier."},
     "prices": {
       "title": "Supplier price lists",
       "newVersion": "New price-list version",
