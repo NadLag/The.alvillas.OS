@@ -57,10 +57,9 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
 export async function runTypecheckProjects(plan, projects = plan.projects, onResult) {
   const megabyte = 1024 * 1024, reserve = 1024 * megabyte, free = () => process.availableMemory?.() ?? freemem();
   const isNative = project => project.name.startsWith("postgres-");
-  // Unit and browser acceptance import the same complete application contracts.
-  // Keep every root and use the application's heap allowance; the live-memory
-  // scheduler still prevents compiler overlap beyond available physical memory.
-  const heap = project => isNative(project) ? 6144 : 3072;
+  // The application program retains the whole production graph. Its heap is
+  // budgeted separately from the smaller test programs by the live scheduler.
+  const heap = project => isNative(project) ? 6144 : project.name === "application" ? 4096 : 3072;
   const run = project => new Promise(resolve => {
     const started = Date.now(); let settled = false;
     const finished = exitCode => { if(settled)return;settled=true;onResult?.({name:project.name,exitCode,roots:project.roots.length,elapsedMs:Date.now()-started});resolve(exitCode); };
