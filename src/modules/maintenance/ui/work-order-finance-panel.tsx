@@ -208,7 +208,7 @@ export function WorkOrderFinancePanel({ taskId, locale, scope, authorizationStam
     <h4 id={panelId}>{f("title")}</h4>
     {open ? <button type="button" onClick={closePanel} className="quiet-button">{f("close")}</button>
       : <button type="button" onClick={openPanel} className="secondary-button">{f("open")}</button>}
-    {open && busy ? <div role="status" aria-label={t("loading")}><SkeletonBlock rows={3}/></div> : null}
+    {open && busy ? <div role="status" aria-label={t("states.loading")}><SkeletonBlock rows={3}/></div> : null}
     {open && state !== "ready" && !busy ? <div role="alert">
       <p>{t("states." + state)}</p>
       {history === null ? <button type="button" className="secondary-button" onClick={openPanel}>{f("refresh")}</button> : null}

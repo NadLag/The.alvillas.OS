@@ -45,7 +45,7 @@ it("reviews original task issues with independent native property, reservation, 
 });
 it("rejects a source withdrawn during disclosure and foreign native issues before exposing their context",async()=>{
  const f=await fixture(),other=await fixture();await expect(previewMaintenanceIssueContext(f.actor,{issueId:other.issueId,sources:[]},f.deps)).rejects.toBeInstanceOf(MaintenanceIssueAccessError);
- const original=DocumentRepository.prototype.documentSource;let withdrawn=false;
+ const original=Reflect.get<typeof DocumentRepository.prototype,"documentSource">(DocumentRepository.prototype,"documentSource");let withdrawn=false;
  vi.spyOn(DocumentRepository.prototype,"documentSource").mockImplementation(async function(this:DocumentRepository,...args){const result=await original.apply(this,args);if(!withdrawn&&args[0].kind==="SUPPLIER"){withdrawn=true;await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants["supplier:view"]},data:{archivedAt:new Date()}}));}return result;});
  await expect(previewMaintenanceIssueContext(f.actor,{issueId:f.issueId,sources:[{kind:"SUPPLIER",id:f.supplier.id}]},f.deps)).rejects.toBeInstanceOf(MaintenanceIssueAccessError);
 });
@@ -60,7 +60,7 @@ it("records original issue links once with immutable attach/detach history, acto
  expect(await withTenant(db,f.organizationId,async tx=>({issues:await tx.operationIssue.findMany({where:{organizationId:f.organizationId}}),money:await tx.financialTransaction.count({where:{organizationId:f.organizationId}}),stock:await tx.inventoryMovement.count({where:{organizationId:f.organizationId}})}))).toEqual(before);
 });
 it("rolls back an issue context and receipt when original source permission is withdrawn after insertion",async()=>{
- const f=await fixture(),intent={issueId:f.issueId,expectedVersion:"0",operation:"ATTACH",source:{kind:"SUPPLIER",id:f.supplier.id},reason:"Keep the original supplier authority independent at issue-link commit"},review=await previewMaintenanceIssueLink(f.actor,intent,f.deps),nonce=randomUUID(),original=MaintenanceIssueContextRepository.prototype.insert;
+ const f=await fixture(),intent={issueId:f.issueId,expectedVersion:"0",operation:"ATTACH",source:{kind:"SUPPLIER",id:f.supplier.id},reason:"Keep the original supplier authority independent at issue-link commit"},review=await previewMaintenanceIssueLink(f.actor,intent,f.deps),nonce=randomUUID(),original=Reflect.get<typeof MaintenanceIssueContextRepository.prototype,"insert">(MaintenanceIssueContextRepository.prototype,"insert");
  vi.spyOn(MaintenanceIssueContextRepository.prototype,"insert").mockImplementation(async function(this:MaintenanceIssueContextRepository,value){const result=await original.call(this,value);await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants["supplier:view"]},data:{archivedAt:new Date()}}));return result;});
  await expect(publishMaintenanceIssueLink(f.actor,{intent:review.intent,reviewFingerprint:review.reviewFingerprint,idempotencyKey:nonce},f.deps)).rejects.toBeInstanceOf(MaintenanceIssueAccessError);vi.restoreAllMocks();
  expect(await withTenant(db,f.organizationId,tx=>new MaintenanceIssueContextRepository(tx,f.organizationId).history(f.issueId))).toEqual([]);expect(await withTenant(db,f.organizationId,tx=>tx.outboxEvent.count({where:{organizationId:f.organizationId,idempotencyKey:"maintenance-issue-context:"+f.actor.actorId+":"+nonce}}))).toBe(0);

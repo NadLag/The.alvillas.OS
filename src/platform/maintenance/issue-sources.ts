@@ -20,7 +20,7 @@ import {MaintenanceIssueAccessError,MaintenanceIssueConflictError,MaintenanceIss
 
 export type MaintenanceSourceContext={propertyId:string;taskId:string};
 export type MaintenanceSourceNavigation={kind:"FIELD_EVIDENCE";id:string}|{kind:"DOCUMENT_VERSION";documentId:string;version:number};
-export type AuthorizedMaintenanceSource={reference:MaintenanceIssueSource;label:string;labels?:z.infer<typeof localizedTextSchema>;dataClass:"operational"|"personal"|"guest"|"financial"|"sensitive";navigation?:MaintenanceSourceNavigation;fingerprint:string;checks:CurrentAuthorityCheck[];recheck():Promise<void>};
+export type AuthorizedMaintenanceSource={reference:MaintenanceIssueSource;label:string;labels?:z.infer<typeof localizedTextSchema>;dataClass:"operational"|"personal"|"guest"|"financial"|"sensitive";navigation?:MaintenanceSourceNavigation;fingerprint:string;checks:CurrentAuthorityCheck[];recheck:()=>Promise<void>};
 export type MaintenanceAssetSource=(actor:AccountActorContext,tx:TenantTransaction,reference:Extract<MaintenanceIssueSource,{kind:string}>,context:MaintenanceSourceContext)=>Promise<AuthorizedMaintenanceSource>;
 const digest=(value:unknown)=>jsonbFingerprint(JSON.parse(JSON.stringify(value)));
 async function clock(tx:TenantTransaction,organizationId:string){return new DocumentRepository(tx,organizationId).clock();}
