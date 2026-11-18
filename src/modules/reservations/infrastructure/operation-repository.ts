@@ -359,6 +359,9 @@ export class OperationRepository {
       orderBy: { createdAt: "desc" },
     });
   }
+  maintenanceIssue(id:string){
+    return this.tx.operationIssue.findFirst({where:{organizationId:this.organizationId,id},include:{task:{include:{property:true}}}});
+  }
   addIssue(
     data: Omit<Prisma.OperationIssueUncheckedCreateInput, "organizationId">,
   ) {

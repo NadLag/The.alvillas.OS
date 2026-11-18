@@ -255,6 +255,7 @@ function duplicateContacts(people: PersonProfileSummary[]): DuplicateContactSumm
 }
 
 export class IdentityRepository {
+  maintenancePerson(id:string){return this.tx.person.findFirst({where:{organizationId:this.organizationId,id},select:{id:true,displayName:true,archivedAt:true,updatedAt:true}});}
   constructor(
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
