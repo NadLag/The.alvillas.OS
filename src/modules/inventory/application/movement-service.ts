@@ -39,7 +39,12 @@ export const inventoryMovementReadAuthorityInTransaction=(actor:AccountActorCont
 export const inventoryMovementAuthorityInTransaction=authority;
 type SourceHeads={items:ReadonlyMap<string,Awaited<ReturnType<InventoryRepository["catalogItemById"]>>>;locations:ReadonlyMap<string,Awaited<ReturnType<InventoryRepository["locationCatalogById"]>>>;reservations:ReadonlyMap<string,Awaited<ReturnType<InventoryMovementRepository["reservation"]>>>};
 async function sources(actor:AccountActorContext,context:Authority,itemId:string,locationIds:readonly string[],reservationIds:readonly string[],writing=false,heads?:SourceHeads){
- const item=heads?heads.items.get(itemId)??null:await context.inventory.catalogItemById(itemId),locations=await Promise.all([...new Set(locationIds)].sort().map(id=>heads?heads.locations.get(id)??null:context.inventory.locationCatalogById(id))),reservations=await Promise.all([...new Set(reservationIds)].sort().map(id=>heads?heads.reservations.get(id)??null:context.movements.reservation(id)));
+ const item = heads ? heads.items.get(itemId) ?? null : await context.inventory.catalogItemById(itemId);
+ const locationKeys = [...new Set(locationIds)].sort(), reservationKeys = [...new Set(reservationIds)].sort();
+ const locations = heads ? locationKeys.map(id => heads.locations.get(id) ?? null)
+   : await Promise.all(locationKeys.map(id => context.inventory.locationCatalogById(id)));
+ const reservations = heads ? reservationKeys.map(id => heads.reservations.get(id) ?? null)
+   : await Promise.all(reservationKeys.map(id => context.movements.reservation(id)));
  if(!item||locations.some(row=>!row)||reservations.some(row=>!row))throw new InventoryCatalogAccessError();
  const actualLocations=locations.filter(row=>row!==null),actualReservations=reservations.filter(row=>row!==null),checks:CurrentAuthorityCheck[]=[];
  if(writing&&(item.archivedAt||actualLocations.some(row=>row.archivedAt||row.propertyArchivedAt)||actualReservations.some(row=>row.propertyArchivedAt)))throw new InventoryCatalogAccessError();
