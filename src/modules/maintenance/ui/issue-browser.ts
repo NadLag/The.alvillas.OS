@@ -4,7 +4,7 @@ export class MaintenanceBrowserError extends Error{constructor(readonly state:Ma
 export async function maintenanceIssueRequest(operation:"read"|"history"|"sources"|"review"|"publish"|"recover"|"status",input:unknown,signal:AbortSignal,scope:string):Promise<unknown>{
  return maintenanceRequest("issues",operation,input,signal,scope);
 }
-export async function maintenanceWorkOrderRequest(operation:"read"|"tasks"|"review"|"publish"|"recover"|"status"|"contractor-read"|"contractor-search"|"contractor-publish",input:unknown,signal:AbortSignal,scope:string):Promise<unknown>{
+export async function maintenanceWorkOrderRequest(operation:"read"|"tasks"|"review"|"publish"|"recover"|"status"|"finance-read"|"finance-search"|"finance-review"|"finance-publish"|"finance-status"|"contractor-read"|"contractor-search"|"contractor-publish",input:unknown,signal:AbortSignal,scope:string):Promise<unknown>{
  return maintenanceRequest("work-orders",operation,input,signal,scope);
 }
 async function maintenanceRequest(family:"issues"|"work-orders",operation:string,input:unknown,signal:AbortSignal,scope:string):Promise<unknown>{

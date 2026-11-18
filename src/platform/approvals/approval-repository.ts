@@ -5,14 +5,20 @@ import type { approvalRequestSchema } from "./approval";
 import { SupplierPayableRepository } from "@/modules/finance/infrastructure/supplier-payable-repository";
 
 export const approvalInclude = { property: true, recipients: true, expense: true, invoiceSubmission: { include: { invoice: true } }, employeeSubmission:{include:{withdrawal:true}},
+  maintenanceEstimate: { select: { id: true, taskId: true, actorId: true, estimateRevision: true, snapshot: true,
+    workOrder: { select: { task: { select: {
+    archivedAt: true, propertyId: true, reservationId: true
+  } } } } } },
   financialStages: { orderBy: { position: "asc" as const }, include: { recipients: true, employeeCost:true, property: { select: { name: true, cityId: true, regionId: true } } } } } satisfies Prisma.ApprovalRequestInclude;
 const include=approvalInclude;
 
 export type FinancialApprovalStageDraft = { kind: string; ownerId: string | null; amount: string; currency: string; routing: Prisma.InputJsonObject; recipients: string[];
   lineId?: string; employeeCostId?:string; propertyId?: string | null; reservationId?: string | null; sourceSnapshot?: Prisma.InputJsonObject };
 type FinancialApprovalInput = { requestedBy: string; title: string; details: string; stages: FinancialApprovalStageDraft[] } &
-  ({ expenseId: string; propertyId: string; invoiceSubmissionId?: never;employeeSubmissionId?:never } | { invoiceSubmissionId: string; propertyId: null; expenseId?: never;employeeSubmissionId?:never } |
-  {employeeSubmissionId:string;propertyId:null;expenseId?:never;invoiceSubmissionId?:never});
+  ({ expenseId: string; propertyId: string; invoiceSubmissionId?: never; employeeSubmissionId?: never; maintenanceEstimateId?: never } |
+  { invoiceSubmissionId: string; propertyId: null; expenseId?: never; employeeSubmissionId?: never; maintenanceEstimateId?: never } |
+  { employeeSubmissionId: string; propertyId: null; expenseId?: never; invoiceSubmissionId?: never; maintenanceEstimateId?: never } |
+  { maintenanceEstimateId: string; propertyId: string; expenseId?: never; invoiceSubmissionId?: never; employeeSubmissionId?: never });
 
 export class ApprovalRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
@@ -36,10 +42,12 @@ export class ApprovalRepository {
   }
   lockInvoice(id: string) { return new SupplierPayableRepository(this.tx, this.organizationId).lockInvoice(id); }
   async createFinancial(input: FinancialApprovalInput) {
-    if (!input.stages.length || [input.expenseId,input.invoiceSubmissionId,input.employeeSubmissionId].filter(Boolean).length!==1) throw Error("Financial approval requires one source and its configured stages");
+    if (!input.stages.length || [input.expenseId, input.invoiceSubmissionId, input.employeeSubmissionId, input.maintenanceEstimateId].filter(Boolean).length!==1) throw Error("Financial approval requires one source and its configured stages");
     const row = await this.tx.approvalRequest.create({ data: { organizationId: this.organizationId, expenseId: input.expenseId, invoiceSubmissionId: input.invoiceSubmissionId,
-      employeeSubmissionId:input.employeeSubmissionId,propertyId: input.propertyId, requestedBy: input.requestedBy, title: input.title, details: input.details,
-      idempotencyKey: input.expenseId ? `expense:${input.expenseId}:approval` : input.invoiceSubmissionId ? `supplier-invoice-submission:${input.invoiceSubmissionId}:approval` : `employee-submission:${input.employeeSubmissionId}:approval`, routingSnapshot: input.stages[0].routing } });
+      employeeSubmissionId: input.employeeSubmissionId, maintenanceEstimateId: input.maintenanceEstimateId, propertyId: input.propertyId, requestedBy: input.requestedBy, title: input.title, details: input.details,
+      idempotencyKey: input.expenseId ? `expense:${input.expenseId}:approval` : input.invoiceSubmissionId ? `supplier-invoice-submission:${input.invoiceSubmissionId}:approval`  : input.employeeSubmissionId
+        ? `employee-submission:${input.employeeSubmissionId}:approval`
+        : `maintenance-estimate:${input.maintenanceEstimateId}:approval`, routingSnapshot: input.stages[0].routing } });
     await this.tx.approvalRecipient.createMany({ data: [...new Set(input.stages.flatMap(stage => stage.recipients))].map(userAccountId =>
       ({ organizationId: this.organizationId, approvalId: row.id, userAccountId })) });
     for (const [index, stage] of input.stages.entries()) {
@@ -51,6 +59,15 @@ export class ApprovalRepository {
     }
     return this.find(row.id);
   }
+  async maintenanceReviews(estimateIds: string[]) {
+    if (!estimateIds.length) return new Map<string, { id: string; state: string }>();
+    const reviews = await this.tx.approvalRequest.findMany({
+      where: { organizationId: this.organizationId, maintenanceEstimateId: { in: estimateIds } },
+      select: { id: true, maintenanceEstimateId: true, state: true }
+    });
+    return new Map(reviews.map(review => [review.maintenanceEstimateId!, { id: review.id, state: review.state }]));
+  }
+
   decideStage(id: string, state: "APPROVED" | "REJECTED" | "CANCELLED", decidedBy: string, decisionReason: string, decidedAt: Date) {
     return this.tx.approvalStage.updateMany({ where: { id, organizationId: this.organizationId, state: "PENDING" }, data: { state, decidedBy, decisionReason, decidedAt } });
   }

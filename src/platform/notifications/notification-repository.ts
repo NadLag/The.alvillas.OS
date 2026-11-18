@@ -110,7 +110,7 @@ export class NotificationRepository {
     const approval = input.kind === "approval_requested" ? await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: input.targetId },
       include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : null;
     const stage = approval?.financialStages.find(stage => stage.state === "PENDING");
-    if ((approval?.expenseId||approval?.invoiceSubmissionId||approval?.employeeSubmissionId) && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
+    if ((approval?.expenseId || approval?.invoiceSubmissionId || approval?.employeeSubmissionId || approval?.maintenanceEstimateId) && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
     let routing:NotificationRouting;
@@ -560,7 +560,7 @@ export class NotificationRepository {
       include:approvalInclude }) : [];
     const approvalReader = readerId && approvals.some(row => row.invoiceSubmissionId||row.employeeSubmissionId) ? await authContextForAccountInTransaction(this.tx, this.organizationId, readerId) : null;
     for (const row of approvals) {
-      if(row.employeeSubmission?.withdrawal)continue;
+      if (row.employeeSubmission?.withdrawal || row.maintenanceEstimate?.workOrder.task.archivedAt) continue;
       const lineSource=Boolean(row.invoiceSubmissionId||row.employeeSubmissionId),active = row.financialStages.find(stage => stage.state === "PENDING");
       const owned = readerId ? row.financialStages.filter(stage => stage.recipients.some(recipient => recipient.userAccountId === readerId) &&
         (!lineSource || approvalReader && authorizeApprovalResource(approvalReader, "view", approvalResource(row, stage.ownerId, stage)))) : [];
@@ -615,7 +615,7 @@ export class NotificationRepository {
     const row = await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: approvalId },
       include: { employeeSubmission:{select:{withdrawal:true}},recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } });
     if (!row || row.state !== "PENDING"||row.employeeSubmission?.withdrawal) return false;
-    if (!row.expenseId && !row.invoiceSubmissionId&&!row.employeeSubmissionId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
+    if (!row.expenseId && !row.invoiceSubmissionId && !row.employeeSubmissionId && !row.maintenanceEstimateId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
     const stage = row.financialStages.find(stage => stage.state === "PENDING");
     if (!stage || !sourceEventId || !stage.recipients.some(recipient => recipient.userAccountId === recipientId)) return false;
     const event = await this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id: sourceEventId, type: notificationEventType } });

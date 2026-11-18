@@ -8199,6 +8199,48 @@
       "conflict": "The issue or original record changed. Refresh before reviewing again.",
       "uncertain": "The save has not been confirmed. Refresh to check the original change."
     },
+    "finance": {
+      "openApproval": "Open approval",
+      "approvalStates": {
+        "PENDING": "Awaiting approval",
+        "APPROVED": "Approved for work",
+        "REJECTED": "Estimate rejected"
+      },
+      "title": "Work order costs",
+      "open": "Open work order costs",
+      "close": "Close work order costs",
+      "refresh": "Reload costs",
+      "unknownState": "State unavailable",
+      "owner": "Owner allocation",
+      "alvillas": "ALVILLAS allocation",
+      "guest": "Guest allocation",
+      "requiredApproval": "Required approval: {steps}",
+      "noApproval": "Policy requires no approval",
+      "openSource": "Open original financial record",
+      "estimateRevision": "Estimate revision {revision}",
+      "steps": {
+        "manager": "Manager",
+        "owner": "Owner",
+        "finance": "Finance"
+      },
+      "recorded": "Work order finance record saved.",
+      "unknownOutcome": "The previous save has no confirmation. Review the current history before trying again.",
+      "recordedVersion": "Linked version {version} · {amount}",
+      "empty": "No estimates or linked costs yet.",
+      "record": "Record costs",
+      "kind": "Record type",
+      "estimate": "Estimate revision",
+      "expense": "Link an expense",
+      "invoice": "Link a supplier invoice",
+      "sourceQuery": "Purpose, invoice reference or record ID",
+      "choices": "Matching records",
+      "amount": "Estimated amount",
+      "currency": "Currency code",
+      "date": "Estimate date",
+      "category": "Finance category key",
+      "purpose": "Scope of work",
+      "save": "Save financial record"
+    },
     "contractor": {
       "title": "Contractor and SLA",
       "open": "Open contractor assignment",

@@ -25,6 +25,12 @@ export class OperationRepository {
   async lock(key: string) {
     await advisoryTransactionLock(this.tx,`operation:${this.organizationId}:${key}`);
   }
+
+  async maintenanceEstimateAllowsWork(taskId: string) {
+    const [row] = await this.tx.$queryRaw<Array<{ allowed: boolean }>>(Prisma.sql`
+      SELECT app_maintenance_estimate_work_allowed(${this.organizationId}::uuid, ${taskId}::uuid) AS allowed`);
+    return row.allowed;
+  }
   task(id: string) {
     return this.tx.operationTask.findFirst({
       where: { organizationId: this.organizationId, id, archivedAt: null },

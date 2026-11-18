@@ -368,7 +368,8 @@ export async function transitionOperationTask(
       ["ASSIGNED", "COMPLETED"].includes(value.state)
     )
       throw new ReservationConflictError();
-    if (value.state === "IN_PROGRESS" && !task.assignedToPersonId)
+    if (value.state === "IN_PROGRESS" && (!task.assignedToPersonId ||
+      task.type === "MAINTENANCE" && !await repo.maintenanceEstimateAllowsWork(task.id)))
       throw new ReservationConflictError();
     await repo.context(ctx.actorId, meta.requestId, value.reason);
     await repo.update(task.id, { state: value.state });
@@ -434,6 +435,8 @@ export async function proxyCompleteOperationTaskInTransaction(
       task.assignedToUserAccountId === ctx.actorId ||
       !completeChecklist(task.checklistItems, value.checklistItemIds)
     )
+      throw new ReservationConflictError();
+    if (task.type === "MAINTENANCE" && !await repo.maintenanceEstimateAllowsWork(task.id))
       throw new ReservationConflictError();
     if (!(await repo.performer(value.performedByPersonId)))
       throw new ReservationNotFoundError();

@@ -8199,6 +8199,48 @@
       "conflict": "L’incident ou le dossier original a changé. Actualisez avant une nouvelle vérification.",
       "uncertain": "L’enregistrement n’est pas confirmé. Actualisez pour vérifier la modification originale."
     },
+    "finance": {
+      "openApproval": "Ouvrir l’approbation",
+      "approvalStates": {
+        "PENDING": "En attente d’approbation",
+        "APPROVED": "Travaux approuvés",
+        "REJECTED": "Estimation rejetée"
+      },
+      "title": "Coûts de l’ordre de travail",
+      "open": "Ouvrir les coûts de l’ordre de travail",
+      "close": "Fermer les coûts de l’ordre de travail",
+      "refresh": "Recharger les coûts",
+      "unknownState": "État indisponible",
+      "owner": "Part du propriétaire",
+      "alvillas": "Part d’ALVILLAS",
+      "guest": "Part du voyageur",
+      "requiredApproval": "Approbation requise : {steps}",
+      "noApproval": "La règle ne requiert aucune approbation",
+      "openSource": "Ouvrir la pièce financière d’origine",
+      "estimateRevision": "Révision {revision} de l’estimation",
+      "steps": {
+        "manager": "Responsable",
+        "owner": "Propriétaire",
+        "finance": "Finance"
+      },
+      "recorded": "L’écriture financière de l’ordre de travail a été enregistrée.",
+      "unknownOutcome": "L’enregistrement précédent n’est pas confirmé. Consultez l’historique avant de réessayer.",
+      "recordedVersion": "Version liée {version} · {amount}",
+      "empty": "Aucune estimation ni aucun coût lié pour le moment.",
+      "record": "Enregistrer les coûts",
+      "kind": "Type d’écriture",
+      "estimate": "Révision de l’estimation",
+      "expense": "Lier une dépense",
+      "invoice": "Lier une facture fournisseur",
+      "sourceQuery": "Objet, référence de facture ou identifiant",
+      "choices": "Écritures correspondantes",
+      "amount": "Montant estimé",
+      "currency": "Code de la devise",
+      "date": "Date de l’estimation",
+      "category": "Code de catégorie comptable",
+      "purpose": "Travaux prévus",
+      "save": "Enregistrer l’écriture financière"
+    },
     "contractor": {
       "title": "Prestataire et délais",
       "open": "Ouvrir l’affectation du prestataire",
