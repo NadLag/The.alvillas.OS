@@ -148,6 +148,13 @@ export function presentAuditHistoryRow(
       { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
       { before: { dataClass: "sensitive" }, after: { dataClass: "sensitive" }, reason: { dataClass: "sensitive" } }) as AuditHistoryRow;
   }
+  if(row.resourceType==="maintenance_issue_context"||row.resourceType==="maintenance_issue_context_command"){
+    // Context reasons can refer to financial or personal sources. Their native
+    // issue history authorizes the original source before disclosing details.
+    return present({...ctx.authContext,visibleDataClasses:new Set()},action,
+      {type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},
+      {before:{dataClass:"sensitive"},after:{dataClass:"sensitive"},reason:{dataClass:"sensitive"}})as AuditHistoryRow;
+  }
   if(row.resourceType==="service_allocation"){
     const allowed=Boolean(financialResource?.type==="service_allocation"&&financialResource.id===row.resourceId&&financialResource.propertyId===row.propertyScopeId&&canViewServiceAllocation(ctx.authContext,financialResource,new Date(),action));
     return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { getTranslations, getFormatter } from "next-intl/server";
 import { taskEvidence } from "../application/operation-evidence";
@@ -87,6 +88,7 @@ export async function OperationEvidencePanel({
               <strong>{issue.title}</strong>
               <p>{issue.description}</p>
               <span>{t(`priorities.${issue.severity}`)}</span>
+              {authorize(ctx.authContext,"view",{...resource,type:"issue",id:issue.id,status:issue.state,dataClass:"operational"})&&authorize(ctx.authContext,"view",{...resource,type:"property",id:detail.task.propertyId,dataClass:"operational"})?<Link prefetch={false} className="secondary-button" href={`/${locale}/app/maintenance/issues/${issue.id}`}>{t("maintenanceContext")}</Link>:null}
               {issue.evidenceId ? <a href={`/api/operations/evidence/${issue.evidenceId}`} target="_blank" rel="noopener noreferrer">{t("viewPhoto")}</a> : null}
             </li>
           ))}

@@ -1,5 +1,4 @@
 import {z} from "zod";
-import {nativeMaintenanceIssueInputSchema} from "@/platform/maintenance/issue-input";
 
 const id=z.uuid().transform(value=>value.toLowerCase());
 const record=z.object({kind:z.enum(["PROPERTY","RESERVATION","GUEST","TASK","PERSON","SUPPLIER","EXPENSE","ASSET"]),id}).strict();
@@ -11,9 +10,6 @@ export function maintenanceIssueSourceKey(source:MaintenanceIssueSource){return 
 export const maintenanceIssueSourcesSchema=z.array(maintenanceIssueSourceSchema).max(50).superRefine((sources,context)=>{
  if(new Set(sources.map(maintenanceIssueSourceKey)).size!==sources.length)context.addIssue({code:"custom",message:"Each original issue context appears once"});
 });
-/** Reuse the canonical field/task issue input, including its original nonce and
- * photo command. Linked records carry identities, never editable money. */
-export const maintenanceIssueDraftSchema=z.object({issue:nativeMaintenanceIssueInputSchema,sources:maintenanceIssueSourcesSchema}).strict();
 export class MaintenanceIssueAccessError extends Error{constructor(){super("maintenance_issue_unavailable");}}
 export class MaintenanceIssueConflictError extends Error{constructor(){super("maintenance_issue_changed");}}
 export class MaintenanceIssueSourceUnavailableError extends Error{constructor(readonly kind:MaintenanceIssueSource["kind"]){super("maintenance_issue_source_not_ready");}}
@@ -27,3 +23,8 @@ export const maintenanceIssueLinkReceiptSchema=z.object({schemaVersion:z.literal
 export type MaintenanceIssueLinkReceipt=z.infer<typeof maintenanceIssueLinkReceiptSchema>;
 export const maintenanceIssueLinkPublishedSchema=maintenanceIssueLinkReceiptSchema.safeExtend({replayed:z.boolean()}).strict();
 export const maintenanceIssueLinkCancellationSchema=z.object({schemaVersion:z.literal(1),organizationId:id,actorId:id,issueId:id,idempotencyKey:id}).strict();
+const acknowledgement={organizationId:id,actorId:id,issueId:id,idempotencyKey:id};
+export const maintenanceIssueCommandStatusSchema=z.discriminatedUnion("state",[
+ z.object({...acknowledgement,state:z.literal("RECORDED"),contextId:id,version:version.refine(value=>value!=="0")}).strict(),
+ z.object({...acknowledgement,state:z.enum(["CANCELLED","UNKNOWN"])}).strict()
+]);

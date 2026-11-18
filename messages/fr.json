@@ -1150,7 +1150,8 @@
       "configureRecurring": "Configurer le travail récurrent",
       "generationResult": "{created} tâches créées ; {existing} occurrences existent déjà.",
       "generationMore": "D’autres tâches restent à générer. Relancez la génération ; le planificateur continue aussi automatiquement.",
-      "generationFailed": "La génération des tâches récurrentes a échoué. Vérifiez la liste, les horaires et les droits actuels du créateur, puis relancez-la."
+      "generationFailed": "La génération des tâches récurrentes a échoué. Vérifiez la liste, les horaires et les droits actuels du créateur, puis relancez-la.",
+      "maintenanceContext": "Gérer les dossiers de maintenance associés"
     }
   },
   "Field": {
@@ -8120,5 +8121,83 @@
     },
     "varianceLink": "Examiner l’écart de blanchisserie",
     "priceChange": "Examiner le changement de prix"
+  },
+  "MaintenanceIssues": {
+    "eyebrow": "Maintenance",
+    "title": "Incident de maintenance",
+    "subtitle": "Consultez les dossiers associés et conservez un historique clair.",
+    "backToOperations": "Retour aux opérations",
+    "refresh": "Actualiser",
+    "originalTask": "Ouvrir la tâche originale",
+    "saved": "Modification enregistrée.",
+    "notRecorded": "La modification n’a pas été enregistrée. Vérifiez-la avant un nouvel enregistrement.",
+    "unconfirmed": "L’enregistrement n’a pas pu être confirmé. Vérifiez la modification originale avant de continuer.",
+    "privateHidden": "Les dossiers privés sont masqués lorsque cet écran est inactif.",
+    "version": "Version des associations {number}",
+    "openEvidence": "Ouvrir le justificatif original",
+    "linkedRecords": "Dossiers associés",
+    "emptySources": "Aucun dossier n’a encore été associé.",
+    "maskedSource": "•••••• · L’accès à ce dossier original est indisponible.",
+    "unlink": "Dissocier",
+    "unlinkRecord": "Dissocier un dossier",
+    "addRecord": "Associer un dossier",
+    "changeRecord": "Vérifier une modification d’association",
+    "recordType": "Type de dossier",
+    "photoLocation": "Emplacement de la photo",
+    "documentArchive": "Archives documentaires",
+    "taskPhotos": "Photos des tâches",
+    "searchLabel": "Rechercher un dossier original",
+    "search": "Rechercher",
+    "sourceUnavailable": "L’association d’un actif est indisponible.",
+    "emptyChoices": "Aucun dossier accessible ne correspond sur cette page.",
+    "next": "Page suivante",
+    "first": "Première page",
+    "selectedRecord": "Dossier sélectionné",
+    "reason": "Motif de cette modification",
+    "unlinkHelp": "Sélectionnez le dossier à dissocier, indiquez le motif et vérifiez la modification. Le dossier original et son historique sont conservés.",
+    "review": "Vérifier l’association",
+    "reviewUnlink": "Vérifier la dissociation",
+    "reviewTitle": "Vérifier cette modification",
+    "historyPreserved": "Cette modification conserve le dossier original et son historique.",
+    "saving": "Enregistrement…",
+    "publish": "Enregistrer la modification vérifiée",
+    "changeReview": "Modifier la sélection",
+    "history": "Historique des associations",
+    "showHistory": "Afficher l’historique",
+    "emptyHistory": "Aucune modification d’association n’a été enregistrée.",
+    "you": "Vous",
+    "anotherActor": "Un autre utilisateur autorisé",
+    "issueStates": {
+      "OPEN": "Ouvert",
+      "CLOSED": "Clos",
+      "RESOLVED": "Résolu",
+      "CANCELLED": "Annulé"
+    },
+    "operations": {
+      "ATTACH": "Associer le dossier",
+      "DETACH": "Dissocier le dossier"
+    },
+    "kinds": {
+      "PROPERTY": "Propriété",
+      "RESERVATION": "Réservation",
+      "GUEST": "Voyageur",
+      "TASK": "Tâche",
+      "PERSON": "Personne",
+      "SUPPLIER": "Fournisseur",
+      "EXPENSE": "Dépense",
+      "ASSET": "Actif",
+      "PHOTO": "Photo",
+      "DOCUMENT": "Document"
+    },
+    "states": {
+      "ready": "Prêt",
+      "loading": "Chargement…",
+      "offline": "Hors connexion. Les dossiers privés restent masqués jusqu’au rétablissement de la connexion.",
+      "forbidden": "L’accès à cet incident est indisponible.",
+      "unavailable": "L’incident est temporairement indisponible. Actualisez pour vérifier son état enregistré.",
+      "validation": "Vérifiez le dossier sélectionné et indiquez un motif d’au moins six caractères.",
+      "conflict": "L’incident ou le dossier original a changé. Actualisez avant une nouvelle vérification.",
+      "uncertain": "L’enregistrement n’est pas confirmé. Actualisez pour vérifier la modification originale."
+    }
   }
 }

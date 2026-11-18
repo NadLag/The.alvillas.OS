@@ -1150,7 +1150,8 @@
       "configureRecurring": "Configure recurring work",
       "generationResult": "Created {created} tasks; {existing} occurrences already exist.",
       "generationMore": "More tasks remain. Generate again to continue; the scheduler also continues automatically.",
-      "generationFailed": "Recurring tasks could not be generated. Review the checklist, schedule and creator’s current access, then generate again."
+      "generationFailed": "Recurring tasks could not be generated. Review the checklist, schedule and creator’s current access, then generate again.",
+      "maintenanceContext": "Manage related maintenance records"
     }
   },
   "Field": {
@@ -8120,5 +8121,83 @@
     },
     "varianceLink": "Review laundry variance",
     "priceChange": "Review price change"
+  },
+  "MaintenanceIssues": {
+    "eyebrow": "Maintenance",
+    "title": "Maintenance issue",
+    "subtitle": "Review related records and retain a clear history.",
+    "backToOperations": "Back to operations",
+    "refresh": "Refresh",
+    "originalTask": "Open original task",
+    "saved": "Change saved.",
+    "notRecorded": "The change was not recorded. Review it again before saving.",
+    "unconfirmed": "The save could not be confirmed. Check the original change before continuing.",
+    "privateHidden": "Private records are hidden while this screen is inactive.",
+    "version": "Context version {number}",
+    "openEvidence": "Open original evidence",
+    "linkedRecords": "Related records",
+    "emptySources": "No related records have been linked yet.",
+    "maskedSource": "•••••• · Access to this original record is unavailable.",
+    "unlink": "Unlink",
+    "unlinkRecord": "Unlink a related record",
+    "addRecord": "Link a related record",
+    "changeRecord": "Review a record change",
+    "recordType": "Record type",
+    "photoLocation": "Photo location",
+    "documentArchive": "Document archive",
+    "taskPhotos": "Task photos",
+    "searchLabel": "Find an original record",
+    "search": "Search",
+    "sourceUnavailable": "Asset linking is unavailable.",
+    "emptyChoices": "No accessible matching records on this page.",
+    "next": "Next page",
+    "first": "First page",
+    "selectedRecord": "Selected record",
+    "reason": "Reason for this change",
+    "unlinkHelp": "Select a record to unlink, enter its reason and review the change. Its original record and history are preserved.",
+    "review": "Review link",
+    "reviewUnlink": "Review unlink",
+    "reviewTitle": "Review this change",
+    "historyPreserved": "This change retains the original record and its history.",
+    "saving": "Saving…",
+    "publish": "Save reviewed change",
+    "changeReview": "Change selection",
+    "history": "Context history",
+    "showHistory": "Show history",
+    "emptyHistory": "No context changes have been recorded.",
+    "you": "You",
+    "anotherActor": "Another authorized user",
+    "issueStates": {
+      "OPEN": "Open",
+      "CLOSED": "Closed",
+      "RESOLVED": "Resolved",
+      "CANCELLED": "Cancelled"
+    },
+    "operations": {
+      "ATTACH": "Link record",
+      "DETACH": "Unlink record"
+    },
+    "kinds": {
+      "PROPERTY": "Property",
+      "RESERVATION": "Reservation",
+      "GUEST": "Guest",
+      "TASK": "Task",
+      "PERSON": "Person",
+      "SUPPLIER": "Supplier",
+      "EXPENSE": "Expense",
+      "ASSET": "Asset",
+      "PHOTO": "Photo",
+      "DOCUMENT": "Document"
+    },
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading…",
+      "offline": "Offline. Private related records are hidden until you reconnect.",
+      "forbidden": "Access to this issue is unavailable.",
+      "unavailable": "The issue is temporarily unavailable. Refresh to check its original saved state.",
+      "validation": "Check the selected record and enter a reason of at least six characters.",
+      "conflict": "The issue or original record changed. Refresh before reviewing again.",
+      "uncertain": "The save has not been confirmed. Refresh to check the original change."
+    }
   }
 }
