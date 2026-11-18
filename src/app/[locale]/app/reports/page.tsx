@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { safeLocale } from "@/i18n/routing";
 import { financeActorContextFromSession } from "@/modules/finance/application/finance-access";
+import { inventoryReportSources } from "@/modules/finance/application/inventory-performance-report";
 import { AccountantExportWorkspace } from "@/modules/finance/ui/accountant-export-workspace";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import { listOwnerPortalProperties } from "@/modules/owner-portal/application/owner-portal-service";
@@ -23,6 +24,9 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
   ]);
   const hasReportAccess = finance && authorizeCollection(finance.authContext, "view", "report");
   const canViewCompany = finance && authorizeOrganizationSource(finance.authContext, "view", { type: "report", organizationId: finance.organizationId }, new Date());
+  const canViewInventory = canViewCompany && finance &&
+    [...inventoryReportSources.operationalSources, ...inventoryReportSources.financialSources].every(type =>
+      authorizeOrganizationSource(finance.authContext, "view", { type, organizationId: finance.organizationId }, new Date()));
   const canGenerate = finance && hasReportAccess && canViewAccountantExport(finance.authContext, "export", new Date());
   const properties = owner ? (await listOwnerPortalProperties(owner)).filter(property => property.canViewFinances) : [];
   if (!hasReportAccess && !properties.length) notFound();
@@ -35,6 +39,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
       {hasReportAccess ? <nav className="form-actions">
         <Link className="secondary-button" href={`/${locale}/app/properties`}>{t("propertyReports")}</Link>
         {canViewCompany ? <Link className="secondary-button" href={`/${locale}/app/reports/company`}>{t("companyReports")}</Link> : null}
+        {canViewInventory ? <Link className="secondary-button" href={`}/${locale}/app/reports/inventory`}>{t("inventoryReports")}</Link> : null}
         {canViewCompany && finance && authorizeOrganizationSource(finance.authContext, "view", { type: "team_member", organizationId: finance.organizationId }, new Date())
           ? <Link className="secondary-button" href={`/${locale}/app/reports/team`}>{t("teamReports")}</Link> : null}
       </nav> : null}

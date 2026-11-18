@@ -307,7 +307,7 @@ F-RPT-02 | IN-PROGRESS | Owner annual and monthly reporting includes exact verif
 F-RPT-03 | IN-PROGRESS | Property ledgers and original stay calendars drive the localized P&L and performance report with audited CSV, Excel and PDF. Targeted PostgreSQL passed. Mandatory CI and staging acceptance pending.
 F-RPT-04 | IN-PROGRESS | Company P&L, bank and cash locations, and active portfolio performance use original sealed postings and reservation data. Exact currency, custody separation, and native service PostgreSQL checks passed. CI and hosted acceptance pending.
 F-RPT-05 | IN-PROGRESS | Localized team reports show recorded workload, completed jobs, recognized compensation and wallet movements. Focused PostgreSQL and Chromium CSV checks passed. Mandatory CI and hosted acceptance pending.
-F-RPT-06 | TODO |
+F-RPT-06 | IN-PROGRESS | Native inventory and stocktake quantities, procurement receipts and laundry comparisons with scoped EN/FR/AR reporting and exports. Integration and hosted acceptance pending.
 F-RPT-07 | TODO |
 F-RPT-08 | TODO |
 F-RPT-09 | TODO |

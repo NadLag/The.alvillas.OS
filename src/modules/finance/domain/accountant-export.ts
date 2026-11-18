@@ -3,7 +3,7 @@ import { appLocales } from "@/i18n/routing";
 import { Money } from "@/platform/money/money";
 
 export const accountantReportKinds = ["TRANSACTIONS", "INCOME", "EXPENSES", "OWNER_STATEMENTS", "BANK_RECONCILIATION", "SUPPLIER_PAYMENTS", "STAFF_PAYMENTS"] as const;
-export const performanceReportKinds = ["PROPERTY_PERFORMANCE", "COMPANY_PERFORMANCE", "TEAM_PERFORMANCE"] as const;
+export const performanceReportKinds = ["PROPERTY_PERFORMANCE", "COMPANY_PERFORMANCE", "TEAM_PERFORMANCE", "INVENTORY_PERFORMANCE"] as const;
 const reportDocumentKinds = [...accountantReportKinds, ...performanceReportKinds] as const;
 export const accountantExportFormats = ["CSV", "EXCEL", "PDF"] as const;
 export const accountantExportInputSchema = z.object({ kind: z.enum(accountantReportKinds), format: z.enum(accountantExportFormats),

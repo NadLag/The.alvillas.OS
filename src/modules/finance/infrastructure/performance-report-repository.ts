@@ -1,8 +1,18 @@
 import { Prisma } from "@prisma/client";
+import { InventoryReportRepository } from "./inventory-report-repository";
 import { PropertyFinanceRepository } from "./property-finance-repository";
 import type { CompanyPostingTotal, PortfolioNights, PropertyPostingTotal, TeamPerformanceSource } from "../domain/performance-report";
 
 export class PerformanceReportRepository extends PropertyFinanceRepository {
+  inventory() {
+    return new InventoryReportRepository(this.tx, this.organizationId);
+  }
+
+  reportProperties() {
+    return this.tx.property.findMany({ where: { organizationId: this.organizationId, archivedAt: null },
+      select: { id: true, name: true, cityId: true, regionId: true }, orderBy: [{ name: "asc" }, { id: "asc" }] });
+  }
+
   propertyPostings(input: { propertyId: string; currency: string; startsAt: Date; endsAt: Date }) {
     return this.tx.$queryRaw<PropertyPostingTotal[]>(Prisma.sql`
       WITH classified AS (

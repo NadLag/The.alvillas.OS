@@ -19,7 +19,7 @@ type ExportSource = {
 };
 
 export async function performanceReportFile(source: ExportSource, format: AccountantExportFormat, locale: AppLocale,
-  policy: { id: string; version: number; capacity: number }, titleKey: "propertyTitle" | "companyTitle" | "teamTitle") {
+  policy: { id: string; version: number; capacity: number }, titleKey: "propertyTitle" | "companyTitle" | "teamTitle" | "inventoryTitle") {
   const { default: catalog } = await import(`../../../../messages/${locale}.json`) as {
     default: typeof en;
   };
@@ -29,7 +29,7 @@ export async function performanceReportFile(source: ExportSource, format: Accoun
     metadata: t.metadata, metadataRow: t.metadataRow, sourceRow: t.sourceRow, metadataSheet: t.metadataSheet, dataSheet: t.dataSheet };
   const columns: AccountantExportColumn[] = ["description", "amount", "reference"];
   const rows = source.metrics.map(({ key, amount, count, subject }) => accountantExportRow(subject ? subject.id + "." + key : key, columns, {
-    description: (subject ? subject.name + " ? " : "") + report.metric[key as keyof typeof report.metric], amount: amount?.toJSON().amount ?? null,
+    description: (subject ? subject.name + " · " : "") + report.metric[key as keyof typeof report.metric], amount: amount?.toJSON().amount ?? null,
     reference: count ?? (amount === null ? report.unavailable : null)
   }));
   return renderAccountantReportDocument({

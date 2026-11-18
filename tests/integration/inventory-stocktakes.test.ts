@@ -1,3 +1,4 @@
+import { InventoryReportRepository } from "@/modules/finance/infrastructure/inventory-report-repository";
 import {randomUUID} from "node:crypto";
 import {PrismaClient} from "@prisma/client";
 import {beforeAll,afterAll,it,expect,vi} from "vitest";
@@ -35,6 +36,13 @@ it("records native property/company counts, preserves holds/condition and origin
  expect(results.map(row=>row.replayed).sort()).toEqual([false,true]);expect(new Set(results.map(row=>row.stocktakeId)).size).toBe(1);const {replayed,...receipt}=results[0];expect(typeof replayed).toBe("boolean");expect(await recoverInventoryCount(f.ctx,{idempotencyKey:input.idempotencyKey},f.deps)).toEqual({recorded:true,receipt});
  expect((await inventoryCountContext(f.ctx,{itemId:f.item.id,locationId:f.location.id},f.deps)).position).toMatchObject({quantity:"15",reserved:"10",damaged:"2",available:"3",revision:"4"});expect(await withTenant(db,f.organizationId,tx=>tx.$queryRaw`SELECT id::text,xmin::text,md5(to_jsonb(m)::text) AS body FROM inventory_movement m WHERE organization_id=${f.organizationId}::uuid AND stocktake_id IS NULL ORDER BY id`)).toEqual(original);
  const zero=await publishInventoryCount(f.ctx,await command(f,"0",f.store.id),f.deps);expect(zero.movementId).toBeNull();expect((await inventoryCountContext(f.ctx,{itemId:f.item.id,locationId:f.store.id},f.deps)).position.revision).toBe("1");expect(await facts(f)).toEqual({counts:2,movements:4,journals:0,postings:0,audits:2});const history=await inventoryCountPage(f.ctx,{},f.deps);expect(history.items.map(row=>row.delta)).toEqual(["0","-5"]);expect(history.items.every(row=>row.origin==="WORKSPACE")).toBe(true);expect(JSON.stringify(history)).not.toMatch(/configSnapshot|authorizationCap|guestName|amount|price|cost|wallet/);
+ const readings = await withTenant(db, f.organizationId, tx => new InventoryReportRepository(tx, f.organizationId).quantities({
+   propertyId: f.property.id, currency: "MAD", startsAt: new Date(Date.now() - 86_400_000), endsAt: new Date(Date.now() + 1_000)
+ }));
+ expect(Object.fromEntries(readings.map(row => [row.key,row.quantity]))).toEqual({
+   inventoryPurchased: "20", inventoryDamaged: "2", inventoryStocktakeExpected: "20",
+   inventoryStocktakeCounted: "15", inventoryStocktakeVariance: "-5", inventoryStocktakes: "1"
+ });
  const variance=await withTenant(db,f.organizationId,tx=>tx.outboxEvent.findFirstOrThrow({where:{idempotencyKey:`inventory:${results[0].stocktakeId}:variance`}}));expect(variance.payload).toMatchObject({propertyId:f.property.id,stocktake:{expected:"20",actual:"15",delta:"-5",revision:"4"}});
 });
 it("requires an explicit new review after a stale revision and closes an unrecorded nonce against delayed publication",async()=>{
