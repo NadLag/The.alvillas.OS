@@ -110,9 +110,10 @@ export class OwnerPortalRepository extends LedgerCalendarRepository {
     return property ? { now: clock.now, timezone: property.timezone } : null;
   }
 
-  reservations(propertyId: string, from: Date, until?: Date, cursor?: { day: Date; id: string }) {
+  reservations(propertyId: string, from: Date, until?: Date, cursor?: { day: Date; id: string }, reservationId?: string) {
     return this.tx.reservation.findMany({
-      where: { organizationId: this.organizationId, propertyId, archivedAt: null, checkOut: { gt: from },
+      where: { organizationId: this.organizationId, propertyId, id: reservationId, archivedAt: null,
+        ...(reservationId ? {} : { checkOut: { gt: from } }),
         ...(until ? { checkIn: { lte: until } } : {}),
         ...(cursor ? { OR: [{ checkIn: { gt: cursor.day } }, { checkIn: cursor.day, id: { gt: cursor.id } }] } : {}) },
       select: { id: true, reference: true, checkIn: true, checkOut: true, status: true },

@@ -11,7 +11,7 @@ import { auth } from "@/platform/auth/session";
 
 export default async function OwnerReservationsPage({ params, searchParams }: {
   params: Promise<{ locale: string; propertyId: string }>;
-  searchParams: Promise<{ from?: string; until?: string; cursorDay?: string; cursorId?: string }>;
+  searchParams: Promise<{ from?: string; until?: string; cursorDay?: string; cursorId?: string; reservation?: string }>;
 }) {
   const [{ locale: candidate, propertyId }, query, session] = await Promise.all([params, searchParams, auth()]);
   const locale = safeLocale(candidate);
@@ -19,7 +19,7 @@ export default async function OwnerReservationsPage({ params, searchParams }: {
   if (!session) redirect(`/${locale}/login`);
   const actor = await ownerPortalActorContextFromSession(session);
   const filters = ownerReservationQuery.safeParse({ propertyId, from: query.from || undefined, until: query.until || undefined,
-    cursorDay: query.cursorDay, cursorId: query.cursorId });
+    cursorDay: query.cursorDay, cursorId: query.cursorId, reservationId: query.reservation });
   if (!actor || !filters.success) notFound();
   const [t, data] = await Promise.all([
     getTranslations("OwnerPortal.reservationList"),

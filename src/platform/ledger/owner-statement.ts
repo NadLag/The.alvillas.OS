@@ -30,6 +30,8 @@ export type RawOwnerLedgerPosting = {
   locationName: string | null;
   locationCode: string | null;
   propertyName?: string | null;
+  reservationId?: string | null;
+  reversal?: boolean;
 };
 
 export type OwnerStatementLine = {
@@ -44,6 +46,8 @@ export type OwnerStatementLine = {
   signedAmount: Money;
   locationName: string;
   reservationReference: string | null;
+  reservationId?: string | null;
+  reversal?: boolean;
   source: string | null;
   propertyId: string | null;
   propertyName: string | null;
@@ -227,6 +231,8 @@ export function buildOwnerStatement<TPropertyId extends string | null>(input: {
         signedAmount,
         locationName,
         reservationReference: dimensionString(posting.dimensions, "reservation_reference"),
+        reservationId: posting.reservationId,
+        reversal: posting.reversal,
         source: dimensionString(posting.dimensions, "source"),
         propertyId: dimensionString(posting.dimensions, "property_id"),
         propertyName: posting.propertyName ?? null,

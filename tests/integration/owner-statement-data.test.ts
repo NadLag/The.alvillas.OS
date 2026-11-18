@@ -1,3 +1,6 @@
+import { getOwnerPayoutHistory } from "@/modules/owner-portal/application/owner-payout-history";
+import { getOwnerMoneyMovements } from "@/modules/owner-portal/application/owner-money-movements";
+import { getOwnerFinancialActivity } from "@/modules/owner-portal/application/owner-financial-activity";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -79,6 +82,37 @@ async function exporter(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("native shared statement generation", () => {
+  it("separates owner-attributed receipt and settlement custody evidence from the remaining payable", async () => {
+    const f = await fixture(), at = new Date("2026-11-02T12:00:00Z");
+    await withTenant(db, f.org, async tx => {
+      const finance = new FinanceRepository(tx, f.org);
+      const dims = { owner_id: f.owner.id, property_id: f.property.id }, payout = { ...dims, source: "OWNER_PAYOUT", payout_id: randomUUID() };
+      const booked = Money.of("125.01", "MAD"), paid = Money.of("45.02", "MAD");
+      const post = (postings: Parameters<typeof finance.createFinancialTransaction>[0]["postings"]) => finance.createFinancialTransaction({
+        reference: "OWNER-SOURCE:" + randomUUID(), occurredAt: at, description: "Original owner money movement", createdBy: f.account.id, idempotencyKey: randomUUID(), postings
+      });
+      await post([
+        { ledgerAccountId: f.bank.id, side: "DEBIT", amount: booked, bucket: "OWNER_REVENUE", dimensions: { posting_kind: "accommodation_revenue_received" } },
+        { ledgerAccountId: f.claim.id, side: "CREDIT", amount: booked, bucket: "OWNER_REVENUE", dimensions: { ...dims, posting_kind: "owner_accommodation_revenue" } }
+      ]);
+      await post([
+        { ledgerAccountId: f.bank.id, side: "CREDIT", amount: paid, bucket: "PAYOUT_PAYMENT", dimensions: payout },
+        { ledgerAccountId: f.claim.id, side: "DEBIT", amount: paid, bucket: "PAYOUT", dimensions: payout }
+      ]);
+    });
+    await append(f, "MAD", "10.00", at.toISOString(), "DEBIT");
+    const before = await facts(f.org);
+    const value = await getOwnerMoneyMovements(f.ctx, f.property.id, { from: "2026-11-02", to: "2026-11-02", currency: "MAD" }, 1, { db, requestId: randomUUID() });
+    expect(value.payable.toJSON().amount).toBe("69.99");
+    expect(value.payments.toJSON().amount).toBe("45.02");
+    expect(value.collected.map(([rail, amount]) => [rail, amount.toJSON().amount])).toEqual([["BOOKING_RECEIPT", "125.01"]]);
+    expect(value.movements).toHaveLength(2);
+    const payouts = await getOwnerPayoutHistory(f.ctx, f.property.id, { from: "2026-11-02", to: "2026-11-02", currency: "MAD" }, 1, { db, requestId: randomUUID() });
+    expect(payouts.rows).toEqual([]);
+    expect(payouts.plannedTotal.toJSON().amount).toBe("0.00");
+    expect(await facts(f.org)).toEqual(before);
+  });
+
   it("withholds rendered bytes and success history when the financial calendar changes during export", async () => {
     const f = await fixture(), actor = await exporter(f); await append(f, "MAD", "0.07", "2026-11-01T23:30:00Z"); const original = await facts(f.org);
     const input = { kind: "OWNER_STATEMENTS", format: "CSV", locale: "en", fromOn: "2026-11-02", toOn: "2026-11-02", currency: "MAD", ownerId: f.owner.id,
@@ -149,5 +183,13 @@ describe("native shared statement generation", () => {
     expect(statement.currency).toBe("EUR"); expect(statement.openingBalance.toJSON().amount).toBe("0.00");
     expect(statement.periodCreditTotal.toJSON().amount).toBe("9007199254740993.07"); expect(statement.closingBalance.toJSON().amount).toBe("9007199254740993.07");
     expect(statement.lines).toHaveLength(1); expect(statement.lines[0].amount.toJSON().currency).toBe("EUR"); expect(await facts(f.org)).toEqual(original);
+    const deps = { db, requestId: randomUUID() };
+    const activity = await getOwnerFinancialActivity(f.ctx, f.property.id, { ...input, posting: statement.lines[0].postingId }, deps);
+    expect(activity.rows.map(row => row.amount.toJSON())).toEqual([{ currency: "EUR", amount: "9007199254740993.07" }]);
+    expect(activity.detail).toMatchObject({ category: "OWNER_REVENUE", reference: statement.lines[0].reference });
+    expect(Object.keys(activity.detail ?? {})).not.toContain("description");
+    await expect(getOwnerFinancialActivity(f.ctx, f.property.id, { ...input, currency: "MAD", posting: statement.lines[0].postingId }, deps)).rejects.toThrow();
+    await expect(getOwnerFinancialActivity(f.ctx, randomUUID(), input, deps)).rejects.toThrow();
+    expect(await facts(f.org)).toEqual(original);
   });
 });
