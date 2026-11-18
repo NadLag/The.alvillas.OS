@@ -1192,6 +1192,12 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "documents": {
+      "title": "Documents",
+      "back": "Retour au logement",
+      "open": "Ouvrir les archives privées",
+      "empty": "Aucun document n’est accessible avec vos droits."
+    },
     "approvals": {
       "title": "Approbations en attente",
       "back": "Retour",

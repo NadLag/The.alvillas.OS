@@ -297,7 +297,7 @@ F-OWN-05 | IN-PROGRESS | Payout history reads native submitted schedules and exa
 F-OWN-06 | IN-PROGRESS | Owner statements offer monthly and annual periods with CSV and PDF downloads from one authorized ledger snapshot. Focused PostgreSQL confirms exact cents, real PDF output and unauthorized denial. Arabic PDF requires the configured renderer. Mandatory CI and hosted acceptance remain open.
 F-OWN-07 | IN-PROGRESS | The owner center lists the next configured approval only for the owner, property and assigned recipient. Shared approve and reject commands preserve ordered decisions and retry behavior. The two-owner PostgreSQL test passes. Mandatory CI and hosted acceptance remain open.
 F-OWN-08 | IN-PROGRESS | Owner portfolio and statements already show authorized property condition from native Maintenance issues and work orders. The PostgreSQL contractor journey and the prior scoped portal browser journey pass. Mandatory CI and hosted acceptance remain open.
-F-OWN-09 | TODO |
+F-OWN-09 | IN-PROGRESS | The owner portal opens authorized owner and property document sources in the native private archive. Current ownership and independent document permissions both gate visibility. Focused Chromium covers the documents surface and denies unrelated property access. Mandatory CI and hosted acceptance remain open.
 F-OWN-10 | TODO |
 F-OWN-11 | TODO |
 F-OWN-12 | TODO |

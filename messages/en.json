@@ -1192,6 +1192,12 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "documents": {
+      "title": "Documents",
+      "back": "Back to property",
+      "open": "Open private archive",
+      "empty": "No documents are available for your access."
+    },
     "approvals": {
       "title": "Pending approvals",
       "back": "Back",
