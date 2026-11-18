@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { listSupplierInvoices, SupplierInvoiceAccessError } from "@/modules/finance/application/supplier-invoice-service";
 import { readSupplierPriceLists } from "@/modules/finance/application/supplier-price-list";
 import { SupplierPriceListEditor } from "@/modules/finance/ui/supplier-price-list-editor";
 import { formatCurrencyAmount, formatDate } from "@/i18n/format";
@@ -21,7 +22,7 @@ export default async function Page({ params, searchParams }: {
   try { supplier = await getSupplier(actor, supplierId); } catch (error) { if (error instanceof SupplierAccessError || error instanceof z.ZodError) notFound(); throw error; }
   const query = await searchParams, cursor = z.uuid().optional().safeParse(query.priceAfter);
   if (!cursor.success) notFound();
-  const [prices, archive] = await Promise.all([
+  const [prices, archive, finance, invoices] = await Promise.all([
     readSupplierPriceLists(actor, supplier.id, cursor.data).catch((error: unknown) => {
       if (error instanceof SupplierAccessError) return null;
       throw error;
@@ -32,7 +33,14 @@ export default async function Page({ params, searchParams }: {
           if (error instanceof DocumentAccessError || error instanceof DocumentConfigurationError || error instanceof DocumentConflictError) return null;
           throw error;
         })
-      : null
+      : null,
+    actor.authContext.permissions.has("supplier_invoice:view")
+      ? listSupplierInvoices(actor, { supplierId: supplier.id }).catch((error: unknown) => {
+        if (error instanceof SupplierInvoiceAccessError) return null;
+        throw error;
+      })
+      : null,
+    getTranslations("SupplierInvoices")
   ]);
   const archivePath = "/" + locale + "/app/documents";
   return <AdminShell className="resource-page supplier-page" testId="supplier-page"><ShellHeader eyebrow={supplier.reference} title={supplier.displayName} subtitle={supplier.category} actions={<>{supplier.canEdit && !supplier.archived ? <Link className="primary-button" data-testid="supplier-edit" href={`/${locale}/app/finance/suppliers/${supplier.id}/edit`}>{t("edit")}</Link> : null}<Link className="secondary-button" href={`/${locale}/app/finance/suppliers`}>{t("back")}</Link></>} />
@@ -59,6 +67,16 @@ export default async function Page({ params, searchParams }: {
       {archive.items.length ? <ul className="resource-list">{archive.items.slice(0, 8).map(item => <li key={item.id}>
         <span dir="auto">{item.title}</span>
       </li>)}</ul> : <p>{t("documents.empty")}</p>}
+    </section> : null}
+    {finance ? <section className="panel resource-form" aria-label={t("payables.title")}>
+      <h2>{t("payables.title")}</h2>
+      <Link className="secondary-button" href={"/" + locale + "/app/finance/supplier-invoices?supplier=" + supplier.id}>{t("payables.open")}</Link>
+      {finance.invoices.length ? <ul className="resource-list">{finance.invoices.slice(0, 5).map(invoice => <li key={invoice.id}>
+        <Link className="resource-row" href={"/" + locale + "/app/finance/supplier-invoices/" + invoice.id}>
+          <span><strong dir="auto">{invoice.invoiceNumber}</strong><small>{invoice.archived ? invoices("archived") : invoices("states." + invoice.state)}</small></span>
+          <span className="money">{formatCurrencyAmount(locale, invoice.amount, invoice.currency)}</span>
+        </Link>
+      </li>)}</ul> : <p>{t("payables.empty")}</p>}
     </section> : null}
     {supplier.canEdit ? <SupplierArchiveForm key={supplier.version} supplier={supplier} /> : null}
   </AdminShell>;

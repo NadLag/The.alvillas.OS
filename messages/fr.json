@@ -2883,6 +2883,7 @@
     "snapshotAt": "Consulté le {date}"
   },
   "Suppliers": {
+    "payables": {"title": "Dettes et historique des paiements", "open": "Ouvrir les factures et règlements enregistrés", "empty": "Aucune facture accessible pour ce fournisseur."},
     "documents": {"title": "Documents et contrats", "open": "Ouvrir les archives de ce fournisseur", "empty": "Aucun document accessible pour ce fournisseur."},
     "prices": {
       "title": "Tarifs fournisseur",
@@ -2950,6 +2951,7 @@
     "reload": "Recharger le fournisseur"
   },
   "SupplierInvoices": {
+    "backSupplier": "Retour au fournisseur",
     "submissionTitle": "Soumettre la facture",
     "submissionDescription": "Vérifiez la répartition configurée avant de soumettre. L’approbation n’enregistre aucun paiement.",
     "emergency": "Exception d’urgence demandée",

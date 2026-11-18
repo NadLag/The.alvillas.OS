@@ -2883,6 +2883,7 @@
     "snapshotAt": "Read at {date}"
   },
   "Suppliers": {
+    "payables": {"title": "Payables and payment history", "open": "Open original invoices and settlements", "empty": "No accessible invoices for this supplier."},
     "documents": {"title": "Documents and contracts", "open": "Open this supplier’s archive", "empty": "No accessible documents for this supplier."},
     "prices": {
       "title": "Supplier price lists",
@@ -2950,6 +2951,7 @@
     "reload": "Reload supplier"
   },
   "SupplierInvoices": {
+    "backSupplier": "Back to supplier",
     "submissionTitle": "Submit invoice",
     "submissionDescription": "Review the configured cost allocation before submitting. Approval does not record payment.",
     "emergency": "Emergency exception requested",

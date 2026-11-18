@@ -13,7 +13,7 @@ import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repo
 import { SupplierPayableRepository } from "@/modules/finance/infrastructure/supplier-payable-repository";
 import { postSupplierPayment, voidSupplierPayment } from "@/modules/finance/application/supplier-payment-service";
 import { SupplierInvoiceConflictError } from "@/modules/finance/application/supplier-invoice-access";
-import { createSupplierInvoice, getSupplierInvoice } from "@/modules/finance/application/supplier-invoice-service";
+import { createSupplierInvoice, getSupplierInvoice, listSupplierInvoices } from "@/modules/finance/application/supplier-invoice-service";
 import { submitSupplierInvoice } from "@/modules/finance/application/supplier-invoice-submission";
 import { recognizeSupplierInvoice } from "@/modules/finance/application/supplier-invoice-recognition";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
@@ -95,6 +95,8 @@ describe("canonical supplier source on real PostgreSQL", () => {
     const submitted = await submitSupplierInvoice(f.ctx, { id: invoice.id, expectedVersion: 0, occurredOn, emergency: false, idempotencyKey: randomUUID(),
       reason: "Freeze actual supplier claim policy", lineNotes: { [draft.lines[0].id]: "Actual owner charge source for settlement acceptance" } }, { db });
     const recognized = await recognizeSupplierInvoice(f.ctx, { id: invoice.id, expectedVersion: submitted.version, idempotencyKey: randomUUID(), reason: "Dedicated supplier claim kernel acceptance" }, { db });
+    expect((await listSupplierInvoices(f.ctx, { supplierId: supplier.id }, { db })).invoices.map(invoice => invoice.id)).toEqual([invoiceId]);
+    expect((await listSupplierInvoices(f.ctx, { supplierId: randomUUID() }, { db })).invoices).toEqual([]);
     const journal = await withTenant(db, f.org, tx => tx.financialTransaction.findUniqueOrThrow({ where: { id: recognized.transactionIds[0] }, include: { postings: true, reversedByTransactions: true } }));
     const source = { ...funding, journal };
     const settle = async (value: string) => {
