@@ -549,6 +549,7 @@ export class NotificationRepository {
     const warrantyIds = rows.filter(row => row.kind === "asset_warranty_expiring").map(row => row.targetId);
     for (const row of await new AssetRepository(this.tx, this.organizationId).warrantyTargets(warrantyIds)) {
       targets.set(row.referenceId, { type: "asset", id: row.assetId, organizationId: this.organizationId,
+        notificationEventId: row.referenceId,
         propertyId: row.propertyId, city: row.cityId, region: row.regionId, dataClass: "operational" });
     }
     for (const row of rows) if (row.kind === "language_updated" || row.kind === "security_session_revoked") targets.set(row.targetId, { type: "identity", organizationId: this.organizationId, id: row.targetId });

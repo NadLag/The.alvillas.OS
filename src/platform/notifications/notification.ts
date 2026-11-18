@@ -59,7 +59,7 @@ export function ownNotificationContext(ctx: AuthContext, accountId: string): Aut
 export function notificationDestination(
   ctx: AuthContext, input: NotificationInput, target: Resource | null, locale: "en" | "fr" | "ar"
 ): string | null {
-  const referenceId = input.kind === "lead_reminder"||input.kind === "document_expiring"||input.kind === "supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed" ? target?.notificationEventId : input.kind === "staff_document_expiring" ? target?.documentId :
+  const referenceId = input.kind === "asset_warranty_expiring" || input.kind === "lead_reminder"||input.kind === "document_expiring"||input.kind === "supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed" ? target?.notificationEventId : input.kind === "staff_document_expiring" ? target?.documentId :
     input.kind === "approval_requested" || input.kind === "approval_decided" ? target?.approvalId ?? target?.id : target?.id;
   if (input.recipientId !== ctx.userAccountId || !target || referenceId !== input.targetId) return null;
   if(input.kind==="lead_reminder")return target.type==="lead"&&(target as Resource&{leadWorkRecipientId?:string}).leadWorkRecipientId===input.recipientId&&authorize(ctx,"view",target)?`/${locale}/app/crm?lead=${target.id}`:null;
