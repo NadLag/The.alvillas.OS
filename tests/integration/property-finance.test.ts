@@ -1,3 +1,7 @@
+import { getPropertyPerformanceReport, exportPropertyPerformanceReport } from "@/modules/finance/application/property-performance-report";
+import { PerformanceReportAccessError, propertyReportMetrics } from "@/modules/finance/domain/performance-report";
+import { performanceReportFile } from "@/modules/finance/application/performance-report-file";
+import { Money } from "@/platform/money/money";
 import {randomUUID} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {PrismaClient} from "@prisma/client";
@@ -39,6 +43,60 @@ const query=(f:Fixture)=>({propertyId:f.property.id,fromOn:f.on,toOn:f.on,curren
 const financial=(f:Fixture)=>withTenant(db,f.org,tx=>tx.$queryRaw<Array<{kind:string;id:string;xmin:string;body:unknown}>>`SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${f.org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p) FROM posting p WHERE organization_id=${f.org}::uuid ORDER BY kind,id`);
 
 describe("actual property-attributed finance and immutable mortgage history",()=>{
+ it("derives property performance from exact sealed postings and original stay dates", async () => {
+   const f = await fixture();
+   await withTenant(db, f.org, async tx => {
+     const keys = ["report:view", "report:export", "reservation:view", "property_finance:export", "financial_transaction:export",
+       "company_ledger:export", "owner_statement:export", "expense:export", "supplier_invoice:export", "employee_payable:export",
+       "staff_compensation:export", "wallet:export", "cash_collection:export"];
+     const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: keys } } });
+     expect(permissions).toHaveLength(keys.length);
+     await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: f.role.id, permissionId: permission.id })) });
+     const finance = new FinanceRepository(tx, f.org);
+     const claim = await finance.ensureLedgerAccount({ code: "OWNER_PAYABLE", name: "Original claim", accountType: "CLAIM_OWNERSHIP", normalSide: "CREDIT" });
+     const dimensions = { property_id: f.property.id };
+     for (const [currency, amount] of [["MAD", "9007199254740993.07"], ["EUR", "71.13"]]) {
+       await finance.createFinancialTransaction({ reference: randomUUID(), description: "Original posted lodging revenue", occurredAt: new Date("2026-03-08T09:00:00Z"),
+         idempotencyKey: randomUUID(), createdBy: f.account.id, postings: [
+           { ledgerAccountId: f.bank.id, side: "DEBIT", amount: Money.of(amount, currency), bucket: "OWNER_REVENUE", dimensions },
+           { ledgerAccountId: claim.id, side: "CREDIT", amount: Money.of(amount, currency), bucket: "OWNER_REVENUE", dimensions }
+         ] });
+     }
+     await tx.reservation.create({ data: { organizationId: f.org, propertyId: f.property.id, reference: randomUUID(), source: "DIRECT",
+       status: "CHECKED_OUT", guestName: "Private guest", checkIn: new Date("2026-03-08"), checkOut: new Date("2026-03-09"),
+       nights: 1, idempotencyKey: randomUUID() } });
+     await tx.calendarBlock.create({ data: { organizationId: f.org, propertyId: f.property.id, kind: "MAINTENANCE", source: "MANUAL",
+       checkIn: new Date("2026-03-09"), checkOut: new Date("2026-03-10"), idempotencyKey: randomUUID() } });
+     await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.accountant_exports", scopeType: "organization",
+       effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id, reason: "Authorize original report file generation",
+       value: { source: "ORIGINAL_POSTED_FINANCIAL_SOURCES", reports: ["TRANSACTIONS"], formats: ["CSV", "EXCEL", "PDF"],
+         classifications: {}, capacity: { CSV: 100, EXCEL: 100, PDF: 100 }, rate_limit: { requests: 20, window_seconds: 60 } } });
+   });
+   const ctx = { ...f.ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+   const filter = { propertyId: f.property.id, fromOn: "2026-03-08", toOn: "2026-03-10", currency: "MAD" };
+   const original = await financial(f), report = await getPropertyPerformanceReport(ctx, filter, { db });
+   expect(report).toMatchObject({ occupied: "1", available: "2", blocked: "1", conflicts: "0", occupancy: "50.00" });
+   expect(report.adr?.toJSON().amount).toBe("9007199254740993.07");
+   expect(report.revpar?.toJSON().amount).toBe("4503599627370496.54");
+   expect(report.ownerResult.toJSON().amount).toBe("9007199254740993.07");
+   const eur = await getPropertyPerformanceReport(ctx, { ...filter, currency: "EUR" }, { db });
+   expect(eur.adr?.toJSON().amount).toBe("71.13");
+   for (const format of ["CSV", "EXCEL", "PDF"] as const) {
+     const bytes = await exportPropertyPerformanceReport(ctx, filter, {
+       format, render: (original, policy) => {
+         const report = propertyReportMetrics(original);
+         return performanceReportFile({ ...original, organizationId: f.org, kind: "PROPERTY_PERFORMANCE",
+           metrics: [...report.financial, ...report.occupancy] }, format, "en", policy, "propertyTitle");
+       }
+     }, { db });
+     if (format === "CSV") expect(new TextDecoder().decode(bytes)).toContain("9007199254740993.07");
+     else expect(new TextDecoder().decode(bytes.slice(0, 5))).toMatch(format === "PDF" ? /^%PDF-/u : /^PK/u);
+   }
+   const unrelated = await fixture();
+   await expect(getPropertyPerformanceReport(unrelated.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
+   expect(await financial(f)).toEqual(original);
+ });
+
  it("includes the actual native cash collection through its tenant-scoped source despite legacy camel-case posting dimensions",async()=>{
   const f=await fixture(),task=await withTenant(db,f.org,async tx=>{const row=await tx.operationTask.create({data:{organizationId:f.org,propertyId:f.property.id,assignedToUserAccountId:f.account.id,assignedToPersonId:f.person.id,type:"TRANSFER",state:"ASSIGNED",dueDate:new Date(f.on),titleTranslations:{en:"Actual collected service",fr:"Service encaissé"},idempotencyKey:randomUUID(),createdBy:f.account.id}}),roles=await tx.role.findMany({where:{organizationId:f.org,key:{in:["driver","field_staff"]}}});expect(roles).toHaveLength(2);for(const role of roles)await tx.roleAssignment.create({data:{organizationId:f.org,roleId:role.id,userAccountId:f.account.id,personId:f.person.id,scopeType:"job",scopeId:row.id,validFrom:new Date("2020-01-01")}});return row;});
   const actor={...f.ctx,personId:f.person.id,authContext:{...await authContextForAccount(f.org,f.account.id,{db}),personId:f.person.id}},receipt=await withTenant(db,f.org,tx=>recordFieldCashInTransaction(actor,{taskId:task.id,amount:"0.09",currency:"MAD",payer:"Actual native service guest",purpose:"Actual native service cash collection",expectedRevision:cashCollectionRevision(task.id,task.version,0n)},{deviceId:randomUUID(),clientOpId:randomUUID(),clientCreatedAt:null},tx,{requestId:randomUUID(),ipAddress:null})),original=await financial(f),dimensions=await withTenant(db,f.org,tx=>tx.posting.findMany({select:{dimensions:true}}));expect(dimensions).toHaveLength(2);expect(dimensions.every(p=>(p.dimensions as Record<string,unknown>).propertyId===f.property.id&&!("property_id"in(p.dimensions as Record<string,unknown>)))).toBe(true);

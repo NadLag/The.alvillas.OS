@@ -30,6 +30,9 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
       <ShellHeader eyebrow={t("eyebrow")} title={t("title")} actions={
         <Link className="secondary-button" href={`/${locale}/app`}>{t("back")}</Link>
       } />
+      {hasReportAccess ? <nav className="form-actions">
+        <Link className="secondary-button" href={`/${locale}/app/properties`}>{t("propertyReports")}</Link>
+      </nav> : null}
       {canGenerate ? (
         <section className="detail-panel">
           <h2>{t("financialExports")}</h2>
