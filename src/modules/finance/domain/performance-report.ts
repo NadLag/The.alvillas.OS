@@ -123,3 +123,20 @@ export function companyReportMetrics(report: ReturnType<typeof companyReportTota
     ] satisfies PerformanceMetric[]
   };
 }
+
+export type TeamPerformanceSource = { id: string; name: string; assigned: string; open: string; completed: string;
+  onTime: string; recognized: string; walletDebits: string; walletCredits: string };
+
+export function teamReportMetrics(row: TeamPerformanceSource, currency: string): PerformanceMetric[] {
+  const onTime = exactReportPercent(BigInt(row.onTime), BigInt(row.completed));
+  const subject = { id: row.id, name: row.name };
+  return [
+    { key: "scheduledJobs", count: row.assigned, amount: null },
+    { key: "openJobs", count: row.open, amount: null },
+    { key: "completedJobs", count: row.completed, amount: null },
+    { key: "onTimeJobs", count: onTime === null ? null : onTime + "%", amount: null },
+    { key: "recognizedCompensation", amount: Money.of(row.recognized, currency) },
+    { key: "walletDebits", amount: Money.of(row.walletDebits, currency) },
+    { key: "walletCredits", amount: Money.of(row.walletCredits, currency) }
+  ].map(metric => ({ ...metric, subject }));
+}

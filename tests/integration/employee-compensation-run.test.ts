@@ -1,3 +1,4 @@
+import { PerformanceReportRepository } from "@/modules/finance/infrastructure/performance-report-repository";
 import { getEmployeeCompensationPaymentWorkspace } from "@/modules/finance/application/employee-compensation-payment-workspace";
 import { prepareAccountantExport } from "@/modules/finance/application/accountant-export-service";
 import { accountantExportFixtureAuthority } from "./support/accountant-export";
@@ -453,6 +454,25 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     const run=await createEmployeeCompensationRun(f.claimActor,{...f.input,idempotencyKey:randomUUID(),jobs},{db}),retained=await withTenant(db,f.org,tx=>new EmployeeCompensationRunRepository(tx,f.org).find(run.id)),source=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,runId:run.id,idempotencyKey:randomUUID(),reason:"Retain complete original beneficiary total across work pages",costs:retained!.lines.map(line=>({runLineId:line.id,category:"staff",costCenter:null,note:"Actual paginated work cost for one beneficiary"}))},{db}),saved=await withTenant(db,f.org,tx=>new EmployeeCompensationClaimRepository(tx,f.org).find(source.id)),first=await getEmployeeCompensationClaimDetail(f.claimActor,{id:source.id,claimId:saved!.claims[0].id},{db});
     expect(first.claim).toMatchObject({amount:{amount:"25512.75",currency:"MAD"},costCount:51});expect(first.costs).toHaveLength(50);expect(first.next).toBeTruthy();const next=await getEmployeeCompensationClaimDetail(f.claimActor,{id:source.id,claimId:first.claim.id,after:first.next!},{db});
     expect(next.claim.amount).toEqual(first.claim.amount);expect(next.costs).toHaveLength(1);expect(next.next).toBeNull();expect(new Set([...first.costs,...next.costs].map(cost=>cost.id)).size).toBe(51);expect(await withTenant(db,f.org,tx=>tx.financialTransaction.count())).toBe(0);
+  });
+
+  it("reads native recognized compensation for the actual performer without adding wallet activity", async () => {
+    const f = await claimFixture();
+    await withTenant(db, f.org, tx => tx.property.update({ where: { id: f.property.id }, data: { timezone: "UTC" } }));
+    const actor = (await fixtures.reader(f, { permissions: ["employee_payable:pay", "financial_transaction:create"] })).ctx;
+    const submitted = await submitEmployeeCompensation(actor, { ...f.claimInput, idempotencyKey: randomUUID(),
+      reason: "Approve actual completed work before the team report reads it" }, { db });
+    const source = await withTenant(db, f.org, tx => new EmployeeCompensationClaimRepository(tx, f.org).find(submitted.id));
+    const result = await recognizeEmployeeCompensation(actor, { id: submitted.id, claimId: source!.claims[0].id,
+      idempotencyKey: randomUUID(), reason: "Recognize original employee compensation for a team report" }, { db });
+    await withTenant(db, f.org, async tx => {
+      const journal = await tx.financialTransaction.findFirstOrThrow({ where: { organizationId: f.org, id: result.transactionIds[0] } });
+      const report = new PerformanceReportRepository(tx, f.org);
+      const day = journal.occurredAt.toISOString().slice(0, 10);
+      const range = await report.range(day, day, "UTC");
+      expect(await report.teamPerformance({ currency: "MAD", timezone: "UTC", fromOn: day, toOn: day, ...range }))
+        .toContainEqual(expect.objectContaining({ id: f.performer.id, recognized: "500.25", walletDebits: "0", walletCredits: "0" }));
+    });
   });
 
   it("recognizes an approved employee claim once from its original costs without moving physical money",async()=>{
