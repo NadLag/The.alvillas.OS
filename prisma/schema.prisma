@@ -7122,7 +7122,7 @@ model ReportCalendarMaterialization {
   rows Json
   computedAt DateTime @map("computed_at") @db.Timestamptz(6)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  configRule ConfigRule @relation(fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  configRule ConfigRule @relation(fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "report_calendar_materializati_organization_id_config_rule__fkey")
 
   @@id([organizationId, periodKey])
   @@index([organizationId, fromOn, toOn], map: "report_calendar_materialization_range_idx")
