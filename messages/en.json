@@ -1192,6 +1192,23 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "reports": {
+      "title": "Financial reports",
+      "year": "Year",
+      "annual": "Annual totals",
+      "monthly": "Monthly activity",
+      "empty": "No posted activity for this year.",
+      "columns": {
+        "accommodation": "Accommodation",
+        "services": "Services",
+        "commission": "Commission",
+        "platform": "Platform fees",
+        "expenses": "Owner expenses",
+        "reimbursements": "Reimbursements",
+        "payouts": "Payout entries",
+        "adjustments": "Adjustments"
+      }
+    },
     "documents": {
       "title": "Documents",
       "back": "Back to property",

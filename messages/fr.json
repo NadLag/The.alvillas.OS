@@ -1192,6 +1192,23 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "reports": {
+      "title": "Rapports financiers",
+      "year": "Année",
+      "annual": "Totaux annuels",
+      "monthly": "Activité mensuelle",
+      "empty": "Aucune activité comptabilisée pour cette année.",
+      "columns": {
+        "accommodation": "Hébergement",
+        "services": "Services",
+        "commission": "Commission",
+        "platform": "Frais de plateforme",
+        "expenses": "Dépenses du propriétaire",
+        "reimbursements": "Remboursements",
+        "payouts": "Écritures de versement",
+        "adjustments": "Ajustements"
+      }
+    },
     "documents": {
       "title": "Documents",
       "back": "Retour au logement",

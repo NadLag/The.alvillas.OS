@@ -105,6 +105,7 @@ export default async function OwnerStatementPage({
           </Link>
           <Link className="secondary-button" href={statementPath + "/approvals"}>{t("approvals.title")}</Link>
           <Link className="secondary-button" href={statementPath + "/documents"}>{t("documents.title")}</Link>
+          <Link className="secondary-button" href={statementPath + "/reports?year=" + statement.fromOn.slice(0, 4) + "&currency=" + statement.currency}>{t("reports.title")}</Link>
           <LocaleSwitch
             compact
             currentLocale={appLocale}

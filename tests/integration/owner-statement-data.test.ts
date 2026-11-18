@@ -1,3 +1,4 @@
+import { getOwnerFinancialReport } from "@/modules/owner-portal/application/owner-financial-report";
 import { downloadOwnerStatement } from "@/modules/owner-portal/application/owner-statement-download";
 import { getOwnerPayoutHistory } from "@/modules/owner-portal/application/owner-payout-history";
 import { getOwnerMoneyMovements } from "@/modules/owner-portal/application/owner-money-movements";
@@ -198,6 +199,9 @@ describe("native shared statement generation", () => {
     expect(csv.filename).toBe("statement-2026-11-02-2026-11-02-EUR.csv");
     expect(new TextDecoder().decode(csv.bytes)).toContain("9007199254740993.07");
     expect(new TextDecoder().decode(pdf.bytes.slice(0, 5))).toBe("%PDF-");
+    const report = await getOwnerFinancialReport(f.ctx, f.property.id, "2026", "EUR", deps);
+    expect(report.rows.map(row => [row.month, row.amount.accommodation.toJSON().amount])).toEqual([["2026-11", "9007199254740993.07"]]);
+    expect(report.totals.find(row => row.key === "accommodation")?.amount.toJSON()).toEqual({ amount: "9007199254740993.07", currency: "EUR" });
     await expect(downloadOwnerStatement(f.ctx, randomUUID(), input, "en", "csv", labels, deps)).rejects.toThrow();
     await expect(getOwnerFinancialActivity(f.ctx, f.property.id, { ...input, currency: "MAD", posting: statement.lines[0].postingId }, deps)).rejects.toThrow();
     await expect(getOwnerFinancialActivity(f.ctx, randomUUID(), input, deps)).rejects.toThrow();

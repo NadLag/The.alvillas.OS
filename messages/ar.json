@@ -1192,6 +1192,23 @@
     "draftSaved": "تم حفظ تغييراتك على هذا الجهاز."
   },
   "OwnerPortal": {
+    "reports": {
+      "title": "التقارير المالية",
+      "year": "السنة",
+      "annual": "المجاميع السنوية",
+      "monthly": "النشاط الشهري",
+      "empty": "لا توجد حركات مسجلة لهذه السنة.",
+      "columns": {
+        "accommodation": "الإقامة",
+        "services": "الخدمات",
+        "commission": "العمولة",
+        "platform": "رسوم المنصة",
+        "expenses": "مصروفات المالك",
+        "reimbursements": "المبالغ المستردة",
+        "payouts": "قيود الدفعات",
+        "adjustments": "التسويات"
+      }
+    },
     "documents": {
       "title": "المستندات",
       "back": "العودة إلى العقار",
