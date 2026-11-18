@@ -2883,6 +2883,33 @@
     "snapshotAt": "Read at {date}"
   },
   "Suppliers": {
+    "prices": {
+      "title": "Supplier price lists",
+      "newVersion": "New price-list version",
+      "effectiveOn": "Effective date",
+      "currency": "Currency code",
+      "entry": "Item {number}",
+      "code": "Item code",
+      "name": "Item or service",
+      "unit": "Unit",
+      "amount": "Price per unit",
+      "remove": "Remove item",
+      "add": "Add item",
+      "reason": "Reason for the price change",
+      "save": "Save version",
+      "saving": "Saving version",
+      "saved": "Price-list version saved.",
+      "empty": "No price list is currently effective.",
+      "active": "Current version {version}",
+      "version": "Version {version} · {date}",
+      "older": "Older versions",
+      "errors": {
+        "invalid": "Check the prices and required fields.",
+        "forbidden": "Your access to this price list is unavailable.",
+        "conflict": "The price list changed or contains an unsupported currency. Refresh and check your entries.",
+        "unavailable": "The version could not be saved. Try again."
+      }
+    },
     "title": "Suppliers",
     "eyebrow": "Finance",
     "description": "Keep supplier contacts and categories together.",

@@ -305,6 +305,12 @@ export class ConfigRuleRepository {
       .flatMap(scope => byScope.get(scopeKey(scope)) ?? []).filter(rule => rule.effectiveFrom <= group.asOf && (!rule.effectiveTo || rule.effectiveTo > group.asOf)))]));
   }
 
+  async latestVersion(key: string, scopeType: ConfigScopeType, scopeId: string | null) {
+    const row = await this.tx.configRule.findFirst({ where: { organizationId: this.organizationId, key, scopeType, scopeId },
+      orderBy: { version: "desc" }, select: { version: true } });
+    return row?.version ?? 0;
+  }
+
   async list(input: {
     key?: string;
     scopeType?: string;

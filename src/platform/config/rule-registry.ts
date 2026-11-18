@@ -1,3 +1,4 @@
+import { supplierPriceListPolicySchema, supplierPriceListSupplierId } from "./supplier-price-list-policy";
 import { assetWarrantyPolicyKey, assetWarrantyPolicySchema } from "@/modules/assets/domain/warranty-alerts";
 import { maintenanceSlaPolicyKey, maintenanceSlaPolicySchema } from "./maintenance-sla-policy";
 import {taskTypeSchema} from "./task-type";
@@ -392,7 +393,7 @@ export const configRuleSchemas = {
   "feature_flag": featureFlagConfigSchema
 } as const satisfies Record<string, z.ZodType>;
 
-export type ConfigRuleKey = keyof typeof configRuleSchemas | `feature_flag.${string}` | `automation.rule.${string}` | `operations.laundry_pricing.supplier.${string}`;
+export type ConfigRuleKey = keyof typeof configRuleSchemas | `feature_flag.${string}` | `automation.rule.${string}` | `operations.laundry_pricing.supplier.${string}` | `finance.supplier_price_list.${string}`;
 export type CommissionRuleValue = z.infer<typeof commissionRuleValueSchema>;
 export type AgreementNoticeConfig = z.infer<typeof agreementNoticeConfigSchema>;
 export type AgreementResponsibilitiesConfig = z.infer<typeof agreementResponsibilitiesConfigSchema>;
@@ -403,6 +404,7 @@ export type FeatureFlagConfig = z.infer<typeof featureFlagConfigSchema>;
 export type PayoutScheduleConfig = z.infer<typeof payoutScheduleConfigSchema>;
 
 export function schemaForConfigKey(key: string): z.ZodType | null {
+  if (supplierPriceListSupplierId(key)) return supplierPriceListPolicySchema;
   if(laundryPricingSupplierId(key))return laundrySupplierPricePolicySchema;
   if (/^automation\.rule\.[a-z][a-z0-9_.-]{0,99}$/u.test(key)) return automationRuleSchema;
   if (key.startsWith("feature_flag.")) {

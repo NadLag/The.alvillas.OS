@@ -1,3 +1,4 @@
+import { readSupplierPriceLists, saveSupplierPriceList } from "@/modules/finance/application/supplier-price-list";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -47,6 +48,27 @@ describe("canonical supplier source on real PostgreSQL", () => {
     db.$on("query", event => { if (/FROM (?:"public"\.)?"supplier"/u.test(event.query)) supplierQueries++; });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+
+  it("retains supplier price versions without granting invoice or ledger access", async () => {
+    const f = await fixture(["supplier:view", "supplier:create", "supplier:edit", "supplier_invoice:view", "config_rule:configure"]);
+    const unrelated = await fixture();
+    const supplier = await createSupplier(f.ctx, creation(), { db });
+    const foreign = await createSupplier(unrelated.ctx, creation(), { db });
+    const command = { supplierId: supplier.id, expectedVersion: 0, effectiveOn: "2024-02-29", reason: "Retain the supplier signed rate card",
+      priceList: { currency: "MAD", items: [{ code: "pool", name: "Pool inspection", unit: "visit", amount: "9999999999999999.99" }] } };
+    await expect(saveSupplierPriceList(f.ctx, { ...command, supplierId: foreign.id }, { db })).rejects.toBeInstanceOf(SupplierAccessError);
+    await expect(saveSupplierPriceList(f.ctx, command, { db })).resolves.toEqual({ version: 1 });
+    const second = { ...command, expectedVersion: 1, effectiveOn: "9999-01-01", reason: "Record the later signed rates without overwriting",
+      priceList: { currency: "MAD", items: [{ code: "pool", name: "Pool inspection", unit: "visit", amount: "165.05" }] } };
+    await expect(saveSupplierPriceList(f.ctx, second, { db })).resolves.toEqual({ version: 2 });
+    await expect(saveSupplierPriceList(f.ctx, second, { db })).rejects.toBeInstanceOf(SupplierConflictError);
+    expect(await readSupplierPriceLists(f.ctx, supplier.id, undefined, { db })).toMatchObject({
+      activeVersion: 1, version: 2, active: { items: [{ code: "POOL", amount: "9999999999999999.99" }] },
+      history: [{ version: 2 }, { version: 1 }]
+    });
+    expect(await readSupplierPriceLists(unrelated.ctx, supplier.id, undefined, { db })).toBeNull();
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count({ where: { organizationId: f.org } }))).toBe(0);
+  });
 
   it("recognizes an actual supplier claim and serializes partial settlements without duplicating the expense", async () => {
     const f = await fixture(["supplier:view", "supplier:create", "supplier:edit", "supplier_invoice:view", "supplier_invoice:create", "supplier_invoice:edit", "supplier_invoice:pay",

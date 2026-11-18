@@ -2883,6 +2883,33 @@
     "snapshotAt": "Consulté le {date}"
   },
   "Suppliers": {
+    "prices": {
+      "title": "Tarifs fournisseur",
+      "newVersion": "Nouvelle version des tarifs",
+      "effectiveOn": "Date effective",
+      "currency": "Code devise",
+      "entry": "Article {number}",
+      "code": "Code article",
+      "name": "Article ou service",
+      "unit": "Unité",
+      "amount": "Prix unitaire",
+      "remove": "Supprimer l’article",
+      "add": "Ajouter un article",
+      "reason": "Motif de la modification des tarifs",
+      "save": "Enregistrer la version",
+      "saving": "Enregistrement de la version",
+      "saved": "Version des tarifs enregistrée.",
+      "empty": "Aucun tarif actuellement en vigueur.",
+      "active": "Version actuelle {version}",
+      "version": "Version {version} · {date}",
+      "older": "Versions précédentes",
+      "errors": {
+        "invalid": "Vérifiez les prix et les champs obligatoires.",
+        "forbidden": "Votre accès à ces tarifs est indisponible.",
+        "conflict": "Les tarifs ont changé ou la devise est non prise en charge. Actualisez et vérifiez la saisie.",
+        "unavailable": "Impossible d’enregistrer la version. Réessayez."
+      }
+    },
     "title": "Fournisseurs",
     "eyebrow": "Finance",
     "description": "Retrouvez les coordonnées et les catégories de vos fournisseurs.",

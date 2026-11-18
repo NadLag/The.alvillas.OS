@@ -1,3 +1,4 @@
+import { supplierPriceListSupplierId } from "./supplier-price-list-policy";
 import {ledgerIntegrityPolicyKey,ledgerIntegrityRoutingKey} from "@/modules/finance/domain/ledger-integrity";
 import {paymentMethodPolicyKey} from "@/modules/finance/domain/payment-method";
 import {financialAttachmentPolicyKey} from "@/modules/finance/domain/financial-attachment-policy";
@@ -39,6 +40,7 @@ const sourceGroups:Readonly<Record<string,readonly string[]>>={
  "finance.tax":["financial_transaction","company_ledger"]
 };
 function financialSources(key: string): readonly string[] | undefined {
+ if(supplierPriceListSupplierId(key))return["supplier_invoice"];
  if(protectedLaundryPricingKey(key))return["supplier_invoice"];
  if (Object.hasOwn(sourceGroups,key)) return sourceGroups[key];
  if (key === "finance.receivables" || key.startsWith("finance.receivable_")) return ["receivable","financial_transaction","staff_compensation"];
@@ -49,7 +51,7 @@ function financialSources(key: string): readonly string[] | undefined {
 }
 export const protectedFinancialRuleKey=(key:string|undefined):key is string=>Boolean(key&&financialSources(key));
 export function financialRuleSourceChecks(organizationId:string,key:string,action:"view"|"export"="view"):CurrentAuthorityCheck[]{
- const sources=financialSources(key);if(!sources)return[];const checks:CurrentAuthorityCheck[]=sources.flatMap(type=>[{action:"view"as const,resource:{type,organizationId,dataClass:"financial"as const},organizationOnly:true},...action==="export"?[{action:"export"as const,resource:{type,organizationId,dataClass:"financial"as const},organizationOnly:true}]:[]]);const supplierId=laundryPricingSupplierId(key);if(supplierId)for(const permission of action==="export"?["view","export"]as const:["view"]as const)checks.push({action:permission,resource:{type:"supplier",organizationId,id:supplierId,dataClass:"personal"},organizationOnly:true});return checks;
+ const sources=financialSources(key);if(!sources)return[];const checks:CurrentAuthorityCheck[]=sources.flatMap(type=>[{action:"view"as const,resource:{type,organizationId,dataClass:"financial"as const},organizationOnly:true},...action==="export"?[{action:"export"as const,resource:{type,organizationId,dataClass:"financial"as const},organizationOnly:true}]:[]]);const supplierId=laundryPricingSupplierId(key)??supplierPriceListSupplierId(key);if(supplierId)for(const permission of action==="export"?["view","export"]as const:["view"]as const)checks.push({action:permission,resource:{type:"supplier",organizationId,id:supplierId,dataClass:"personal"},organizationOnly:true});return checks;
 }
 export function financialRuleAccess(auth:AuthContext,action:"view"|"export"="view",now=new Date(),key:string=recurringExpensePolicyKey){
  return protectedFinancialRuleKey(key)&&financialRuleSourceChecks(auth.organizationId,key,action).every(check=>authorizeOrganizationSource(auth,check.action,check.resource,now));

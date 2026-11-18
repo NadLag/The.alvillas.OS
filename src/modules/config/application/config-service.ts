@@ -1,3 +1,4 @@
+import { supplierPriceListSupplierId } from "@/platform/config/supplier-price-list-policy";
 import {configRuleKeyInputSchema} from "@/platform/config/key-contract";
 import {protectedLaundryPricingKey} from "@/platform/config/laundry-pricing-policy";
 import { headers } from "next/headers";
@@ -467,6 +468,7 @@ export async function createConfigRuleVersion(
   assertCollectionAllowed(ctx, input.lifecycle === "DRAFT" ? "create" : "configure");
   const meta = await auditMeta(deps);
   const key = normalizeKey(input);
+  if (supplierPriceListSupplierId(key)) throw new ConfigAuthorizationError();
   const scope = normalizeScope(input);
   const rawValue = parseJsonObject(input.valueJson);
   assertValidRuleValue(key, rawValue);
@@ -535,6 +537,7 @@ export async function activateConfigRuleVersion(
       throw new ConfigNotFoundError();
     }
 
+    if (supplierPriceListSupplierId(source.key)) throw new ConfigAuthorizationError();
     const priceSource=protectedLaundryPricingKey(source.key)?await propertyTemplateRuleWriteAuthority(ctx,tx,source.key,source,"configure"):{};
     assertRuleAllowed(ctx, "configure", source,priceSource);
     const checks=[{action:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:source.id,propertyId:source.scopeType==="property"?source.scopeId:undefined}}];
@@ -585,6 +588,7 @@ export async function retireConfigRuleVersion(
       throw new ConfigNotFoundError();
     }
 
+    if (supplierPriceListSupplierId(source.key)) throw new ConfigAuthorizationError();
     const priceSource=protectedLaundryPricingKey(source.key)?await propertyTemplateRuleWriteAuthority(ctx,tx,source.key,source,"configure"):{};
     assertRuleAllowed(ctx, "configure", source,priceSource);
     const checks=[{action:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:source.id,propertyId:source.scopeType==="property"?source.scopeId:undefined}}];
