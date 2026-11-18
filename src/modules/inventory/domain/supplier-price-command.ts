@@ -1,9 +1,10 @@
 import {z} from "zod";
 import {laundrySupplierPricePolicySchema} from "@/platform/config/laundry-pricing-policy";
 import {inventoryItemReasonSchema} from "./item-catalog";
+import {laundryPriceChangeEvidenceSchema} from "./laundry-price-change";
 const id=z.uuid().transform(value=>value.toLowerCase()),instant=z.iso.datetime(),hash=z.string().regex(/^[a-f0-9]{64}$/u);
 export const supplierPriceScopeSchema=z.object({scopeType:z.enum(["organization","property"]),scopeId:id.nullable()}).strict().superRefine((value,context)=>{if((value.scopeType==="organization")!==(value.scopeId===null))context.addIssue({code:"custom",message:"The original price scope must match its actual property"});});
-const create=z.object({kind:z.literal("CREATE"),supplierId:id,scope:supplierPriceScopeSchema,policy:laundrySupplierPricePolicySchema,lifecycle:z.enum(["DRAFT","ACTIVE"]),effectiveFrom:instant,effectiveTo:instant.nullable(),reason:inventoryItemReasonSchema}).strict().superRefine((value,context)=>{if(value.effectiveTo&&Date.parse(value.effectiveTo)<=Date.parse(value.effectiveFrom))context.addIssue({code:"custom",path:["effectiveTo"],message:"The original price window must end after it starts"});});
+const create=z.object({kind:z.literal("CREATE"),supplierId:id,scope:supplierPriceScopeSchema,policy:laundrySupplierPricePolicySchema,lifecycle:z.enum(["DRAFT","ACTIVE"]),effectiveFrom:instant,effectiveTo:instant.nullable(),evidence:laundryPriceChangeEvidenceSchema.optional(),reason:inventoryItemReasonSchema}).strict().superRefine((value,context)=>{if(value.effectiveTo&&Date.parse(value.effectiveTo)<=Date.parse(value.effectiveFrom))context.addIssue({code:"custom",path:["effectiveTo"],message:"The original price window must end after it starts"});});
 const lifecycle=z.object({kind:z.enum(["ACTIVATE","RETIRE"]),versionId:id,effectiveFrom:instant,reason:inventoryItemReasonSchema}).strict();
 export const supplierPriceDraftSchema=z.union([create,lifecycle]);
 export const supplierPriceCommandSchema=z.object({draft:supplierPriceDraftSchema,reviewFingerprint:hash,idempotencyKey:id}).strict();

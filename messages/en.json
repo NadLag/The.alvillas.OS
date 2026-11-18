@@ -4631,7 +4631,8 @@
     "comparison_NO_ACTUAL": "No active actual invoice is associated with this estimate. Review the original batch before comparing.",
     "comparison_BASELINE_CHANGED": "The active invoices use another retained estimate. Review the current batch association.",
     "comparison_CURRENCY_MISMATCH": "The original currencies differ. Amounts remain separate; no conversion or variance has been invented.",
-    "varianceLink": "Review laundry variance"
+    "varianceLink": "Review laundry variance",
+    "reviewPriceChange": "Review supplier price change · invoice {number}"
   },
   "AccountantExports": {
     "eyebrow": "Finance",
@@ -7962,7 +7963,20 @@
       "USABLE": "Usable",
       "DAMAGED": "Damaged"
     },
-    "billingHelp": "Select the agreed supplier terms explicitly. Missing terms prevent an invoice estimate; excluded conditions are not billed. A new version preserves earlier agreements."
+    "billingHelp": "Select the agreed supplier terms explicitly. Missing terms prevent an invoice estimate; excluded conditions are not billed. A new version preserves earlier agreements.",
+    "priceChangeTitle": "Review supplier price changes",
+    "priceChangeHelp": "An invoice difference can also reflect quantity, damage, tax or other charges. Read the original receipt, confirm the supplier-stated unit rates and change only the affected linen prices. The latest scoped price list is copied; billing terms and other prices are preserved.",
+    "priceChangeStates": {
+      "POSSIBLE_CHANGE": "Possible price change: review the original evidence.",
+      "MATCHED": "The original totals match. Verify unit prices before publishing any change.",
+      "CURRENCY_MISMATCH": "The original currencies differ. This workflow cannot convert or reprice them."
+    },
+    "retainedExpected": "Retained expected invoice",
+    "actualInvoice": "Original actual invoice",
+    "priceEvidenceReceipt": "Read the original supplier receipt",
+    "priceEvidenceInvoice": "Open the original invoice",
+    "priceRatesConfirmed": "I checked the original supplier evidence and confirmed the entered unit rates; these rates are not inferred from the invoice total.",
+    "priceChange": "Review price change"
   },
   "ExpectedLaundry": {
     "eyebrow": "Inventory · Laundry",
@@ -8104,6 +8118,7 @@
       "APPROVED": "Approved",
       "REJECTED": "Rejected"
     },
-    "varianceLink": "Review laundry variance"
+    "varianceLink": "Review laundry variance",
+    "priceChange": "Review price change"
   }
 }

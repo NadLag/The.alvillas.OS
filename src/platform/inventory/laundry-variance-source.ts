@@ -38,7 +38,7 @@ export const authorizeLaundryVarianceSource:VarianceSourceAuthority=async(ctx,re
    const expectedMoney={amount:expected.value.result.total!,currency:expected.value.result.currency},actualMoney=[...totals.values()].map(value=>value.toJSON()).sort((a,b)=>a.currency.localeCompare(b.currency));
    let facts:VarianceFacts;
    if(actualMoney.length!==1||actualMoney[0].currency!==expectedMoney.currency)facts={kind:"UNAVAILABLE",unit:"LAUNDRY",currency:null,expected:null,actual:null,variance:null,reason:actualMoney.length?"CURRENCY_MISMATCH":heads.length?"BASELINE_CHANGED":"NO_ACTUAL",expectedMoney,actualMoney};
-   else facts={kind:"MONEY",unit:"MONEY:"+expectedMoney.currency,currency:expectedMoney.currency,expected:expectedMoney.amount,actual:actualMoney[0].amount,variance:Money.of(actualMoney[0].amount,expectedMoney.currency).subtract(Money.of(expectedMoney.amount,expectedMoney.currency)).toJSON().amount};
+   else facts={kind:"MONEY",unit:"MONEY:"+expectedMoney.currency,currency:expectedMoney.currency,expected:expectedMoney.amount,actual:actualMoney[0].amount,variance:Money.of(actualMoney[0].amount,expectedMoney.currency).subtract(Money.of(expectedMoney.amount,expectedMoney.currency)).toJSON().amount,priceChangeAssociations:heads.filter(row=>row.expectedInvoiceId===reference.id).map(row=>row.id)};
    if(access==="history")checks.push({action:"view",organizationOnly:true,resource:{type:"audit_log",organizationId:ctx.organizationId,dataClass:"financial"}});
    const action=access==="ASSIGN"?"edit":access==="RESOLVE"||access==="REOPEN"?"approve":"view";
    await assertSupplierInvoiceAuthority(ctx,tx,action,await finance.clock());

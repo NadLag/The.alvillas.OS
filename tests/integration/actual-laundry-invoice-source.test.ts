@@ -25,6 +25,9 @@ import {readVarianceCenter} from "@/modules/finance/application/variance-center-
 import {authorizeVarianceSource} from "@/platform/reconciliation/variance-source-authority";
 import {VarianceWorkflowSourceError} from "@/modules/finance/domain/variance-workflow";
 import {varianceDetailSchema} from "@/modules/finance/domain/variance-workspace";
+import {readLaundryPriceChange,previewSupplierPrice,publishSupplierPrice,recoverSupplierPrice,getSupplierPriceVersion} from "@/modules/inventory/application/supplier-price-service";
+import {laundryPriceChangeContextSchema} from "@/modules/inventory/domain/laundry-price-change-view";
+import {SupplierPriceRepository} from "@/modules/inventory/infrastructure/supplier-price-repository";
 let admin:PrismaClient,db:PrismaClient;
 beforeAll(async()=>{const url=new URL(process.env.TEST_DATABASE_URL!);if(!["127.0.0.1","localhost"].includes(url.hostname)||!(url.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&url.pathname==="/alvillas_os"))throw Error("Owned native laundry invoice source database required");admin=new PrismaClient({datasourceUrl:url.toString()});await provisionIntegrationRole(admin,"alvillas_ops_tests");url.username=url.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:url.toString()});});
 afterAll(async()=>{vi.restoreAllMocks();await db?.$disconnect();await admin?.$disconnect();});afterEach(()=>vi.restoreAllMocks());
@@ -83,6 +86,36 @@ it("keeps unmatched laundry currencies separate, handles unlinking and denies wi
  expect(await readVarianceWorkflow(f.actor,{source:f.source},f.varianceDeps)).toMatchObject({status:"SOURCE_CHANGED",facts:{kind:"UNAVAILABLE",reason:"NO_ACTUAL",actualMoney:[]}});
  const other=await varianceFixture();await expect(readVarianceWorkflow(f.actor,{source:other.source},f.varianceDeps)).rejects.toBeInstanceOf(VarianceWorkflowSourceError);
  await withTenant(db,other.organizationId,tx=>tx.roleAssignment.update({where:{id:other.grants["document:view"]},data:{archivedAt:new Date()}}));await expect(readVarianceWorkflow(other.actor,{source:other.source},other.varianceDeps)).rejects.toBeInstanceOf(VarianceWorkflowSourceError);
+});
+async function priceChangeFixture(){
+ const f=await varianceFixture(),context=laundryPriceChangeContextSchema.parse(await readLaundryPriceChange(f.actor,{associationId:f.recorded.associationId},f.deps));
+ const draft={kind:"CREATE",supplierId:context.basis.supplier.id,scope:context.basis.scope,policy:{...context.basis.policy,prices:context.basis.policy.prices.map(price=>({...price,amount:price.item===f.item.key?"17.20":price.amount}))},lifecycle:"DRAFT",effectiveFrom:new Date().toISOString(),effectiveTo:null,evidence:context.evidence,reason:"Confirm original supplier-stated unit rates without inferring tax or charges from the invoice total"};
+ return{...f,priceContext:context,priceDraft:draft};
+}
+it("detects a possible laundry rate change and publishes/replays a source-bound native price version without changing prior invoices or stock",async()=>{
+ const f=await priceChangeFixture();expect(f.priceContext).toMatchObject({state:"POSSIBLE_CHANGE",expected:{amount:"159.00"},actual:{amount:"172.00"},affected:[f.item.key]});
+ const review=await previewSupplierPrice(f.actor,f.priceDraft,f.deps),nonce=randomUUID(),command={draft:review.draft,reviewFingerprint:review.reviewFingerprint,idempotencyKey:nonce},saved=await Promise.all([publishSupplierPrice(f.actor,command,f.deps),publishSupplierPrice(f.actor,command,f.deps)]);expect(saved[0].versionId).toBe(saved[1].versionId);expect(saved.map(row=>row.replayed).sort()).toEqual([false,true]);
+ expect(await recoverSupplierPrice(f.actor,{idempotencyKey:nonce},f.deps)).toMatchObject({recorded:true,receipt:{versionId:saved[0].versionId,draft:{evidence:{associationId:f.recorded.associationId}}}});
+ const published=await getSupplierPriceVersion(f.actor,{id:saved[0].versionId},f.deps),original=await getSupplierPriceVersion(f.actor,{id:f.priceContext.basis.id},f.deps);expect(published.policy.prices.find(price=>price.item===f.item.key)?.amount).toBe("17.20");expect(original.policy.prices.find(price=>price.item===f.item.key)?.amount).toBe("15.90");expect(published.policy.billing).toEqual(original.policy.billing);
+ expect(await readVarianceWorkflow(f.actor,{source:f.source},f.varianceDeps)).toMatchObject({facts:{expected:"159.00",actual:"172.00",variance:"13.00"}});
+ expect(await withTenant(db,f.organizationId,async tx=>({journal:await tx.financialTransaction.count({where:{organizationId:f.organizationId}}),stock:await tx.inventoryMovement.count({where:{organizationId:f.organizationId}}),invoices:await tx.supplierInvoice.count({where:{organizationId:f.organizationId}})}))).toEqual({journal:0,stock:0,invoices:1});
+});
+it("rejects stale laundry rate bases, changed billing/currency, absent confirmation and unrelated tenant evidence",async()=>{
+ const f=await priceChangeFixture();
+ await expect(previewSupplierPrice(f.actor,{...f.priceDraft,evidence:{...f.priceDraft.evidence,confirmedUnitPrices:false}},f.deps)).rejects.toThrow();
+ await expect(previewSupplierPrice(f.actor,{...f.priceDraft,policy:{...f.priceDraft.policy,currency:"EUR"}},f.deps)).rejects.toThrow();
+ await expect(previewSupplierPrice(f.actor,{...f.priceDraft,policy:{...f.priceDraft.policy,billing:{quantityBasis:"SENT",billableConditions:["USABLE"]}}},f.deps)).rejects.toThrow();
+ const independent={...f.priceDraft,evidence:undefined,reason:"Retain a newer native supplier price draft before reviewing another update"},review=await previewSupplierPrice(f.actor,independent,f.deps);await publishSupplierPrice(f.actor,{draft:review.draft,reviewFingerprint:review.reviewFingerprint,idempotencyKey:randomUUID()},f.deps);
+ await expect(previewSupplierPrice(f.actor,f.priceDraft,f.deps)).rejects.toThrow();
+ const other=await varianceFixture();await expect(readLaundryPriceChange(other.actor,{associationId:f.recorded.associationId},other.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);
+});
+it("rolls back a laundry price version when original receipt access is withdrawn after native insertion and protects recovery disclosure",async()=>{
+ const f=await priceChangeFixture(),review=await previewSupplierPrice(f.actor,f.priceDraft,f.deps),nonce=randomUUID(),original=SupplierPriceRepository.prototype.insertReference;
+ vi.spyOn(SupplierPriceRepository.prototype,"insertReference").mockImplementation(async function(this:SupplierPriceRepository,input){const result=await original.call(this,input);await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants["document:view"]},data:{archivedAt:new Date()}}));return result;});
+ await expect(publishSupplierPrice(f.actor,{draft:review.draft,reviewFingerprint:review.reviewFingerprint,idempotencyKey:nonce},f.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);vi.restoreAllMocks();
+ expect(await withTenant(db,f.organizationId,tx=>tx.outboxEvent.count({where:{organizationId:f.organizationId,idempotencyKey:"laundry-supplier-price:"+nonce}}))).toBe(0);
+ await expect(readLaundryPriceChange(f.actor,{associationId:f.recorded.associationId},f.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);
+ const other=await priceChangeFixture(),next=await previewSupplierPrice(other.actor,other.priceDraft,other.deps),savedNonce=randomUUID();await publishSupplierPrice(other.actor,{draft:next.draft,reviewFingerprint:next.reviewFingerprint,idempotencyKey:savedNonce},other.deps);await withTenant(db,other.organizationId,tx=>tx.roleAssignment.update({where:{id:other.grants["document:view"]},data:{archivedAt:new Date()}}));await expect(recoverSupplierPrice(other.actor,{idempotencyKey:savedNonce},other.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);
 });
 async function fixture(){
  const f=await nativeSupplierPriceFixture(admin,db),grants:Record<string,string>={};

@@ -1,5 +1,6 @@
 "use client";
 import {useTranslations} from "next-intl";
+import Link from "next/link";
 import type {AppLocale} from "@/i18n/routing";
 import {formatCurrencyAmount,formatPercentageAmount} from "@/i18n/format";
 import {exactVariancePercentage,type VarianceFacts} from "../domain/variance-facts";
@@ -14,5 +15,6 @@ export function VarianceFactsView({facts,locale,provider,testPrefix}:{facts:Vari
  const percentage=provider==="LAUNDRY"&&facts.kind==="MONEY"&&facts.currency?exactVariancePercentage(facts.expected,facts.actual,facts.currency):null;
  return <><dl className="detail-grid">{(["expected","actual","variance"] as const).map(key=><div key={key}><dt>{t(key)}</dt><dd data-testid={testPrefix+"-"+key} dir="auto">{facts.kind==="MONEY"&&facts.currency?formatCurrencyAmount(locale,facts[key],facts.currency):new Intl.NumberFormat(locale).format(BigInt(facts[key]))}</dd></div>)}
   {provider==="LAUNDRY"?<div><dt>{t("variancePercentage")}</dt><dd dir="auto" data-testid={testPrefix+"-percentage"}>{percentage===null?t("percentageUndefined"):formatPercentageAmount(locale,percentage)}</dd></div>:null}
- </dl>{facts.kind==="QUANTITY"?<p dir="auto">{facts.unit.startsWith("QUANTITY:")?facts.unit.slice(9):t("quantity")}</p>:null}</>;
+ </dl>{facts.kind==="QUANTITY"?<p dir="auto">{facts.unit.startsWith("QUANTITY:")?facts.unit.slice(9):t("quantity")}</p>:null}
+ {provider==="LAUNDRY"?facts.priceChangeAssociations?.map((id,index)=><Link key={id} className="secondary-button" prefetch={false} href={"/"+locale+"/app/inventory/supplier-prices?association="+id}>{t("reviewPriceChange",{number:new Intl.NumberFormat(locale).format(index+1)})}</Link>):null}</>;
 }

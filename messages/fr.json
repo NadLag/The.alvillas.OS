@@ -4631,7 +4631,8 @@
     "comparison_NO_ACTUAL": "Aucune facture réelle active n’est associée à cette estimation. Vérifiez le lot original.",
     "comparison_BASELINE_CHANGED": "Les factures actives utilisent une autre estimation conservée. Vérifiez les associations du lot.",
     "comparison_CURRENCY_MISMATCH": "Les devises originales diffèrent. Les montants restent séparés sans conversion ni écart inventé.",
-    "varianceLink": "Examiner l’écart de blanchisserie"
+    "varianceLink": "Examiner l’écart de blanchisserie",
+    "reviewPriceChange": "Examiner le changement de prix · facture {number}"
   },
   "AccountantExports": {
     "eyebrow": "Finance",
@@ -7962,7 +7963,20 @@
       "USABLE": "Utilisable",
       "DAMAGED": "Endommagé"
     },
-    "billingHelp": "Sélectionnez explicitement les conditions convenues avec le fournisseur. Leur absence bloque le calcul ; les états exclus ne sont pas facturés. Une nouvelle version conserve les accords antérieurs."
+    "billingHelp": "Sélectionnez explicitement les conditions convenues avec le fournisseur. Leur absence bloque le calcul ; les états exclus ne sont pas facturés. Une nouvelle version conserve les accords antérieurs.",
+    "priceChangeTitle": "Examiner les changements de prix du fournisseur",
+    "priceChangeHelp": "Un écart peut aussi provenir des quantités, dommages, taxes ou autres frais. Consultez le reçu original, confirmez les prix unitaires indiqués par le fournisseur et modifiez uniquement les prix du linge concerné. La dernière grille de prix du même périmètre est copiée sans modifier les conditions de facturation ni les autres prix.",
+    "priceChangeStates": {
+      "POSSIBLE_CHANGE": "Changement de prix possible : vérifiez les justificatifs originaux.",
+      "MATCHED": "Les totaux originaux correspondent. Vérifiez les prix unitaires avant toute modification.",
+      "CURRENCY_MISMATCH": "Les devises originales diffèrent. Ce parcours ne les convertit pas."
+    },
+    "retainedExpected": "Facture attendue conservée",
+    "actualInvoice": "Facture réelle originale",
+    "priceEvidenceReceipt": "Consulter le reçu original du fournisseur",
+    "priceEvidenceInvoice": "Ouvrir la facture originale",
+    "priceRatesConfirmed": "J’ai vérifié les justificatifs originaux et confirmé les prix unitaires saisis, sans les déduire du total de la facture.",
+    "priceChange": "Examiner le changement de prix"
   },
   "ExpectedLaundry": {
     "eyebrow": "Stock · Blanchisserie",
@@ -8104,6 +8118,7 @@
       "APPROVED": "Approuvée",
       "REJECTED": "Rejetée"
     },
-    "varianceLink": "Examiner l’écart de blanchisserie"
+    "varianceLink": "Examiner l’écart de blanchisserie",
+    "priceChange": "Examiner le changement de prix"
   }
 }
