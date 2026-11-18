@@ -1584,6 +1584,7 @@
       "approval_requested": "طلب موافقة بانتظار قرارك.",
       "approval_decided": "تم تسجيل قرار الموافقة.",
       "staff_document_expiring": "وثيقة موظف تقترب من انتهاء الصلاحية.",
+      "report_ready": "تقريرك المجدول جاهز.",
       "supplier_prices_changed": "تغيرت الأسعار السارية لأحد الموردين.",
       "supplier_performance_alert": "تجاوز أحد المقاولين موعدا مستهدفا للصيانة.",
       "asset_warranty_expiring": "يوشك ضمان أحد الأصول على الانتهاء.",

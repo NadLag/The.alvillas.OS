@@ -20,11 +20,13 @@ export async function resolveNotificationChannel(repository: NotificationReposit
   const ctx = candidate ? contextForRoleAssignments(candidate.organizationId, candidate.id, candidate.roleAssignments) : null;
   const locale = safeLocale(candidate?.person.preferredLocale ?? "en");
   const destination = ctx && target ? notificationDestination(ctx, input, target, locale) : null;
+  const reportNotice = input.kind === "report_ready" ? await repository.scheduledReportNotice(input.targetId, input.recipientId) : null;
+  const currentReport = input.kind !== "report_ready" || Boolean(reportNotice?.notice.routing.channels.includes(payload.channel));
   const currentApproval = input.kind !== "approval_requested" || await repository.approvalDeliveryAllowed(input.targetId, input.recipientId, payload.sourceEventId);
   const currentIntegrity = input.kind !== "ledger_integrity_failed" || payload.sourceEventId === input.targetId &&
     await repository.ledgerIntegrityChannelAllowed(input.targetId, input.recipientId, payload.channel);
   const allowed = Boolean(candidate && ctx && target && destination && (target.type === "identity" || !securityEnrollment(candidate).setupRequired)
-    && currentIntegrity
+    && currentIntegrity && currentReport
     && (target.type === "identity" || authorize(ctx, "view", target))
     && (input.kind !== "approval_requested" || (currentApproval && (authorize(ctx, "approve", target) || authorize(ctx, "reject", target))))
     && shouldDeliverNotification(input.kind, payload.channel, preferences));

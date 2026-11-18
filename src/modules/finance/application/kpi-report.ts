@@ -1,14 +1,9 @@
 import type { FinanceActorContext } from "./finance-access";
 import { readOrganizationPerformance, type OrganizationReportPeriod, type OrganizationReportSource,
   type PerformanceExport, type PerformanceReportDeps } from "./organization-performance-report";
-import { inventoryReportSources } from "./inventory-performance-report";
+import { kpiReportSources } from "../domain/report-source-scope";
 import { calendarKpiPeriod, kpiFilters, kpiReportMetrics, kpiSelectKeys, type KpiEvidence } from "../domain/kpi-report";
 import { PerformanceReportAccessError } from "../domain/performance-report";
-
-export const kpiReportSources = {
-  operationalSources: [...inventoryReportSources.operationalSources, "task", "issue", "owner", "team_member", "role", "supplier"],
-  financialSources: [...inventoryReportSources.financialSources, "company_ledger", "service_allocation", "wallet", "cash_collection"]
-} as const;
 
 type KpiReport = ReturnType<typeof kpiReportMetrics> & OrganizationReportPeriod;
 function buildKpiReport(input: unknown) {

@@ -1,3 +1,4 @@
+import { canReadScheduledReport, scheduledReportHref } from "@/modules/finance/domain/scheduled-report";
 import { canReadSupplierAlert } from "@/modules/finance/domain/supplier-alert";
 import { canReadAssetWarrantyAlert } from "@/modules/assets/domain/warranty-alerts";
 import { z } from "zod";
@@ -11,6 +12,7 @@ import {canReadDocumentExpiryNotice,type DocumentExpiryNoticeResource} from "@/m
 export const notificationEventType = "notification.requested";
 export class NotificationAudienceUnavailableError extends Error{}
 export const notificationInputSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("report_ready"), recipientId: z.uuid(), targetId: z.uuid() }),
   z.object({ kind: z.literal("supplier_prices_changed"), recipientId: z.uuid(), targetId: z.uuid() }).strict(),
   z.object({ kind: z.literal("supplier_performance_alert"), recipientId: z.uuid(), targetId: z.uuid() }).strict(),
   z.object({ kind: z.literal("asset_warranty_expiring"), recipientId: z.uuid(), targetId: z.uuid() }).strict(),
@@ -65,6 +67,7 @@ export function notificationDestination(
   const referenceId = input.kind === "asset_warranty_expiring" || input.kind === "supplier_prices_changed" || input.kind === "supplier_performance_alert" || input.kind === "lead_reminder"||input.kind === "document_expiring"||input.kind === "supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed" ? target?.notificationEventId : input.kind === "staff_document_expiring" ? target?.documentId :
     input.kind === "approval_requested" || input.kind === "approval_decided" ? target?.approvalId ?? target?.id : target?.id;
   if (input.recipientId !== ctx.userAccountId || !target || referenceId !== input.targetId) return null;
+  if (input.kind === "report_ready") return canReadScheduledReport(ctx, target, new Date()) ? scheduledReportHref(target, locale) : null;
   if(input.kind==="lead_reminder")return target.type==="lead"&&(target as Resource&{leadWorkRecipientId?:string}).leadWorkRecipientId===input.recipientId&&authorize(ctx,"view",target)?`/${locale}/app/crm?lead=${target.id}`:null;
   if(input.kind==="document_expiring")return canReadDocumentExpiryNotice(ctx,target,new Date())?`/${locale}/app/documents?document=${target.documentId}&version=${(target as DocumentExpiryNoticeResource).documentExpiryVersionNumber}`:null;
   if (input.kind === "language_updated" || input.kind === "security_session_revoked") {

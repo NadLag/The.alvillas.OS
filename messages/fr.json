@@ -1584,6 +1584,7 @@
       "approval_requested": "Une approbation attend votre décision.",
       "approval_decided": "Une décision d’approbation a été enregistrée.",
       "staff_document_expiring": "Un document du personnel arrive à expiration.",
+      "report_ready": "Votre rapport planifié est disponible.",
       "supplier_prices_changed": "Les tarifs en vigueur d’un fournisseur ont changé.",
       "supplier_performance_alert": "Un prestataire a dépassé un délai de maintenance.",
       "asset_warranty_expiring": "La garantie d’un équipement arrive à échéance.",

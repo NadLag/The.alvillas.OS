@@ -1,3 +1,4 @@
+import { tickScheduledReports } from "@/modules/finance/application/scheduled-report-job";
 import { refreshKpiCalendar } from "@/modules/finance/application/kpi-materialization-job";
 import { tickSupplierAlerts } from "@/platform/notifications/supplier-alerts";
 import { tickAssetWarrantyReminders } from "@/modules/assets/application/warranty-alerts";
@@ -198,4 +199,18 @@ export const refreshReportingCalendar = inngest.createFunction({
   return { refreshed };
 });
 
-export const inngestFunctions = [dispatchOutbox,refreshReportingCalendar,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,admitGuestAgreementSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding,reconcileInventoryMinimums];
+export const deliverScheduledReports = inngest.createFunction({
+  id: "report-scheduled-delivery", name: "ALVILLAS OS scheduled report delivery",
+  triggers: [{ cron: "* * * * *" }], concurrency: { limit: 1 }, retries: 3
+}, async ({ step }) => {
+  const organizations = await step.run("list-organizations", () => OutboxRepository.organizations(prisma));
+  const totals = { scheduled: 0, blocked: 0 };
+  for (const { id } of organizations) {
+    const result = await step.run(`schedule-reports-${id}`, () => tickScheduledReports(id));
+    totals.scheduled += result.scheduled;
+    totals.blocked += result.blocked;
+  }
+  return totals;
+});
+
+export const inngestFunctions = [dispatchOutbox,refreshReportingCalendar,deliverScheduledReports,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,admitGuestAgreementSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding,reconcileInventoryMinimums];

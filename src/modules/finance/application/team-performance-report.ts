@@ -1,4 +1,5 @@
 import type { FinanceActorContext } from "./finance-access";
+import { teamReportSources } from "../domain/report-source-scope";
 import type { TeamPerformanceSource } from "../domain/performance-report";
 import { readOrganizationPerformance, type OrganizationReportPeriod, type OrganizationReportSource,
   type PerformanceExport, type PerformanceReportDeps } from "./organization-performance-report";
@@ -7,8 +8,7 @@ type TeamResults = { people: TeamPerformanceSource[] };
 export type TeamPerformanceReport = TeamResults & OrganizationReportPeriod;
 const source: OrganizationReportSource<TeamPerformanceSource[], TeamResults> = {
   auditResource: "team_report",
-  operationalSources: ["team_member", "task"],
-  financialSources: ["financial_transaction", "employee_payable", "staff_compensation", "wallet"],
+  ...teamReportSources,
   capture: (repository, query) => repository.teamPerformance(query),
   summarize: (_currency, people) => ({ people })
 };

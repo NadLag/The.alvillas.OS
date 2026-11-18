@@ -1,4 +1,4 @@
-import { propertyFinanceFinancialSources } from "@/platform/authz/property-finance-resource";
+import { companyReportSources } from "../domain/report-source-scope";
 import type { FinanceActorContext } from "./finance-access";
 import { companyReportTotals, type CompanyPostingTotal, type PortfolioNights } from "../domain/performance-report";
 import { readOrganizationPerformance, type OrganizationReportPeriod, type OrganizationReportSource,
@@ -10,8 +10,7 @@ export type CompanyPerformanceReport = CompanyTotals & OrganizationReportPeriod;
 
 const source: OrganizationReportSource<CompanySources, CompanyTotals> = {
   auditResource: "company_report",
-  operationalSources: ["property", "reservation"],
-  financialSources: propertyFinanceFinancialSources,
+  ...companyReportSources,
   async capture(repository, query) {
     const [postings, portfolio] = await Promise.all([
       repository.companyPostings(query), repository.portfolioNights(query.fromOn, query.toOn)

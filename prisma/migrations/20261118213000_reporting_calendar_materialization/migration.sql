@@ -20,13 +20,13 @@ CREATE INDEX report_calendar_materialization_range_idx ON report_calendar_materi
 
 ALTER TABLE report_calendar_source_revision ENABLE ROW LEVEL SECURITY;
 ALTER TABLE report_calendar_source_revision FORCE ROW LEVEL SECURITY;
-CREATE POLICY report_calendar_source_revision_tenant ON report_calendar_source_revision
+CREATE POLICY report_calendar_source_revision_tenant_isolation ON report_calendar_source_revision
   USING (organization_id = nullif(current_setting('app.current_organization_id',true),'')::uuid)
   WITH CHECK (organization_id = nullif(current_setting('app.current_organization_id',true),'')::uuid);
 
 ALTER TABLE report_calendar_materialization ENABLE ROW LEVEL SECURITY;
 ALTER TABLE report_calendar_materialization FORCE ROW LEVEL SECURITY;
-CREATE POLICY report_calendar_materialization_tenant ON report_calendar_materialization
+CREATE POLICY report_calendar_materialization_tenant_isolation ON report_calendar_materialization
   USING (organization_id = nullif(current_setting('app.current_organization_id',true),'')::uuid)
   WITH CHECK (organization_id = nullif(current_setting('app.current_organization_id',true),'')::uuid);
 
