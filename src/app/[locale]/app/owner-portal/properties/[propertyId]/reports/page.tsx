@@ -43,14 +43,41 @@ export default async function OwnerReportsPage({ params, searchParams }: {
         <dt>{t("columns." + key)}</dt><dd className="money">{formatCurrency(locale, amount)}</dd>
       </div>)}</dl>
     </section>
+    <section className="panel resource-form">
+      <h2>{t("settlements")}</h2>
+      <dl className="detail-grid">
+        <div><dt>{labels("remainingPayable")}</dt><dd className="money">{formatCurrency(locale, report.funds.payable)}</dd></div>
+        <div><dt>{labels("funds.transferred")}</dt><dd className="money">{formatCurrency(locale, report.funds.transferred)}</dd></div>
+        <div><dt>{labels("funds.direct")}</dt><dd>{labels("funds.directUnavailable")}</dd></div>
+        <div><dt>{labels("funds.custody")}</dt><dd>{labels("funds.custodyUnavailable")}</dd></div>
+        <div><dt>{labels("payouts.forecast")}</dt><dd>{
+          report.payouts.forecast === null ? labels("payouts.unavailable") : formatCurrency(locale, report.payouts.forecast)
+        }</dd></div>
+        {report.funds.collected.map(([rail, amount]) => <div key={rail}>
+          <dt>{labels("funds.rails." + rail)}</dt><dd className="money">{formatCurrency(locale, amount)}</dd>
+        </div>)}
+      </dl>
+      <p>{labels("funds.attribution")}</p>
+      {report.payouts.forecast !== null ? <p>{labels("payouts.estimate")}</p> : null}
+      <div className="form-actions">
+        <Link className="secondary-button" href={path + "/funds?" + yearPeriod}>{labels("funds.title")}</Link>
+        <Link className="secondary-button" href={path + "/payouts?" + yearPeriod}>{labels("payouts.title")}</Link>
+      </div>
+    </section>
     <section className="resource-form" aria-label={t("monthly")}>
       <h2>{t("monthly")}</h2>
-      {report.rows.length ? <ul className="resource-list">{report.rows.map(row => <li className="panel" key={row.month}>
+      {report.rows.length ? <ul className="resource-list">{report.rows.map(row => {
+        const [year, calendarMonth] = row.month.split("-").map(Number);
+        const lastDay = new Date(Date.UTC(year, calendarMonth, 0)).getUTCDate();
+        const period = new URLSearchParams({ from: row.month + "-01", to: row.month + "-" + lastDay, currency: report.currency });
+        return <li className="panel" key={row.month}>
         <h3>{month.format(new Date(row.month + "-01T00:00:00Z"))}</h3>
         <dl className="detail-grid">{report.columns.filter(key => !row.amount[key].amount.isZero()).map(key => <div key={key}>
           <dt>{t("columns." + key)}</dt><dd className="money">{formatCurrency(locale, row.amount[key])}</dd>
         </div>)}</dl>
-      </li>)}</ul> : <EmptyState tone="motif">{t("empty")}</EmptyState>}
+        <Link className="secondary-button" href={path + "?" + period.toString()}>{t("monthlyStatement")}</Link>
+      </li>;
+      })}</ul> : <EmptyState tone="motif">{t("empty")}</EmptyState>}
     </section>
   </OwnerShell>;
 }

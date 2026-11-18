@@ -1210,6 +1210,8 @@
       "notifications": "Paramètres des notifications"
     },
     "reports": {
+      "settlements": "Règlements et fonds détenus",
+      "monthlyStatement": "Ouvrir le relevé mensuel",
       "title": "Rapports financiers",
       "year": "Année",
       "annual": "Totaux annuels",

@@ -1210,6 +1210,8 @@
       "notifications": "Notification settings"
     },
     "reports": {
+      "settlements": "Settlements and custody",
+      "monthlyStatement": "Open monthly statement",
       "title": "Financial reports",
       "year": "Year",
       "annual": "Annual totals",
