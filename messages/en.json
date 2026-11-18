@@ -1192,6 +1192,18 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "approvals": {
+      "title": "Pending approvals",
+      "back": "Back",
+      "empty": "No pending requests assigned to you for this property.",
+      "review": "Make a decision on the amount assigned to you.",
+      "next": "Next approvals",
+      "sources": {
+        "maintenance": "Maintenance",
+        "expense": "Expense",
+        "invoice": "Supplier invoice"
+      }
+    },
     "exports": {
       "title": "Statement periods and downloads",
       "month": "This month",

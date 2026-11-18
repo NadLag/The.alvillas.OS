@@ -1192,6 +1192,18 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "approvals": {
+      "title": "Approbations en attente",
+      "back": "Retour",
+      "empty": "Aucune demande en attente ne vous est attribuée pour ce logement.",
+      "review": "Décidez du montant qui vous est attribué.",
+      "next": "Approbations suivantes",
+      "sources": {
+        "maintenance": "Maintenance",
+        "expense": "Dépense",
+        "invoice": "Facture fournisseur"
+      }
+    },
     "exports": {
       "title": "Périodes et téléchargements du relevé",
       "month": "Ce mois-ci",

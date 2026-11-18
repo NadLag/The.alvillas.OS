@@ -1,3 +1,5 @@
+import { loadOwnerApprovals, decideOwnerApproval } from "@/modules/owner-portal/application/owner-approvals";
+import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -1495,8 +1497,25 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     await decideApproval(manager, { id: first.id, stageId: first.stageId, decision: "APPROVED", reason: "Manager approves only this configured step" }, { db });
     const selected = reviewers.find(reviewer => reviewer.ownerId === ownerStages[0].ownerId)!, other = reviewers.find(reviewer => reviewer !== selected)!;
     const ownerReview = await getApproval(selected.actor, first.id, { db }); expect(ownerReview.canReject).toBe(true);
+    await withTenant(db, f.org, tx => tx.ownerPortalAccess.createMany({ data: reviewers.map(reviewer =>
+      ({ organizationId: f.org, ownerId: reviewer.ownerId, userAccountId: reviewer.account.id })) }));
+    async function ownerContext(reviewer: typeof selected) {
+      const access = await ownerPortalActorContextFromSession({ user: {
+        id: reviewer.account.id, personId: reviewer.person.id, organizationId: f.org, sessionId: randomUUID(),
+        securitySetupRequired: false, sessionRevoked: false, preferredLocale: "en"
+      }, expires: "2099-01-01" }, { db });
+      if (!access) throw new Error("Native owner access required");
+      return access;
+    }
+    const selectedContext = await ownerContext(selected), otherContext = await ownerContext(other);
+    const pending = await loadOwnerApprovals(selectedContext, selected.actor, f.property.id, undefined, undefined, db);
+    expect(pending.items).toMatchObject([{ ownerId: selected.ownerId, amount: "600.25", currency: "MAD" }]);
+    expect(JSON.stringify(pending)).not.toMatch(/9000|Private whole|Confidential unrelated/u);
+    expect((await loadOwnerApprovals(otherContext, other.actor, f.property.id, undefined, undefined, db)).items).toEqual([]);
     const rejecting = { id: first.id, stageId: ownerReview.stageId, decision: "REJECTED", reason: "Private first-owner rejection details" };
-    await decideApproval(selected.actor, rejecting, { db }); await decideApproval(selected.actor, rejecting, { db });
+    await expect(decideOwnerApproval(otherContext, other.actor, f.property.id, rejecting, db)).rejects.toBeInstanceOf(ApprovalAccessError);
+    await decideOwnerApproval(selectedContext, selected.actor, f.property.id, rejecting, db);
+    await decideOwnerApproval(selectedContext, selected.actor, f.property.id, rejecting, db);
     const cancelled = await getApproval(other.actor, first.id, { db });
     expect(cancelled).toMatchObject({ state: "CANCELLED", decisionReason: null, financial: { amount: "600.25" }, canApprove: false });
     expect(JSON.stringify(cancelled)).not.toContain(rejecting.reason);

@@ -295,8 +295,8 @@ F-OWN-03 | IN-PROGRESS | Owners can filter posted revenue, services, commissions
 F-OWN-04 | IN-PROGRESS | Portal shows owner-attributed verified receipt and settlement movements separately from the ledger payable. Exact physical custody and platform-direct receipts require original owner attribution. PostgreSQL proves separated totals and unchanged journals. Mandatory CI and hosted acceptance remain open.
 F-OWN-05 | IN-PROGRESS | Payout history reads native submitted schedules and exact confirmed journal transfers, with separate forecast and masked settlement references. The read projection was verified against native PR 130 PostgreSQL records. Combined integration and hosted acceptance remain dependent on PR 130.
 F-OWN-06 | IN-PROGRESS | Owner statements offer monthly and annual periods with CSV and PDF downloads from one authorized ledger snapshot. Focused PostgreSQL confirms exact cents, real PDF output and unauthorized denial. Arabic PDF requires the configured renderer. Mandatory CI and hosted acceptance remain open.
-F-OWN-07 | TODO |
-F-OWN-08 | TODO |
+F-OWN-07 | IN-PROGRESS | The owner center lists the next configured approval only for the owner, property and assigned recipient. Shared approve and reject commands preserve ordered decisions and retry behavior. The two-owner PostgreSQL test passes. Mandatory CI and hosted acceptance remain open.
+F-OWN-08 | IN-PROGRESS | Owner portfolio and statements already show authorized property condition from native Maintenance issues and work orders. The PostgreSQL contractor journey and the prior scoped portal browser journey pass. Mandatory CI and hosted acceptance remain open.
 F-OWN-09 | TODO |
 F-OWN-10 | TODO |
 F-OWN-11 | TODO |
