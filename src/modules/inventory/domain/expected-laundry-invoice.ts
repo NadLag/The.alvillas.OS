@@ -5,6 +5,8 @@ import {stockQuantitySchema} from "./stocktake";
 import {configSlugSchema} from "@/platform/config/identifiers";
 import {InventoryCatalogDefinitionError} from "./catalog-errors";
 const id=z.uuid(),quantity=stockQuantitySchema.refine(value=>BigInt(value)>=0n),condition=z.enum(["USABLE","DAMAGED"]);
+const amount=z.string().regex(/^(0|[1-9][0-9]{0,62})\.[0-9]{2}$/u);
+export const expectedLaundryInvoiceResultSchema=z.object({status:z.enum(["NEEDS_TERMS","NEEDS_PRICE","PROVISIONAL","READY"]),currency:z.string().regex(/^[A-Z]{3}$/u),total:amount.nullable(),lines:z.array(z.object({lineId:id,itemId:id,itemKey:configSlugSchema,condition,unit:z.string().min(1).max(60),quantity,billable:z.boolean(),unitPrice:amount.nullable(),total:amount.nullable(),issue:z.enum(["MISSING_PRICE","UNIT_MISMATCH"]).nullable()}).strict()).max(100)}).strict();
 export const expectedLaundryInvoiceSourceSchema=z.object({finalized:z.boolean(),lines:z.array(z.object({id,itemId:id,itemKey:configSlugSchema,unit:z.string().min(1).max(60),condition,quantity:quantity.refine(value=>BigInt(value)>0n)}).strict()).min(1).max(50),usage:z.array(z.object({lineId:id,basis:laundryInvoiceQuantityBasisSchema.exclude(["PLANNED"]),condition,quantity}).strict()).max(300)}).strict();
 export function calculateExpectedLaundryInvoice(rawPolicy:unknown,rawSource:unknown){
  const policy=laundrySupplierPricePolicySchema.parse(rawPolicy),source=expectedLaundryInvoiceSourceSchema.parse(rawSource),identities=new Map(source.lines.map(line=>[line.id,line])),seen=new Set<string>(),totals=new Map<string,bigint>();if(identities.size!==source.lines.length||new Set(source.lines.map(line=>line.itemId+":"+line.condition)).size!==source.lines.length)throw new InventoryCatalogDefinitionError();

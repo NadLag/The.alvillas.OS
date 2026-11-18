@@ -7872,7 +7872,8 @@
       "REVERSAL": "Reversal"
     },
     "propertyChoice": "Property",
-    "browseArchived": "Include archived suppliers"
+    "browseArchived": "Include archived suppliers",
+    "expectedInvoice": "Expected supplier invoice"
   },
   "SupplierPrices": {
     "eyebrow": "Operations",
@@ -7941,6 +7942,84 @@
       "uncertain": "The result is unconfirmed. Resolve the original request."
     },
     "openEnded": "No end date",
-    "originalSupplier": "Open original supplier"
+    "originalSupplier": "Open original supplier",
+    "billingBasis": "Billable quantity stage",
+    "billingUnconfigured": "Supplier billing terms not configured",
+    "billableConditions": "Billable physical conditions",
+    "billingBases": {
+      "PLANNED": "Planned units",
+      "SENT": "Units sent",
+      "RECEIVED": "Units received by laundry",
+      "WASHED": "Units washed"
+    },
+    "billingConditions": {
+      "USABLE": "Usable",
+      "DAMAGED": "Damaged"
+    },
+    "billingHelp": "Select the agreed supplier terms explicitly. Missing terms prevent an invoice estimate; excluded conditions are not billed. A new version preserves earlier agreements."
+  },
+  "ExpectedLaundry": {
+    "eyebrow": "Inventory · Laundry",
+    "title": "Expected laundry invoice",
+    "subtitle": "Original custody quantities priced with the applicable versioned supplier quote.",
+    "refresh": "Refresh",
+    "originalBatch": "Original laundry batch",
+    "priceLists": "Supplier price lists",
+    "noPosting": "This is a quoted estimate. Recording it creates no supplier invoice, payment, expense, owner charge or stock movement.",
+    "saved": "Expected invoice recorded.",
+    "notRecorded": "The pending command was not recorded and is now closed.",
+    "unconfirmed": "Checking the original command outcome…",
+    "privateHidden": "Private financial information is hidden.",
+    "pricingDate": "Pricing date and time",
+    "timeHelp": "The date uses your browser’s time zone. The saved estimate retains its exact pricing instant.",
+    "property": "Actual batch property",
+    "chooseProperty": "Choose an original property",
+    "organizationScope": "Company scope",
+    "loadQuote": "Load applicable quote",
+    "quoteVersion": "Original quote version {number}",
+    "originalQuote": "Open original quote",
+    "reason": "Reason",
+    "review": "Review estimate",
+    "quoteRequired": "Choose the pricing context and load an applicable quote. Configure missing supplier terms in a new price version.",
+    "reviewTitle": "Review original expected invoice",
+    "originalAssessment": "Recorded expected invoice",
+    "needsReview": "Custody or the applicable quote has changed. Record a new assessment to review the current facts; this original estimate remains unchanged.",
+    "billable": "Billable",
+    "excluded": "Excluded by supplier terms",
+    "missingPrice": "Original unit price unavailable",
+    "incomplete": "Estimate incomplete",
+    "total": "Quoted total",
+    "saving": "Recording…",
+    "record": "Record expected invoice",
+    "sequence": "Original custody sequence {number}",
+    "history": "Immutable estimate history",
+    "inspect": "Inspect original estimate",
+    "older": "Older estimates",
+    "empty": "No expected invoice has been recorded for this batch.",
+    "statuses": {
+      "NEEDS_TERMS": "Supplier billing stage and conditions are required.",
+      "NEEDS_PRICE": "Original prices or units are incomplete.",
+      "PROVISIONAL": "Provisional: the agreed custody stage is incomplete.",
+      "READY": "Ready: all currently billable units have an exact quote."
+    },
+    "conditions": {
+      "USABLE": "Usable",
+      "DAMAGED": "Damaged"
+    },
+    "issues": {
+      "MISSING_PRICE": "The original SKU has no quoted rate.",
+      "UNIT_MISMATCH": "The quote unit differs from the original custody unit."
+    },
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading…",
+      "offline": "Reconnect to review or record stock movements.",
+      "forbidden": "Your current access no longer permits this inventory.",
+      "unavailable": "Inventory is unavailable. Try again.",
+      "validation": "Check the original records, quantities and reason.",
+      "conflict": "Stock or access changed. Review the current quantities again.",
+      "stock_held": "Original physical stock or commitments prevent this operation.",
+      "uncertain": "The result is unconfirmed. Resolve the original request."
+    }
   }
 }

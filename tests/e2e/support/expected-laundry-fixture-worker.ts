@@ -1,0 +1,12 @@
+import {mkdir,writeFile} from "node:fs/promises";
+import {dirname,resolve,sep} from "node:path";
+import {randomUUID} from "node:crypto";
+import {PrismaClient} from "@prisma/client";
+import {z} from "zod";
+import {withTenant} from "@/platform/db/tenant";
+import {nativeSupplierPriceFixture} from "../../integration/support/laundry-pricing-fixture";
+import {createConfigRuleVersion} from "@/modules/config/application/config-service";
+import {previewLaundryBatch,createLaundryBatch} from "@/modules/inventory/application/laundry-batch-service";
+const input=z.object({organizationId:z.uuid(),accountId:z.uuid(),personId:z.uuid(),guestLocale:z.enum(["en","fr","ar"]),output:z.string().min(1)}).strict().parse(JSON.parse(process.argv[2]??"null")),target=new URL(process.env.DATABASE_URL??"invalid:");
+if(process.env.VERCEL||process.env.VERCEL_ENV||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os")||!resolve(input.output).startsWith(resolve(process.cwd())+sep))throw Error("Owned native expected-laundry browser fixture required");
+const db=new PrismaClient();try{const f=await nativeSupplierPriceFixture(db,db,{...input,propertyName:"Actual original expected invoice property "+randomUUID()}),policy={...f.policy,billing:{quantityBasis:"PLANNED",billableConditions:["USABLE"]}},quote=await createConfigRuleVersion(f.actor,{...f.input,valueJson:JSON.stringify(policy)},f.deps),draft={sourceLocationId:f.home.id,outboundTransitId:f.outbound.id,laundryLocationId:f.laundry.id,inboundTransitId:f.inbound.id,returnLocationId:f.home.id,supplierId:f.supplier.id,reservationId:f.reservation.id,lines:[{itemId:f.item.id,condition:"USABLE",quantity:"10"}],reason:"Actual original expected-invoice browser custody and quoted units"},review=await previewLaundryBatch(f.actor,draft,f.deps),batch=await createLaundryBatch(f.actor,{draft:review.draft,reviewFingerprint:review.reviewFingerprint,idempotencyKey:randomUUID()},f.deps),before=await withTenant(db,f.organizationId,async tx=>({financialCount:await tx.financialTransaction.count({where:{organizationId:f.organizationId}}),stockCount:await tx.inventoryMovement.count({where:{organizationId:f.organizationId}})}));await mkdir(dirname(resolve(input.output)),{recursive:true,mode:0o700});await writeFile(input.output,JSON.stringify({batchId:batch.batchId,quoteVersionId:quote.id,propertyId:f.property.id,itemKey:f.item.key,...before}),{flag:"wx",mode:0o600});}finally{await db.$disconnect();}
