@@ -1,9 +1,14 @@
 import { Prisma } from "@prisma/client";
+import { KpiReportRepository } from "./kpi-report-repository";
 import { InventoryReportRepository } from "./inventory-report-repository";
 import { PropertyFinanceRepository } from "./property-finance-repository";
 import type { CompanyPostingTotal, PortfolioNights, PropertyPostingTotal, TeamPerformanceSource } from "../domain/performance-report";
 
 export class PerformanceReportRepository extends PropertyFinanceRepository {
+  kpi() {
+    return new KpiReportRepository(this.tx, this.organizationId);
+  }
+
   inventory() {
     return new InventoryReportRepository(this.tx, this.organizationId);
   }
@@ -13,7 +18,7 @@ export class PerformanceReportRepository extends PropertyFinanceRepository {
       select: { id: true, name: true, cityId: true, regionId: true }, orderBy: [{ name: "asc" }, { id: "asc" }] });
   }
 
-  propertyPostings(input: { propertyId: string; currency: string; startsAt: Date; endsAt: Date }) {
+  propertyPostings(input: { propertyId: string | null; currency: string; startsAt: Date; endsAt: Date; ownerId?: string; bookingSource?: string }) {
     return this.tx.$queryRaw<PropertyPostingTotal[]>(Prisma.sql`
       WITH classified AS (
         SELECT CASE
@@ -35,7 +40,11 @@ export class PerformanceReportRepository extends PropertyFinanceRepository {
         LEFT JOIN cash_collection cash ON cash.organization_id = p.organization_id
           AND cash.transaction_id = coalesce(t.reverses_transaction_id,t.id)
         WHERE p.organization_id = ${this.organizationId}::uuid AND p.currency = ${input.currency}
-          AND coalesce(cash.property_id::text,p.dimensions->>'property_id') = ${input.propertyId}
+          ${input.propertyId ? Prisma.sql`AND coalesce(cash.property_id::text,p.dimensions->>'property_id')=${input.propertyId}` : Prisma.empty}
+          ${input.ownerId ? Prisma.sql`AND p.dimensions->>'owner_id'=${input.ownerId}` : Prisma.empty}
+          ${input.bookingSource ? Prisma.sql`AND EXISTS (
+            SELECT 1 FROM reservation r WHERE r.organization_id=p.organization_id
+              AND r.id::text=coalesce(cash.reservation_id::text,p.dimensions->>'reservation_id') AND r.source=${input.bookingSource})` : Prisma.empty}
           AND t.sealed AND t.occurred_at >= ${input.startsAt} AND t.occurred_at < ${input.endsAt}
       )
       SELECT key, sum(CASE WHEN (side = 'DEBIT') = (key IN ('commission', 'platformFees', 'ownerExpenses', 'operatingCosts'))
@@ -48,8 +57,8 @@ export class PerformanceReportRepository extends PropertyFinanceRepository {
     return result;
   }
 
-  portfolioNights(fromOn: string, toOn: string) {
-    return this.nights(fromOn, toOn);
+  portfolioNights(fromOn: string, toOn: string, scope?: { propertyId: string | null; ownerId?: string; bookingSource?: string }) {
+    return this.nights(fromOn, toOn, scope?.propertyId ?? undefined, scope);
   }
 
   companyPostings(input: { currency: string; startsAt: Date; endsAt: Date }) {
@@ -125,12 +134,15 @@ export class PerformanceReportRepository extends PropertyFinanceRepository {
       ORDER BY p.display_name,p.id`);
   }
 
-  protected nights(fromOn: string, toOn: string, propertyId?: string) {
+  protected nights(fromOn: string, toOn: string, propertyId?: string, scope?: { ownerId?: string; bookingSource?: string }) {
     return this.tx.$queryRaw<PortfolioNights[]>(Prisma.sql`
       WITH properties AS (
         SELECT id, name, daterange(${fromOn}::date, ${toOn}::date + 1, '[)') AS period
         FROM property WHERE organization_id = ${this.organizationId}::uuid
         ${propertyId ? Prisma.sql`AND id = ${propertyId}::uuid` : Prisma.sql`AND archived_at IS NULL AND status = 'ACTIVE'`}
+        ${scope?.ownerId ? Prisma.sql`AND EXISTS (SELECT 1 FROM property_owner owner
+          WHERE owner.organization_id=property.organization_id AND owner.property_id=property.id
+            AND owner.owner_id=${scope.ownerId}::uuid AND owner.archived_at IS NULL)` : Prisma.empty}
       ), reservation_nights AS (
         SELECT r.property_id, range_agg(daterange(r.check_in, r.check_out, '[)') * p.period) AS nights,
           sum(upper(daterange(r.check_in, r.check_out, '[)') * p.period)
@@ -138,6 +150,7 @@ export class PerformanceReportRepository extends PropertyFinanceRepository {
         FROM reservation r JOIN properties p ON p.id = r.property_id
         WHERE r.organization_id = ${this.organizationId}::uuid AND r.archived_at IS NULL
           AND r.status IN ('CHECKED_IN','STAYING','CHECKED_OUT','FINANCIAL_RECONCILIATION','CLOSED')
+          ${scope?.bookingSource ? Prisma.sql`AND r.source=${scope.bookingSource}` : Prisma.empty}
           AND r.check_in < upper(p.period) AND r.check_out > lower(p.period)
         GROUP BY r.property_id
       ), blocked_nights AS (

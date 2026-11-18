@@ -1,3 +1,4 @@
+import { getKpiReport } from "@/modules/finance/application/kpi-report";
 import { getTeamPerformanceReport } from "@/modules/finance/application/team-performance-report";
 import { teamReportMetrics } from "@/modules/finance/domain/performance-report";
 import { exportCompanyPerformanceReport, getCompanyPerformanceReport } from "@/modules/finance/application/company-performance-report";
@@ -89,6 +90,22 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(report.adr?.toJSON().amount).toBe("9007199254740993.07");
    expect(report.revpar?.toJSON().amount).toBe("4503599627370496.54");
    expect(report.ownerResult.toJSON().amount).toBe("9007199254740993.07");
+   await withTenant(db, f.org, async tx => {
+     const keys = ["inventory_item:view", "inventory_location:view", "inventory_movement:view", "issue:view",
+       "role:view", "service_allocation:view"];
+     const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: keys } } });
+     expect(permissions).toHaveLength(keys.length);
+     await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: f.role.id, permissionId: permission.id })) });
+   });
+   const kpiActor = { ...ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+   const kpis = await getKpiReport(kpiActor, filter, { db });
+   expect(kpis.metrics.find(row => row.key === "occupancy")?.count).toBe("50.00%");
+   expect(kpis.metrics.find(row => row.key === "adr")?.amount?.toJSON().amount).toBe("9007199254740993.07");
+   expect(kpis.metrics.find(row => row.key === "kpiOwnerCash")?.amount).toBeNull();
+   const quarter = await getKpiReport(kpiActor, { propertyId: f.property.id, currency: "EUR", period: "2026-Q1" }, { db });
+   expect(quarter).toMatchObject({ fromOn: "2026-01-01", toOn: "2026-03-31" });
+   expect(quarter.metrics.find(row => row.key === "adr")?.amount?.toJSON().amount).toBe("71.13");
+   await expect(getKpiReport(kpiActor, { ...filter, ownerId: randomUUID() }, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
    const eur = await getPropertyPerformanceReport(ctx, { ...filter, currency: "EUR" }, { db });
    expect(eur.adr?.toJSON().amount).toBe("71.13");
    for (const format of ["CSV", "EXCEL", "PDF"] as const) {

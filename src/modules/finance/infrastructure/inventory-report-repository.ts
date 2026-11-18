@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { InventoryMoneyTotal, InventoryQuantityTotal } from "../domain/inventory-performance-report";
 
-type Period = { propertyId: string | null; startsAt: Date; endsAt: Date; currency: string };
+type Period = { propertyId: string | null; startsAt: Date; endsAt: Date; currency: string; supplierId?: string };
 
 export class InventoryReportRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
@@ -65,7 +65,7 @@ export class InventoryReportRepository {
       GROUP BY item.id,activity.key ORDER BY item.key,item.id,activity.key`);
   }
 
-  money({ propertyId, startsAt, endsAt, currency }: Period) {
+  money({ propertyId, startsAt, endsAt, currency, supplierId }: Period) {
     return this.tx.$queryRaw<InventoryMoneyTotal[]>(Prisma.sql`
       WITH receipts AS (
         SELECT (receipt.payload#>>'{source,amount,amount}')::numeric AS amount
@@ -74,6 +74,7 @@ export class InventoryReportRepository {
         WHERE receipt.organization_id=${this.organizationId}::uuid AND receipt.type='inventory.purchase.source_received'
           AND receipt.occurred_at>=${startsAt} AND receipt.occurred_at<${endsAt}
           AND receipt.payload#>>'{source,amount,currency}'=${currency} AND txn.sealed
+          ${supplierId ? Prisma.sql`AND receipt.payload#>>'{source,supplierId}'=${supplierId}` : Prisma.empty}
           AND (${propertyId}::uuid IS NULL OR receipt.payload#>>'{source,propertyId}'=(${propertyId}::uuid)::text)
           AND NOT EXISTS (SELECT 1 FROM financial_transaction reversal
             WHERE reversal.organization_id=txn.organization_id AND reversal.reverses_transaction_id=txn.id
@@ -81,15 +82,19 @@ export class InventoryReportRepository {
       ), assessments AS (
         SELECT DISTINCT ON (expected.batch_id) expected.batch_id,expected.total,expected.created_at,expected.status,expected.currency,expected.pricing_property_id
         FROM laundry_expected_invoice expected
+        JOIN laundry_batch batch ON (batch.organization_id,batch.id)=(expected.organization_id,expected.batch_id)
         WHERE expected.organization_id=${this.organizationId}::uuid
           AND expected.created_at<${endsAt}
+          ${supplierId ? Prisma.sql`AND batch.supplier_id=${supplierId}::uuid` : Prisma.empty}
         ORDER BY expected.batch_id,expected.created_at DESC,expected.id DESC
       ), invoices AS (
         SELECT actual.total, CASE WHEN actual.currency=expected.currency AND expected.status IN ('READY','PROVISIONAL') THEN expected.total END AS compared
         FROM laundry_actual_invoice actual
         JOIN laundry_expected_invoice expected ON (expected.organization_id,expected.id)=(actual.organization_id,actual.expected_invoice_id)
+        JOIN laundry_batch batch ON (batch.organization_id,batch.id)=(actual.organization_id,actual.batch_id)
         WHERE actual.organization_id=${this.organizationId}::uuid AND actual.currency=${currency}
           AND actual.created_at>=${startsAt} AND actual.created_at<${endsAt} AND actual.operation<>'VOID'
+          ${supplierId ? Prisma.sql`AND batch.supplier_id=${supplierId}::uuid` : Prisma.empty}
           AND (${propertyId}::uuid IS NULL OR expected.pricing_property_id=${propertyId}::uuid)
           AND NOT EXISTS (SELECT 1 FROM laundry_actual_invoice successor
             WHERE successor.organization_id=actual.organization_id AND successor.supersedes_id=actual.id AND successor.created_at<${endsAt})

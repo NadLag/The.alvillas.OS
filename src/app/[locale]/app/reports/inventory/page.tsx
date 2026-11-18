@@ -8,7 +8,7 @@ import { getInventoryPerformanceReport } from "@/modules/finance/application/inv
 import { inventoryReportItems } from "@/modules/finance/domain/inventory-performance-report";
 import { PerformanceReportAccessError, PerformanceReportUnavailableError } from "@/modules/finance/domain/performance-report";
 import { requireCompensationSession } from "@/modules/finance/ui/compensation-access";
-import { PerformanceMetrics, PerformanceReportFilters } from "@/modules/finance/ui/performance-report-view";
+import { PerformanceMetrics, PerformancePropertyFilter, PerformanceReportFilters } from "@/modules/finance/ui/performance-report-view";
 
 export default async function InventoryReportsPage({ params, searchParams }: {
   params: Promise<{ locale: string }>;
@@ -37,14 +37,7 @@ export default async function InventoryReportsPage({ params, searchParams }: {
       actions={<Link className="secondary-button" href={`/${locale}/app/reports`}>{t("reportsBack")}</Link>} />
     {report ? <>
       <PerformanceReportFilters report={report} locale={locale} download={path + "/download"} filters={scope}
-        fields={<label className="field"><span>{t("propertyFilter")}</span>
-          <select name="propertyId" defaultValue={report.propertyId ?? ""}>
-            {report.portfolioAvailable ? <option value="">{t("allProperties")}</option> : null}
-            {report.propertyId && report.propertyName && !report.properties.some(property => property.id === report.propertyId) ?
-              <option value={report.propertyId}>{report.propertyName}</option> : null}
-            {report.properties.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
-          </select>
-        </label>} />
+        fields={<PerformancePropertyFilter report={report} />} />
       <PerformanceMetrics title={t("inventoryCosts")} metrics={report.monetaryMetrics} locale={locale} />
       <p className="field-hint">{t("inventoryBasis")}</p>
       {items.length ? items.slice((cursor - 1) * pageSize, cursor * pageSize).map(item =>

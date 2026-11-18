@@ -32,6 +32,8 @@ export type ReportQuery = { propertyId: string | null; currency: string; timezon
 export type OrganizationReportSource<S, T extends object> = {
   auditResource: "company_report" | "team_report" | "inventory_report" | "kpi_report";
   allowProperty?: boolean;
+  dimensions?: Record<string, string>;
+  resolveDates?: (today: string) => { fromOn: string; toOn: string };
   operationalSources: readonly string[];
   financialSources: readonly string[];
   capture: (repository: PerformanceReportRepository, query: ReportQuery) => Promise<S>;
@@ -77,8 +79,9 @@ export async function readOrganizationPerformance<S, T extends object>(actor: Fi
     const currency = input.currency ?? settings.baseCurrency;
     if (!settings.currencies.some(row => row.code === currency)) throw new PerformanceReportUnavailableError();
     const today = calendarDateAt(now, timezone);
-    const fromOn = input.fromOn ?? (await repository.defaults(now, timezone)).fromOn;
-    const toOn = input.toOn ?? today;
+    const dates = descriptor.resolveDates?.(today);
+    const fromOn = dates?.fromOn ?? input.fromOn ?? (await repository.defaults(now, timezone)).fromOn;
+    const toOn = dates?.toOn ?? input.toOn ?? today;
     if (toOn < fromOn || toOn > today) throw new PerformanceReportUnavailableError();
     const range = await repository.range(fromOn, toOn, timezone);
     const policyRepo = new ConfigRuleRepository(tx, organizationId);
@@ -95,7 +98,7 @@ export async function readOrganizationPerformance<S, T extends object>(actor: Fi
     const propertyId = property?.id ?? null;
     const capture = () => descriptor.capture(repository, { ...range, propertyId, currency, timezone, fromOn, toOn });
     const source = await capture();
-    const sourceFingerprint = commandFingerprint({ propertyId, fromOn, toOn, timezone, currency, source });
+    const sourceFingerprint = commandFingerprint({ propertyId, fromOn, toOn, timezone, currency, dimensions: descriptor.dimensions ?? {}, source });
     const properties = descriptor.allowProperty && !output ? await repository.reportProperties() : [];
     const currentAuthority = properties.length ? await authContextForAccountInTransaction(tx, organizationId, actor.actorId) : actor.authContext;
     const visibleProperties = properties.filter(row => [actor.authContext, currentAuthority].every(context =>
@@ -125,7 +128,7 @@ export async function readOrganizationPerformance<S, T extends object>(actor: Fi
     await writeAuditEvent(tx, { organizationId, actorId: actor.actorId, action: "finance." + descriptor.auditResource + "." + (output ? "exported" : "viewed"),
       resourceType: "report", resourceId: propertyId ?? organizationId, propertyScopeId: propertyId, occurredAt: now, requestId: deps.requestId ?? randomUUID(),
       reason: "Read the original sealed financial and operational sources",
-      after: { fromOn, toOn, timezone, currency, sourceFingerprint, format: output?.format ?? null } });
+      after: { fromOn, toOn, timezone, currency, dimensions: descriptor.dimensions ?? {}, sourceFingerprint, format: output?.format ?? null } });
     await recheck(await clock());
     return result;
   });
