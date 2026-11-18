@@ -1192,6 +1192,10 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "preferences": {
+      "title": "Portal preferences",
+      "notifications": "Notification settings"
+    },
     "reports": {
       "title": "Financial reports",
       "year": "Year",

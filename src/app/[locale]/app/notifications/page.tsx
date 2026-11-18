@@ -15,7 +15,10 @@ import { canManageDeliveries } from "@/platform/notifications/delivery-service";
 
 export const dynamic = "force-dynamic";
 
-export default async function NotificationSettingsPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function NotificationSettingsPage({ params, searchParams }: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ from?: string | string[] }>;
+}) {
   const locale = safeLocale((await params).locale);
   setRequestLocale(locale);
   const session = await auth();
@@ -23,10 +26,11 @@ export default async function NotificationSettingsPage({ params }: { params: Pro
   if (session.user.securitySetupRequired) redirect(`/${locale}/app/security`);
   const t = await getTranslations("Notifications.settings");
   const actor = await notificationActorFromSession(session);
+  const fromOwnerPortal = (await searchParams).from === "owner-portal";
   const canConfigure = actor && authorize(actor.authContext, "configure", { type: "config_rule", organizationId: actor.organizationId });
   return <AdminShell className="resource-page" testId="notification-settings-page">
     <ShellHeader eyebrow={t("eyebrow")} title={t("title")} subtitle={t("description")}
-      actions={<Link className="secondary-button" href={`/${locale}/app`}>{t("back")}</Link>} />
+      actions={<Link className="secondary-button" href={`/${locale}/app${fromOwnerPortal ? "/owner-portal" : ""}`}>{t("back")}</Link>} />
     <NotificationSettings />
     <DigestSettings />
     <PushSettings />

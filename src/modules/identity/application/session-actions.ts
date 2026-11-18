@@ -233,12 +233,13 @@ export async function finishPasskeyLoginAction(
 
 export async function updatePreferredLocaleAction(locale: string, formData: FormData): Promise<void> {
   const appLocale = safeLocale(locale);
+  const destination = formData.get("returnSurface") === "owner_portal" ? "/app/owner-portal" : "/app";
   const parsed = preferredLocaleSchema.safeParse({
     preferredLocale: formData.get("preferredLocale")
   });
 
   if (!parsed.success) {
-    redirect(`/${appLocale}/app`);
+    redirect(`/${appLocale}${destination}`);
   }
 
   const session = await auth();
@@ -254,5 +255,5 @@ export async function updatePreferredLocaleAction(locale: string, formData: Form
     requestId: requestHeaders.get("x-request-id") ?? undefined
   });
 
-  redirect(`/${parsed.data.preferredLocale}/app`);
+  redirect(`/${parsed.data.preferredLocale}${destination}`);
 }

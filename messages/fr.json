@@ -1192,6 +1192,10 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "preferences": {
+      "title": "Préférences du portail",
+      "notifications": "Paramètres des notifications"
+    },
     "reports": {
       "title": "Rapports financiers",
       "year": "Année",

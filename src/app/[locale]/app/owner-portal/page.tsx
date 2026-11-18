@@ -2,16 +2,13 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { EmptyState, OwnerShell, ShellHeader } from "@/design-system/shells";
-import { routing, type AppLocale } from "@/i18n/routing";
+import { routing, safeLocale } from "@/i18n/routing";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import { listOwnerPortalProperties } from "@/modules/owner-portal/application/owner-portal-service";
+import { updatePreferredLocaleAction } from "@/modules/identity/application/session-actions";
 import { auth } from "@/platform/auth/session";
 
 export const dynamic = "force-dynamic";
-
-function safeLocale(locale: string): AppLocale {
-  return routing.locales.includes(locale as AppLocale) ? (locale as AppLocale) : routing.defaultLocale;
-}
 
 export default async function OwnerPortalPage({
   params
@@ -34,8 +31,9 @@ export default async function OwnerPortalPage({
     notFound();
   }
 
-  const [t, properties] = await Promise.all([
+  const [t, preferences, properties] = await Promise.all([
     getTranslations("OwnerPortal"),
+    getTranslations("AppShell"),
     listOwnerPortalProperties(ctx, {}, { includeCondition: true })
   ]);
 
@@ -51,6 +49,24 @@ export default async function OwnerPortalPage({
         subtitle={t("subtitle")}
         title={t("title")}
       />
+
+      <section aria-label={t("preferences.title")} className="resource-form">
+        <form action={updatePreferredLocaleAction.bind(null, appLocale)} className="preference-form">
+          <input name="returnSurface" type="hidden" value="owner_portal" />
+          <label className="field">
+            <span>{preferences("languagePreference")}</span>
+            <select defaultValue={safeLocale(session.user.preferredLocale)} name="preferredLocale">
+              {routing.locales.map((language) => (
+                <option key={language} value={language}>{preferences("languageNames." + language)}</option>
+              ))}
+            </select>
+          </label>
+          <button className="secondary-button" type="submit">{preferences("saveLanguagePreference")}</button>
+        </form>
+        <Link className="secondary-button" href={`/${appLocale}/app/notifications?from=owner-portal`}>
+          {t("preferences.notifications")}
+        </Link>
+      </section>
 
       <section className="workspace-main">
         <div className="section-heading">
