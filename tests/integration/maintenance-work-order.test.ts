@@ -1,3 +1,5 @@
+import { generateRecurringOperations } from "@/modules/reservations/application/operation-automation";
+import { readAssetPreventiveSchedule, saveAssetPreventiveSchedule } from "@/modules/assets/application/preventive-schedule";
 import { tickAssetWarrantyReminders } from "@/modules/assets/application/warranty-alerts";
 import { getAsset, listAssets, saveAsset } from "@/modules/assets/application/asset-service";
 import { AssetAccessError, AssetConflictError } from "@/modules/assets/domain/asset";
@@ -203,14 +205,14 @@ it("runs native estimate approval, task completion and expense posting with immu
 });
 
 it("registers and links canonical property assets with exact cost, unchanged sources and scoped history", async () => {
-  const keys = ["asset:view", "asset:create", "asset:edit", "asset_cost:view", "asset_cost:edit"];
+  const keys = ["asset:view", "asset:create", "asset:edit", "asset_cost:view", "asset_cost:edit", "task:create"];
   const f = await fixture(keys), external = await fixture(keys);
   const data = {
     tag: "PUMP-0042", propertyId: f.property.id, idempotencyKey: randomUUID(), reason: "Record the original installed pool pump",
     fields: { name: "Installed pool pump", category: "Pool equipment", description: "Original pump near the pool",
       condition: "GOOD", purchaseOn: "2024-02-29", cost: { amount: "9999999999999999.99", currency: "MAD" },
       warrantyProvider: "Original warranty supplier", warrantyReference: "WR-9001", warrantyStartsOn: "2024-02-29",
-      warrantyEndsOn: "2027-02-28", usefulLifeMonths: 120 }
+      warrantyEndsOn: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10), usefulLifeMonths: 120 }
   };
   const asset = await saveAsset(f.actor, data, f.deps);
   const replay = await saveAsset(f.actor, data, f.deps);
@@ -241,6 +243,19 @@ it("registers and links canonical property assets with exact cost, unchanged sou
     organizationId: f.organizationId, recipientId: f.account.id, kind: "asset_warranty_expiring"
   } }))).toBe(1);
 
+
+  const now = new Date(), today = now.toISOString().slice(0, 10);
+  const schedule = { assetId: asset.id, expectedVersion: 0, cancelFuture: false, reason: "Service the original installed pool pump",
+    definition: { title: { en: "Service pool pump", fr: "Entretenir la pompe" },
+      starts_on: today, ends_on: null, start_minute: 540, every_days: 1, weekdays: [0, 1, 2, 3, 4, 5, 6],
+      checklist_template_key: "maintenance_original", priority: "NORMAL", enabled: true } };
+  await saveAssetPreventiveSchedule(f.actor, schedule, f.deps);
+  const range = { propertyId: f.property.id, from: today, until: today };
+  expect(await generateRecurringOperations(f.actor, range, { ...f.deps, now: new Date(Date.now() + 1000) })).toMatchObject({ created: 1 });
+  expect(await generateRecurringOperations(f.actor, range, { ...f.deps, now: new Date(Date.now() + 1000) })).toMatchObject({ created: 0, existing: 1 });
+  expect(await readAssetPreventiveSchedule(f.actor, asset.id, db)).toMatchObject({
+    version: 1, schedule: { enabled: true }, tasks: [{ state: "PLANNED" }]
+  });
 
   const reviewed = await previewWorkOrderRegistration(f.actor, f.intent, f.deps);
   await publishWorkOrderRegistration(f.actor, { intent: f.intent, reviewFingerprint: reviewed.reviewFingerprint, idempotencyKey: randomUUID() }, f.deps);

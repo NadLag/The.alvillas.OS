@@ -119,6 +119,12 @@ export class AssetRepository {
     return revision;
   }
 
+  preventiveTasks(propertyId: string, seriesKey: string) {
+    return this.tx.operationTask.findMany({ where: { organizationId: this.organizationId, propertyId, seriesKey },
+      select: { id: true, dueDate: true, state: true, assignedToPersonId: true, assignedToUserAccountId: true },
+      orderBy: [{ dueDate: "desc" }, { id: "asc" }], take: 25 });
+  }
+
   currency(code: string) {
     return this.tx.currency.findUnique({ where: { code }, select: { minorUnit: true } });
   }

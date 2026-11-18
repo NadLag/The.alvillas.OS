@@ -3,6 +3,9 @@ import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
+import { readAssetPreventiveSchedule } from "@/modules/assets/application/preventive-schedule";
+import { AssetPreventiveEditor } from "@/modules/assets/ui/asset-preventive-editor";
+import { localizedText } from "@/i18n/content";
 import { formatCurrencyAmount, formatDate, formatDateTime } from "@/i18n/format";
 import { safeLocale } from "@/i18n/routing";
 import { getAsset } from "@/modules/assets/application/asset-service";
@@ -22,6 +25,13 @@ export default async function AssetDetailPage({ params, searchParams }: {
     if (error instanceof AssetAccessError) notFound();
     throw error;
   })]);
+  const [preventive, operations] = await Promise.all([
+    readAssetPreventiveSchedule(actor, parsed.data.assetId).catch((error: unknown) => {
+      if (error instanceof AssetAccessError) return null;
+      throw error;
+    }),
+    getTranslations("Operations.manage")
+  ]);
   const appLocale = safeLocale(locale), base = "/" + appLocale + "/app/assets";
   const { asset, history, next } = data;
   const date = (day: string) => formatDate(appLocale, new Date(day), { timeZone: "UTC" });
@@ -50,6 +60,19 @@ export default async function AssetDetailPage({ params, searchParams }: {
         warrantyStartsOn: asset.warrantyStartsOn, warrantyEndsOn: asset.warrantyEndsOn, usefulLifeMonths: asset.usefulLifeMonths,
         ...(typeof asset.cost === "string" ? {} : { cost: asset.cost }) }
     }} /> : null}
+    {preventive ? <section className="panel resource-form" aria-label={t("schedule.title")}>
+      <h2>{t("schedule.title")}</h2>
+      {preventive.schedule ? <>
+        <p dir="auto">{localizedText(preventive.schedule.title, appLocale)}</p>
+        <p>{t(preventive.schedule.enabled ? "schedule.enabled" : "schedule.paused")}</p>
+      </> : <p>{t("schedule.empty")}</p>}
+      {preventive.canEdit ? <AssetPreventiveEditor key={preventive.version} assetId={asset.id} locale={appLocale} data={preventive} /> : null}
+      {preventive.tasks.length ? <ul className="resource-list">{preventive.tasks.map(task => <li key={task.id}>
+        <Link href={"/" + appLocale + "/app/operations/" + task.id}>
+          {date(task.dueDate.toISOString())} {" / "} {operations("states." + task.state)}
+        </Link>
+      </li>)}</ul> : null}
+    </section> : null}
     <section aria-label={t("history")}>
       <h2>{t("history")}</h2>
       <ol className="resource-list">{history.map(revision => <li key={revision.number} className="resource-form">
