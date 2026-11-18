@@ -64,7 +64,7 @@ export class OwnerPortalRepository extends LedgerCalendarRepository {
     userAccountId: string,
     propertyId: string
   ): Promise<OwnerPropertyRow | null> {
-    const rows = await this.ownerPropertyAccessRows(userAccountId);
+    const rows = await this.ownerPropertyAccessRows(userAccountId, propertyId);
     return rows.find((row) => row.propertyId === propertyId) ?? null;
   }
 
@@ -101,11 +101,31 @@ export class OwnerPortalRepository extends LedgerCalendarRepository {
 
   listOwnerLedgerPostings(input:Parameters<OwnerStatementRepository["listOwnerLedgerPostings"]>[0]):Promise<RawOwnerLedgerPosting[]>{return new OwnerStatementRepository(this.tx,this.organizationId).listOwnerLedgerPostings(input)}
 
-  private async ownerPropertyAccessRows(userAccountId: string): Promise<OwnerPropertyRow[]> {
+  async reservationCalendar(propertyId: string) {
+    const [[clock], property] = await Promise.all([
+      this.tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`,
+      this.tx.property.findFirst({ where: { organizationId: this.organizationId, id: propertyId, archivedAt: null },
+        select: { timezone: true } })
+    ]);
+    return property ? { now: clock.now, timezone: property.timezone } : null;
+  }
+
+  reservations(propertyId: string, from: Date, until?: Date, cursor?: { day: Date; id: string }) {
+    return this.tx.reservation.findMany({
+      where: { organizationId: this.organizationId, propertyId, archivedAt: null, checkOut: { gt: from },
+        ...(until ? { checkIn: { lte: until } } : {}),
+        ...(cursor ? { OR: [{ checkIn: { gt: cursor.day } }, { checkIn: cursor.day, id: { gt: cursor.id } }] } : {}) },
+      select: { id: true, reference: true, checkIn: true, checkOut: true, status: true },
+      orderBy: [{ checkIn: "asc" }, { id: "asc" }], take: 31
+    });
+  }
+
+  private async ownerPropertyAccessRows(userAccountId: string, propertyId?: string): Promise<OwnerPropertyRow[]> {
     const rows = await this.tx.ownerPortalAccess.findMany({
       where: {
         organizationId: this.organizationId,
         userAccountId,
+        userAccount: { status: "ACTIVE", organizationId: this.organizationId },
         archivedAt: null,
         owner: {
           archivedAt: null
@@ -117,6 +137,7 @@ export class OwnerPortalRepository extends LedgerCalendarRepository {
             propertyOwners: {
               where: {
                 archivedAt: null,
+                propertyId,
                 property: {
                   archivedAt: null
                 }

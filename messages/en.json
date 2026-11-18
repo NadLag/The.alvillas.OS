@@ -1192,6 +1192,25 @@
     "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
+    "reservationList": {
+      "title": "Reservations",
+      "back": "Back to properties",
+      "from": "From date",
+      "until": "Through date",
+      "filter": "Apply dates",
+      "stay": "{arrival} to {departure}",
+      "empty": "No reservations for these dates.",
+      "next": "Next reservations",
+      "status": {
+        "SCHEDULED": "Scheduled",
+        "CONFIRMED": "Confirmed",
+        "IN_STAY": "In stay",
+        "COMPLETE": "Completed",
+        "CANCELLED": "Cancelled",
+        "NO_SHOW": "No show",
+        "OTHER": "Recorded"
+      }
+    },
     "condition": {
       "title": "Property condition",
       "states": {

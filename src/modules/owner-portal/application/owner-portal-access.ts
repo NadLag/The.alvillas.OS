@@ -29,7 +29,7 @@ export async function ownerPortalActorContextFromSession(
 ): Promise<OwnerPortalActorContext | null> {
   const user = session?.user;
 
-  if (!user?.id || !user.personId || !user.organizationId) {
+  if (!user?.id || !user.personId || !user.organizationId || user.securitySetupRequired || user.sessionRevoked) {
     return null;
   }
 

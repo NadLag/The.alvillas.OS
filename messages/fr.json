@@ -1192,6 +1192,25 @@
     "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
+    "reservationList": {
+      "title": "Réservations",
+      "back": "Retour aux propriétés",
+      "from": "Date de début",
+      "until": "Date de fin",
+      "filter": "Appliquer les dates",
+      "stay": "Du {arrival} au {departure}",
+      "empty": "Aucune réservation pour ces dates.",
+      "next": "Réservations suivantes",
+      "status": {
+        "SCHEDULED": "Programmée",
+        "CONFIRMED": "Confirmée",
+        "IN_STAY": "En séjour",
+        "COMPLETE": "Terminée",
+        "CANCELLED": "Annulée",
+        "NO_SHOW": "Non-présentation",
+        "OTHER": "Enregistrée"
+      }
+    },
     "condition": {
       "title": "État de la propriété",
       "states": {

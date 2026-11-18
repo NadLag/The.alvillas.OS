@@ -1,3 +1,4 @@
+import { listOwnerReservations } from "@/modules/owner-portal/application/owner-reservations";
 import { tickSupplierAlerts } from "@/platform/notifications/supplier-alerts";
 import { supplierPriceListKey } from "@/platform/config/supplier-price-list-policy";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
@@ -59,6 +60,13 @@ it("retains the original supplier, configured SLA, replay outcome and departure 
   }, { db });
   if (!owner) throw new Error("Expected the linked owner portal account");
   await expect(getOwnerPropertyCondition(owner, f.property.id, { db })).resolves.toBe("CLEAR");
+  const stays = await listOwnerReservations(owner, { propertyId: f.property.id, from: "2020-01-01" }, db);
+  expect(stays.reservations).toContainEqual({
+    reference: f.reservation.reference, checkIn: f.reservation.checkIn.toISOString().slice(0, 10),
+    checkOut: f.reservation.checkOut.toISOString().slice(0, 10), status: "CONFIRMED"
+  });
+  expect(Object.keys(stays.reservations[0]).sort()).toEqual(["checkIn", "checkOut", "reference", "status"]);
+  await expect(listOwnerReservations(owner, { propertyId: randomUUID(), from: "2020-01-01" }, db)).rejects.toBeInstanceOf(OwnerPortalNotFoundError);
   const nativeTask = await withTenant(db, f.organizationId, tx => tx.operationTask.findFirstOrThrow({
     where: { organizationId: f.organizationId, reservationId: f.reservation.id }
   }));
@@ -140,6 +148,7 @@ it("retains the original supplier, configured SLA, replay outcome and departure 
     where: { id: access.id }, data: { archivedAt: new Date() }
   }));
   await expect(getOwnerPropertyCondition(owner, f.property.id, { db })).rejects.toBeInstanceOf(OwnerPortalNotFoundError);
+  await expect(listOwnerReservations(owner, { propertyId: f.property.id, from: "2020-01-01" }, db)).rejects.toBeInstanceOf(OwnerPortalNotFoundError);
   expect(await withTenant(db, f.organizationId, tx => tx.auditLog.count({
     where: { organizationId: f.organizationId, resourceId: taskId, action: "maintenance.work_order.contractor_changed" }
   }))).toBe(2);

@@ -24,6 +24,7 @@ test.describe("owner portal live balance and statement", () => {
   test("shows only authorized owner properties with ledger-derived EN and FR statements", async ({
     page
   }, testInfo) => {
+    test.setTimeout(120000);
     const suffix = `own-${testInfo.project.name}-${Date.now()}`
       .toLowerCase()
       .replace(/[^a-z0-9]+/gu, "-");
@@ -47,6 +48,12 @@ test.describe("owner portal live balance and statement", () => {
     await expect(page.getByTestId("owner-property-row")).toContainText(scenario.propertyName);
     await expect(page.getByText(scenario.otherPropertyName)).toHaveCount(0);
     await expect(page.getByTestId("owner-property-condition")).toHaveText(en.OwnerPortal.condition.states.CLEAR);
+
+    await page.getByRole("link", { name: en.OwnerPortal.reservationList.title, exact: true }).click();
+    await expect(page.getByTestId("owner-reservations")).toBeVisible();
+    await expect(page.getByRole("heading", { name: en.OwnerPortal.reservationList.title })).toBeVisible();
+    await expect(page.getByText(en.OwnerPortal.reservationList.empty)).toBeVisible();
+    await page.getByRole("link", { name: en.OwnerPortal.reservationList.back, exact: true }).click();
 
     await page.getByTestId("owner-property-row").click();
     await expect(page.getByTestId("owner-statement-page")).toBeVisible();
@@ -86,6 +93,9 @@ test.describe("owner portal live balance and statement", () => {
     );
 
     await page.goto(`/en/app/owner-portal/properties/${scenario.otherPropertyId}?${periodQuery}`);
+    await expect(page.locator("body")).toContainText(/404|not found/i);
+
+    await page.goto("/en/app/owner-portal/properties/" + scenario.otherPropertyId + "/reservations");
     await expect(page.locator("body")).toContainText(/404|not found/i);
 
     await page.context().clearCookies();

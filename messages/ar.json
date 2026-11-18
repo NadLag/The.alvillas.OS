@@ -1192,6 +1192,25 @@
     "draftSaved": "تم حفظ تغييراتك على هذا الجهاز."
   },
   "OwnerPortal": {
+    "reservationList": {
+      "title": "الحجوزات",
+      "back": "العودة إلى العقارات",
+      "from": "من تاريخ",
+      "until": "إلى تاريخ",
+      "filter": "تطبيق التواريخ",
+      "stay": "من {arrival} إلى {departure}",
+      "empty": "لا توجد حجوزات لهذه التواريخ.",
+      "next": "الحجوزات التالية",
+      "status": {
+        "SCHEDULED": "مجدول",
+        "CONFIRMED": "مؤكد",
+        "IN_STAY": "قيد الإقامة",
+        "COMPLETE": "مكتمل",
+        "CANCELLED": "ملغى",
+        "NO_SHOW": "لم يحضر",
+        "OTHER": "مسجل"
+      }
+    },
     "condition": {
       "title": "حالة العقار",
       "states": {

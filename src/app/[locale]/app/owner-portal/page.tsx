@@ -62,13 +62,13 @@ export default async function OwnerPortalPage({
         {properties.length === 0 ? (
           <EmptyState testId="owner-properties-empty" tone="motif">{t("empty")}</EmptyState>
         ) : (
-          <div className="resource-list">
+          <ul className="resource-list">
             {properties.map((property) => (
+              <li className="resource-form" key={property.ownerId + ":" + property.propertyId}>
               <Link
                 className="resource-row"
                 data-testid="owner-property-row"
                 href={`/${appLocale}/app/owner-portal/properties/${property.propertyId}`}
-                key={property.propertyId}
               >
                 <span>
                   <strong>{property.propertyName}</strong>
@@ -77,8 +77,12 @@ export default async function OwnerPortalPage({
                 </span>
                 <span>{t("openStatement")}</span>
               </Link>
+              <Link className="secondary-button" href={`/${appLocale}/app/owner-portal/properties/${property.propertyId}/reservations`}>
+                {t("reservationList.title")}
+              </Link>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </section>
     </OwnerShell>
