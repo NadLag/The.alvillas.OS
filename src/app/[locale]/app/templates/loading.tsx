@@ -3,6 +3,7 @@ export default async function LoadingTemplates() {
   const t = await getTranslations("Templates");
   return (
     <section className="workspace-main" role="status" aria-busy="true">
+      <h1>{t("title")}</h1>
       <p>{t("loading")}</p>
       <div className="template-skeleton" />
       <div className="template-skeleton" />
