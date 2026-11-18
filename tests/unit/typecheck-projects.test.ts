@@ -16,11 +16,11 @@ describe("complete compiler partition coverage", () => {
     const moduleUrl = pathToFileURL(join(process.cwd(), "scripts/typecheck-projects.mjs")).href;
     const plan = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `import {prepareTypecheckProjects} from ${JSON.stringify(moduleUrl)};console.log(JSON.stringify(prepareTypecheckProjects(${JSON.stringify(root)})));`], { encoding: "utf8", windowsHide: true })) as { unitRootCount: number; originalRoots: string[]; shared: string[]; projects: { name: string; path: string; roots: string[] }[] };
     const units = plan.projects.filter(project => project.name === "unit" || project.name.startsWith("unit-")), primary = units.flatMap(project => project.roots.filter(file => !plan.shared.includes(file)));
-    expect(plan.unitRootCount).toBe(193); expect(units.map(project => project.name)).toEqual(["unit", "unit-2", "unit-3"]);
+    expect(plan.unitRootCount).toBe(193); expect(units.map(project => project.name)).toEqual(["unit", "unit-2", "unit-3", "unit-4", "unit-5"]);
     expect(primary).toHaveLength(193); expect(new Set(primary).size).toBe(193);
     expect(new Set(plan.projects.flatMap(project => project.roots))).toEqual(new Set([...plan.originalRoots, ...plan.shared]));
     for (const project of units) {
-      expect(project.roots.filter(file => !plan.shared.includes(file)).length).toBeLessThanOrEqual(96);
+      expect(project.roots.filter(file => !plan.shared.includes(file)).length).toBeLessThanOrEqual(48);
       expect(plan.shared.every(file => project.roots.includes(file))).toBe(true);
       const run = () => spawnSync(process.execPath, ["--max-old-space-size=2048", "node_modules/typescript/lib/tsc.js", "--noEmit", "--project", project.path], { cwd: process.cwd(), encoding: "utf8", windowsHide: true });
       const valid = run(); expect(valid.status, valid.stdout + valid.stderr).toBe(0);
