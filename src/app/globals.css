@@ -1305,6 +1305,25 @@ textarea:disabled {
   gap: var(--space-6);
 }
 
+.maintenance-work-order-editor {
+  grid-template-columns: minmax(0, 1fr);
+  min-inline-size: 0;
+}
+
+.maintenance-work-order-choices,
+.maintenance-work-order-choices li,
+.maintenance-work-order-choices button,
+.maintenance-work-order-choices button span {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-work-order-choices button {
+  text-align: start;
+  white-space: normal;
+}
+
 .owners-page {
   grid-template-columns: minmax(0, 1fr);
   overflow-wrap: anywhere;
