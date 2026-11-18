@@ -4553,7 +4553,7 @@
     "provider_BANK": "Rapprochement bancaire",
     "provider_STAFF": "Rémunération du personnel",
     "provider_INVENTORY": "Inventaire physique",
-    "provider_LAUNDRY": "Facture de blanchisserie",
+    "provider_LAUNDRY": "Factures de blanchisserie",
     "provider_OWNER_PAYOUT": "Versement propriétaire",
     "status_OPEN": "Ouvert",
     "status_RESOLVED": "Résolu",
@@ -4625,7 +4625,13 @@
     "emptyPage": "Aucun écart ne correspond sur cette page.",
     "assignedColleague": "Un autre collègue",
     "queueForbidden": "Un accès à cette source pour toute l’organisation est nécessaire pour la parcourir. Ouvrez les écarts individuels depuis leurs espaces existants.",
-    "refreshRequired": "Actualisez cette liste depuis les sources d’origine avant de continuer."
+    "refreshRequired": "Actualisez cette liste depuis les sources d’origine avant de continuer.",
+    "variancePercentage": "Pourcentage d’écart",
+    "percentageUndefined": "Indéfini : le montant attendu est nul.",
+    "comparison_NO_ACTUAL": "Aucune facture réelle active n’est associée à cette estimation. Vérifiez le lot original.",
+    "comparison_BASELINE_CHANGED": "Les factures actives utilisent une autre estimation conservée. Vérifiez les associations du lot.",
+    "comparison_CURRENCY_MISMATCH": "Les devises originales diffèrent. Les montants restent séparés sans conversion ni écart inventé.",
+    "varianceLink": "Examiner l’écart de blanchisserie"
   },
   "AccountantExports": {
     "eyebrow": "Finance",
@@ -8097,6 +8103,7 @@
       "PENDING_APPROVAL": "En attente d’approbation",
       "APPROVED": "Approuvée",
       "REJECTED": "Rejetée"
-    }
+    },
+    "varianceLink": "Examiner l’écart de blanchisserie"
   }
 }

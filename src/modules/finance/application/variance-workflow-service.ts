@@ -13,11 +13,12 @@ import type { FinanceActorContext } from "./finance-access";
 import { varianceCommandInputSchema, varianceCommandReceiptSchema } from "../domain/variance-workspace";
 import { recheckAccountAuthorization } from "@/platform/authz/current-authority";
 import { OutboxRepository } from "@/platform/events/outbox-repository";
+import type {VarianceFacts} from "../domain/variance-facts";
 
 export type VarianceSourceAccess = "view" | "history" | VarianceWorkflowCommand["operation"];
 export type AuthorizedVarianceWorkflowSource = {
   baseline?: VarianceWorkflowSource["baseline"];
-  facts: { kind: "MONEY" | "QUANTITY"; unit: string; currency: string | null; expected: string; actual: string; variance: string };
+  facts: VarianceFacts;
   recheck(): Promise<void>;
 };
 /** Production adapters must authorize original native facts, preserving held and current restrictions. */

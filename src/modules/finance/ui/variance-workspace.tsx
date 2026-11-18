@@ -3,7 +3,8 @@ import { useCallback, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import type { z } from "zod";
 import { SkeletonBlock } from "@/design-system/shells";
-import { formatCurrencyAmount, formatDateTime } from "@/i18n/format";
+import { formatDateTime } from "@/i18n/format";
+import {VarianceFactsView} from "./variance-facts";
 import type { AppLocale } from "@/i18n/routing";
 import type { VarianceSourceReference } from "../domain/variance-workflow";
 import { varianceAssigneesSchema, varianceCommandInputSchema, varianceCommandReceiptSchema, varianceDetailSchema, varianceHistorySchema,
@@ -52,13 +53,13 @@ export function VarianceWorkspace({ locale, scope, actorId, source }: { locale: 
         {command.state === "succeeded" ? <button className="secondary-button" data-testid="variance-new-command" onClick={command.startNew}>{t("newCommand")}</button> : null}</div></section>
     {detail.pending ? <SkeletonBlock rows={5}/> : detail.error ? <p role="alert">{t(detail.error)}</p> : data ? <>
       <section className="resource-form" data-testid="variance-detail"><h2>{t(`provider_${source.provider}`)}</h2><p role="status" data-testid="variance-state">{t(`status_${data.status}`)}</p>
-        <dl className="detail-grid">{(["expected", "actual", "variance"] as const).map(key => <div key={key}><dt>{t(key)}</dt><dd data-testid={`variance-${key}`} dir="auto">{data.facts.kind === "MONEY" && data.facts.currency ?
-          formatCurrencyAmount(locale, data.facts[key], data.facts.currency) : new Intl.NumberFormat(locale).format(BigInt(data.facts[key]))}</dd></div>)}
+        <VarianceFactsView facts={data.facts} locale={locale} provider={source.provider} testPrefix="variance"/>
+        <dl className="detail-grid">
           <div><dt>{t("age")}</dt><dd>{t("ageDays", { days: new Intl.NumberFormat(locale).format(BigInt(data.ageMilliseconds) / 86_400_000n) })}</dd></div>
           <div><dt>{t("assignedTo")}</dt><dd dir="auto">{name(data.assignedTo)}</dd></div>
           {data.resolvedBy ? <div><dt>{t("resolvedBy")}</dt><dd dir="auto">{name(data.resolvedBy)}</dd></div> : null}
           {data.resolvedAt ? <div><dt>{t("resolvedAt")}</dt><dd>{formatDateTime(locale, new Date(data.resolvedAt), { timeZone: "UTC" })}</dd></div> : null}
-        </dl>{data.facts.kind === "QUANTITY" ? <p dir="auto">{data.facts.unit.startsWith("QUANTITY:") ? data.facts.unit.slice(9) : t("quantity")}</p> : null}
+        </dl>
         <p>{t("reason")}: <span dir="auto">{data.reason || t("empty")}</span></p><p>{t("action")}: <span dir="auto">{data.action || t("empty")}</span></p>
       </section>
       {["OPEN", "RESOLVED"].includes(data.status) ? <section className="resource-form"><h2>{t("review")}</h2><p>{t("reviewGuidance")}</p>

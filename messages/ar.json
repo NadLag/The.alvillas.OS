@@ -4553,7 +4553,7 @@
     "provider_BANK": "المطابقة البنكية",
     "provider_STAFF": "أجور الموظفين",
     "provider_INVENTORY": "الجرد الفعلي",
-    "provider_LAUNDRY": "فاتورة الغسيل",
+    "provider_LAUNDRY": "فواتير مورّد الغسيل",
     "provider_OWNER_PAYOUT": "دفعة المالك",
     "status_OPEN": "مفتوح",
     "status_RESOLVED": "تم الحل",
@@ -4625,7 +4625,13 @@
     "emptyPage": "لا توجد فروقات مطابقة في هذه الصفحة.",
     "assignedColleague": "زميل آخر",
     "queueForbidden": "يلزم وصول يشمل المؤسسة لتصفح هذا المصدر. افتح الفروقات الفردية من مساحات العمل الحالية.",
-    "refreshRequired": "حدّث هذه القائمة من المصادر الأصلية قبل المتابعة."
+    "refreshRequired": "حدّث هذه القائمة من المصادر الأصلية قبل المتابعة.",
+    "variancePercentage": "نسبة الفرق",
+    "percentageUndefined": "غير محددة: المبلغ المتوقع يساوي صفراً.",
+    "comparison_NO_ACTUAL": "لا توجد فاتورة فعلية نشطة مرتبطة بهذا التقدير. راجع دفعة الغسيل الأصلية.",
+    "comparison_BASELINE_CHANGED": "تستخدم الفواتير النشطة تقديراً محفوظاً آخر. راجع ارتباطات الدفعة الحالية.",
+    "comparison_CURRENCY_MISMATCH": "تختلف العملات الأصلية. تبقى المبالغ منفصلة دون تحويل أو احتساب فرق غير صحيح.",
+    "varianceLink": "مراجعة فرق تكلفة الغسيل"
   },
   "AccountantExports": {
     "eyebrow": "المالية",
@@ -8097,6 +8103,7 @@
       "PENDING_APPROVAL": "بانتظار الموافقة",
       "APPROVED": "موافق عليها",
       "REJECTED": "مرفوضة"
-    }
+    },
+    "varianceLink": "مراجعة فرق تكلفة الغسيل"
   }
 }

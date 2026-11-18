@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { varianceDetailSchema } from "./variance-workspace";
 
-export const varianceCenterProviderSchema = z.enum(["OTA", "BANK", "STAFF", "INVENTORY"]);
+export const varianceCenterProviderSchema = z.enum(["OTA", "BANK", "STAFF", "INVENTORY", "LAUNDRY"]);
 export const varianceCenterFilterSchema = z.object({ provider: varianceCenterProviderSchema,
   status: z.enum(["OPEN", "RESOLVED", "MATCHED", "SOURCE_CHANGED", "ALL"]).default("OPEN"),
   assignment: z.enum(["ANY", "ME", "UNASSIGNED"]).default("ANY") }).strict();

@@ -4553,7 +4553,7 @@
     "provider_BANK": "Bank reconciliation",
     "provider_STAFF": "Employee earnings",
     "provider_INVENTORY": "Physical inventory",
-    "provider_LAUNDRY": "Laundry invoice",
+    "provider_LAUNDRY": "Laundry supplier invoices",
     "provider_OWNER_PAYOUT": "Owner payout",
     "status_OPEN": "Open",
     "status_RESOLVED": "Resolved",
@@ -4625,7 +4625,13 @@
     "emptyPage": "No differences match on this page.",
     "assignedColleague": "Another colleague",
     "queueForbidden": "You need organization-wide access to browse this source. Open individual differences from their existing workspaces.",
-    "refreshRequired": "Refresh this list from the original sources before continuing."
+    "refreshRequired": "Refresh this list from the original sources before continuing.",
+    "variancePercentage": "Variance percentage",
+    "percentageUndefined": "Undefined: expected amount is zero.",
+    "comparison_NO_ACTUAL": "No active actual invoice is associated with this estimate. Review the original batch before comparing.",
+    "comparison_BASELINE_CHANGED": "The active invoices use another retained estimate. Review the current batch association.",
+    "comparison_CURRENCY_MISMATCH": "The original currencies differ. Amounts remain separate; no conversion or variance has been invented.",
+    "varianceLink": "Review laundry variance"
   },
   "AccountantExports": {
     "eyebrow": "Finance",
@@ -8097,6 +8103,7 @@
       "PENDING_APPROVAL": "Awaiting approval",
       "APPROVED": "Approved",
       "REJECTED": "Rejected"
-    }
+    },
+    "varianceLink": "Review laundry variance"
   }
 }
