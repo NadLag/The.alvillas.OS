@@ -1,4 +1,34 @@
 {
+  "CommandExceptions": {
+    "title": "Exceptions",
+    "back": "Back to dashboard",
+    "approvals": "Approvals",
+    "variances": "Financial variances",
+    "stock": "Low stock",
+    "maintenance": "Maintenance",
+    "conflicts": "Booking conflicts",
+    "sync": "Failed syncs",
+    "denied": "This queue is unavailable for your account.",
+    "changed": "This queue changed. Open it again.",
+    "restart": "Restart",
+    "open": "Open",
+    "empty": "No exceptions.",
+    "emptyPage": "No visible exceptions on this page.",
+    "next": "Next page",
+    "locations": "Stock locations",
+    "pickLocation": "Choose a stock location to see shortages.",
+    "reorder": "Open reorder workspace",
+    "locationSearch": "Find a location",
+    "find": "Search",
+    "moreLocations": "More locations",
+    "shortage": "{current} in stock · minimum {minimum}",
+    "provider": {
+      "OTA": "Booking platforms",
+      "BANK": "Bank",
+      "STAFF": "Team",
+      "LAUNDRY": "Laundry"
+    }
+  },
   "CommandToday": {
     "title": "Today’s operations",
     "arrivals": "Arrivals",

@@ -1,3 +1,4 @@
+import { CommandCenterExceptionsLink } from "@/platform/command-center/exceptions-link";
 import { CommandCenterTodaySummary } from "@/modules/reservations/ui/command-center-today";
 import { ReservationCommandExceptions } from "@/modules/reservations/ui/command-exceptions";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
@@ -179,6 +180,7 @@ export default async function AppPage({
           <h2>{t("welcome", { name: session.user?.name ?? session.user?.email ?? t("fallbackName") })}</h2>
           <p>{t("summary")}</p>
           {reservationContext ? <>
+            <CommandCenterExceptionsLink context={reservationContext.authContext} locale={appLocale} />
             <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} />
             <CommandCenterTodaySummary actor={reservationContext} locale={appLocale} />
           </> : null}

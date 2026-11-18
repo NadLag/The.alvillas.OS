@@ -5,6 +5,10 @@ import type {MaintenanceIssueSource,MaintenanceIssueLinkReceipt} from "../domain
 export type MaintenanceContextHead={id:string;issueId:string;version:string;operation:string;source:unknown};
 export class MaintenanceIssueContextRepository{
  readonly outbox:OutboxRepository;
+ openIssueIds(after?: string) {
+  return this.tx.operationIssue.findMany({where:{organizationId:this.organizationId,state:{in:["OPEN","IN_PROGRESS"]},
+    ...(after?{id:{lt:after}}:{})},select:{id:true},orderBy:{id:"desc"},take:21});
+ }
  constructor(readonly tx:TenantTransaction,readonly organizationId:string){this.outbox=new OutboxRepository(tx,organizationId);}
  lockActor(actorId:string,nonce:string){return this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${"maintenance-issue-context-command:"+this.organizationId+":"+actorId+":"+nonce},0))`);}
  lockIssue(id:string){return this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${"maintenance-issue-context:"+this.organizationId+":"+id},0))`);}

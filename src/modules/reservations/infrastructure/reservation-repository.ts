@@ -823,6 +823,12 @@ export class ReservationRepository {
   async releaseMissingForReservation(reservationId: string, actorId: string, reason: string) {
     await this.tx.reservationException.updateMany({ where: { organizationId: this.organizationId, reservationId, kind: "MISSING_FEED_ENTRY", status: "OPEN" }, data: { status: "RESOLVED", resolvedBy: actorId, resolution: reason } });
   }
+  commandExceptionPage(propertyIds: string[], visibility: Prisma.ReservationWhereInput, propertyWideIds: string[], kinds: string[], after?: string) {
+    return this.tx.reservationException.findMany({ where: { organizationId: this.organizationId, propertyId: { in: propertyIds },
+      status: "OPEN", kind: { in: kinds }, ...(after ? { id: { lt: after } } : {}),
+      OR: [{ reservationId: null, propertyId: { in: propertyWideIds } }, { linkedreservationId: { is: visibility } }] },
+      orderBy: { id: "desc" }, select: { id: true, propertyId: true, reservationId: true, kind: true }, take: 21 });
+  }
   commandExceptions(propertyIds: string[], visibility: Prisma.ReservationWhereInput = {}, propertyWideIds: string[] = propertyIds) { return this.tx.reservationException.findMany({ where: { organizationId: this.organizationId, propertyId: { in: propertyIds }, status: "OPEN", OR: [{ reservationId: null, propertyId: { in: propertyWideIds } }, { linkedreservationId: { is: visibility } }] }, orderBy: { createdAt: "desc" }, select: { id: true, propertyId: true, reservationId: true, kind: true }, take: 10 }); }
   scopedReservations(ids: string[]) { return this.tx.reservation.findMany({ where: { organizationId: this.organizationId, id: { in: ids }, archivedAt: null }, select: { id: true, propertyId: true, status: true, property: { select: { city: true, cityId: true, region: true, regionId: true } } } }); }
 }

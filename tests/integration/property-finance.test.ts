@@ -1,3 +1,4 @@
+import { commandExceptionsPage } from "@/platform/command-center/exceptions";
 import { getCommandCenterToday } from "@/modules/reservations/application/command-center-today";
 import { tickScheduledReports } from "@/modules/finance/application/scheduled-report-job";
 import { ScheduledReportRepository } from "@/modules/finance/infrastructure/scheduled-report-repository";
@@ -205,6 +206,26 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(await getCommandCenterToday({ ...other.ctx, personId: other.person.id }, { db, now })).toBeNull();
    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { validTo: new Date("2026-02-28") } }));
    expect(await getCommandCenterToday(actor, { db, now })).toBeNull();
+ });
+
+ it("reads only open authorized booking conflicts and failed syncs in Command Center", async () => {
+   const f = await fixture(), other = await fixture();
+   const actor = { ...await grantPerformanceReports(f), personId: f.person.id };
+   await withTenant(db, f.org, async tx => {
+     const source = { organizationId: f.org, propertyId: f.property.id, details: { private: "Private feed URL" } };
+     await tx.reservationException.createMany({ data: [
+       { ...source, kind: "DOUBLE_BOOKING", key: randomUUID() },
+       { ...source, kind: "FEED_SYNC_FAILED", key: randomUUID() },
+       { ...source, kind: "DOUBLE_BOOKING", status: "RESOLVED", key: randomUUID() }
+     ] });
+   });
+   const conflicts = await commandExceptionsPage(actor, { kind: "conflicts" }, db);
+   expect(conflicts).toMatchObject({ state: "ready", items: [{ kind: "DOUBLE_BOOKING", propertyName: f.property.name }] });
+   expect(JSON.stringify(conflicts)).not.toContain("Private feed URL");
+   expect(await commandExceptionsPage(actor, { kind: "sync" }, db)).toMatchObject({ state: "ready", items: [{ kind: "FEED_SYNC_FAILED" }] });
+   expect(await commandExceptionsPage({ ...other.ctx, personId: other.person.id }, { kind: "conflicts" }, db)).toEqual({ state: "denied" });
+   await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+   expect(await commandExceptionsPage(actor, { kind: "conflicts" }, db)).toEqual({ state: "denied" });
  });
 
  it("separates company profit and portfolio performance from location and owner claim balances", async () => {

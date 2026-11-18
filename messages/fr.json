@@ -1,4 +1,34 @@
 {
+  "CommandExceptions": {
+    "title": "Exceptions",
+    "back": "Retour au tableau de bord",
+    "approvals": "Approbations",
+    "variances": "Écarts financiers",
+    "stock": "Stocks bas",
+    "maintenance": "Maintenance",
+    "conflicts": "Conflits de réservation",
+    "sync": "Synchronisations échouées",
+    "denied": "Cette file est inaccessible à votre compte.",
+    "changed": "Cette file a changé. Ouvrez-la de nouveau.",
+    "restart": "Recommencer",
+    "open": "Ouvrir",
+    "empty": "Aucune exception.",
+    "emptyPage": "Aucune exception visible sur cette page.",
+    "next": "Page suivante",
+    "locations": "Emplacements du stock",
+    "pickLocation": "Choisissez un emplacement pour voir les manques.",
+    "reorder": "Ouvrir le réapprovisionnement",
+    "locationSearch": "Rechercher un emplacement",
+    "find": "Rechercher",
+    "moreLocations": "Plus d’emplacements",
+    "shortage": "{current} en stock · minimum {minimum}",
+    "provider": {
+      "OTA": "Plateformes de réservation",
+      "BANK": "Banque",
+      "STAFF": "Équipe",
+      "LAUNDRY": "Blanchisserie"
+    }
+  },
   "CommandToday": {
     "title": "Opérations du jour",
     "arrivals": "Arrivées",

@@ -312,7 +312,7 @@ F-RPT-07 | IN-PROGRESS | KPI workspace, calendar and source filters, exact metri
 F-RPT-08 | IN-PROGRESS | Tenant-scoped materialized calendar with revision invalidation, repeatable refresh jobs and live-source fallback. Integration and hosted acceptance pending.
 F-RPT-09 | IN-PROGRESS | Configured weekly/monthly report delivery uses immutable runs, native notifications and current recipient access. Integration and hosted acceptance pending.
 F-CMD-01 | IN-PROGRESS | Local-day arrivals, departures, turnovers and incomplete jobs with current role grants and EN/FR/AR navigation. Integration and hosted acceptance pending.
-F-CMD-02 | TODO |
+F-CMD-02 | IN-PROGRESS | Authorized exception queues with native review routes for approvals, variances, stock, maintenance, conflicts and failed syncs. Hosted acceptance pending.
 F-CMD-03 | TODO |
 F-CMD-04 | TODO |
 F-CMD-05 | TODO |

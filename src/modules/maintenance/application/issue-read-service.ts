@@ -17,6 +17,24 @@ export async function assertMaintenanceIssueViewer(context:AccountActorContext,r
  const actor={...context,authContext:restoreAuthorizationCap(captureAuthorizationCap(context.authContext))},input=z.object({issueId:z.uuid()}).strict().parse(raw);
  return withTenant(deps.db??prisma,actor.organizationId,async tx=>{await nativeMaintenanceIssue(actor,tx,input.issueId);});
 }
+export async function maintenanceExceptionPage(actor: AccountActorContext, after?: string, deps: Dependencies = {}) {
+ if (actor.actorId !== actor.authContext.userAccountId || actor.organizationId !== actor.authContext.organizationId) throw new MaintenanceIssueAccessError();
+ if (after) z.uuid().parse(after);
+ return withTenant(deps.db ?? prisma, actor.organizationId, async tx => {
+   const rows = await new MaintenanceIssueContextRepository(tx, actor.organizationId).openIssueIds(after);
+   const items = [];
+   for (const { id } of rows.slice(0, 20)) {
+     try {
+       const { row } = await nativeMaintenanceIssue(actor, tx, id);
+       if (["OPEN", "IN_PROGRESS"].includes(row.state)) items.push({ id, title: row.title, severity: row.severity });
+     } catch (error) {
+       if (!(error instanceof MaintenanceIssueAccessError)) throw error;
+     }
+   }
+   return { items, next: rows.length > 20 ? rows[19].id : null };
+ });
+}
+
 /** A linked private record never turns operational issue access into financial,
  * guest or personnel access. Unavailable links retain a masked history marker. */
 export async function readMaintenanceIssue(context:AccountActorContext,raw:unknown,deps:Dependencies={}){
