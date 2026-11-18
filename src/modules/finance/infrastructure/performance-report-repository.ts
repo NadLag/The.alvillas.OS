@@ -1,10 +1,16 @@
 import { Prisma } from "@prisma/client";
+import { KpiMaterializationRepository } from "./kpi-materialization-repository";
 import { KpiReportRepository } from "./kpi-report-repository";
 import { InventoryReportRepository } from "./inventory-report-repository";
 import { PropertyFinanceRepository } from "./property-finance-repository";
 import type { CompanyPostingTotal, PortfolioNights, PropertyPostingTotal, TeamPerformanceSource } from "../domain/performance-report";
 
 export class PerformanceReportRepository extends PropertyFinanceRepository {
+  async materializedPortfolioNights(input: { fromOn: string; toOn: string; timezone: string }) {
+    return await new KpiMaterializationRepository(this.tx, this.organizationId).lookup(input)
+      ?? this.portfolioNights(input.fromOn, input.toOn);
+  }
+
   kpi() {
     return new KpiReportRepository(this.tx, this.organizationId);
   }

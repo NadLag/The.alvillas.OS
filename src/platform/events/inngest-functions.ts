@@ -1,3 +1,4 @@
+import { refreshKpiCalendar } from "@/modules/finance/application/kpi-materialization-job";
 import { tickSupplierAlerts } from "@/platform/notifications/supplier-alerts";
 import { tickAssetWarrantyReminders } from "@/modules/assets/application/warranty-alerts";
 import {tickLeadWorkReminders} from "@/modules/crm/application/lead-work-reminders";
@@ -187,4 +188,14 @@ export const advanceNativeOnboarding=inngest.createFunction({id:"native-onboardi
 export const reconcileInventoryMinimums=inngest.createFunction({id:"native-inventory-minimum-reconciliation",name:"ALVILLAS OS original inventory minimum reconciliation",triggers:[{event:inventoryReorderConfigurationRequested}],concurrency:{limit:1},retries:3},async({event,step})=>{
  const source=outboxDispatchInput.safeParse(event.data);if(!source.success)throw new NonRetriableError("inventory_reorder_reference_invalid");return step.run("reconcile-original-configured-inventory",()=>consumeInventoryReorderConfiguration(source.data.organizationId,source.data.outboxEventId));
 });
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,admitGuestAgreementSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding,reconcileInventoryMinimums];
+export const refreshReportingCalendar = inngest.createFunction({
+  id: "reporting-calendar-refresh", name: "ALVILLAS OS calendar KPI refresh",
+  triggers: [{ cron: "*/5 * * * *" }], concurrency: { limit: 1 }, retries: 3
+}, async ({ step }) => {
+  const organizations = await step.run("list-organizations", () => OutboxRepository.organizations(prisma));
+  let refreshed = 0;
+  for (const { id } of organizations) refreshed += await step.run(`refresh-calendar-${id}`, () => refreshKpiCalendar(id));
+  return { refreshed };
+});
+
+export const inngestFunctions = [dispatchOutbox,refreshReportingCalendar,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,admitGuestAgreementSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding,reconcileInventoryMinimums];

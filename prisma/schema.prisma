@@ -402,6 +402,8 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  reportCalendarSourceRevision ReportCalendarSourceRevision?
+  reportCalendarMaterializations ReportCalendarMaterialization[]
   assetLifecycleEvents AssetLifecycleEvent[]
   workOrderAssetRevisions MaintenanceWorkOrderAsset[]
   assets Asset[]
@@ -2468,6 +2470,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  reportCalendarMaterializations ReportCalendarMaterialization[]
   maintenanceContractorAssignments MaintenanceContractorAssignment[]
   supplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceConfig")
   serviceOrders ServiceOrder[] @relation("ServiceOrderCatalog")
@@ -7093,4 +7096,30 @@ model AssetLifecycleEvent {
   @@unique([organizationId, actorId, idempotencyKey], map: "asset_lifecycle_nonce")
   @@unique([organizationId, successorId], map: "asset_lifecycle_successor")
   @@map("asset_lifecycle_event")
+}
+
+model ReportCalendarSourceRevision {
+  organizationId String @id @map("organization_id") @db.Uuid
+  revision BigInt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@map("report_calendar_source_revision")
+}
+
+model ReportCalendarMaterialization {
+  organizationId String @map("organization_id") @db.Uuid
+  periodKey String @map("period_key")
+  fromOn DateTime @map("from_on") @db.Date
+  toOn DateTime @map("to_on") @db.Date
+  sourceRevision BigInt @map("source_revision")
+  configRuleId String @map("config_rule_id") @db.Uuid
+  timezone String
+  rows Json
+  computedAt DateTime @map("computed_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  configRule ConfigRule @relation(fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([organizationId, periodKey])
+  @@index([organizationId, fromOn, toOn], map: "report_calendar_materialization_range_idx")
+  @@map("report_calendar_materialization")
 }

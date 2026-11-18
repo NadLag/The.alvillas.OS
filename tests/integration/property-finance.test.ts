@@ -1,3 +1,6 @@
+import { refreshKpiCalendar } from "@/modules/finance/application/kpi-materialization-job";
+import { KpiMaterializationRepository } from "@/modules/finance/infrastructure/kpi-materialization-repository";
+import { calendarDateAt } from "@/i18n/format";
 import { getKpiReport } from "@/modules/finance/application/kpi-report";
 import { getTeamPerformanceReport } from "@/modules/finance/application/team-performance-report";
 import { teamReportMetrics } from "@/modules/finance/domain/performance-report";
@@ -122,6 +125,28 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    const unrelated = await fixture();
    await expect(getPropertyPerformanceReport(unrelated.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
    expect(await financial(f)).toEqual(original);
+ });
+
+ it("refreshes and invalidates the materialized KPI calendar at the original tenant revision", async () => {
+   const f = await fixture(), another = await fixture();
+   const today = calendarDateAt(new Date(), "UTC"), fromOn = today.slice(0, 7) + "-01";
+   const range = { fromOn, toOn: today, timezone: "UTC" };
+   const cache = (organizationId: string) => withTenant(db, organizationId,
+     tx => new KpiMaterializationRepository(tx, organizationId).lookup(range));
+   await withTenant(db, f.org, async tx => {
+     await tx.property.update({ where: { id: f.property.id }, data: { status: "ACTIVE" } });
+     await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.kpi_refresh", scopeType: "organization",
+       createdBy: f.account.id, effectiveFrom: new Date("2020-01-01"), reason: "Configured materialized calendar window",
+       value: { periods: ["CURRENT_MONTH"], refresh_minutes: 60 } });
+   });
+   expect(await refreshKpiCalendar(f.org, db)).toBe(1);
+   expect(await refreshKpiCalendar(f.org, db)).toBe(0);
+   expect(await cache(f.org)).toMatchObject([{ propertyId: f.property.id, occupied: "0" }]);
+   expect(await cache(another.org)).toBeNull();
+   await withTenant(db, f.org, tx => tx.property.update({ where: { id: f.property.id }, data: { name: "Updated native property name" } }));
+   expect(await cache(f.org)).toBeNull();
+   expect(await refreshKpiCalendar(f.org, db)).toBe(1);
+   expect(await cache(f.org)).toMatchObject([{ propertyName: "Updated native property name" }]);
  });
 
  it("separates company profit and portfolio performance from location and owner claim balances", async () => {

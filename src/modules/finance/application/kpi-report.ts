@@ -28,9 +28,11 @@ function buildKpiReport(input: unknown) {
       const propertyMetrics = !personId && !roleId && !supplierId;
       const inventoryMetrics = !ownerId && !personId && !roleId && !bookingSource;
       const scope = { ...query, ownerId, bookingSource };
+      const nightsSource = () => query.allowMaterialized && !query.propertyId && !ownerId && !bookingSource
+        ? repository.materializedPortfolioNights(query) : repository.portfolioNights(query.fromOn, query.toOn, scope);
       const [postings, nights, operations, ledger, inventoryMoney, quantities] = await Promise.all([
         propertyMetrics ? repository.propertyPostings(scope) : null,
-        propertyMetrics ? repository.portfolioNights(query.fromOn, query.toOn, scope) : null,
+        propertyMetrics ? nightsSource() : null,
         kpi.operations(query, selection), kpi.ledger(query, selection),
         inventoryMetrics ? inventory.money({ ...query, supplierId }) : [],
         inventoryMetrics && !supplierId ? inventory.quantities(query) : []

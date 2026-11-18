@@ -309,7 +309,7 @@ F-RPT-04 | IN-PROGRESS | Company P&L, bank and cash locations, and active portfo
 F-RPT-05 | IN-PROGRESS | Localized team reports show recorded workload, completed jobs, recognized compensation and wallet movements. Focused PostgreSQL and Chromium CSV checks passed. Mandatory CI and hosted acceptance pending.
 F-RPT-06 | IN-PROGRESS | Native inventory and stocktake quantities, procurement receipts and laundry comparisons with scoped EN/FR/AR reporting and exports. Integration and hosted acceptance pending.
 F-RPT-07 | IN-PROGRESS | KPI workspace, calendar and source filters, exact metrics and exports implemented. Verified owner custody attribution and integration/hosted acceptance remain pending.
-F-RPT-08 | TODO |
+F-RPT-08 | IN-PROGRESS | Tenant-scoped materialized calendar with revision invalidation, repeatable refresh jobs and live-source fallback. Integration and hosted acceptance pending.
 F-RPT-09 | TODO |
 F-CMD-01 | TODO |
 F-CMD-02 | TODO |

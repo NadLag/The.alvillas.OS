@@ -28,7 +28,7 @@ export type PerformanceExport<T> = {
   format: AccountantExportFormat;
   render: (report: T, policy: { id: string; version: number; capacity: number }) => Uint8Array | Promise<Uint8Array>;
 };
-export type ReportQuery = { propertyId: string | null; currency: string; timezone: string; fromOn: string; toOn: string; startsAt: Date; endsAt: Date };
+export type ReportQuery = { allowMaterialized: boolean; propertyId: string | null; currency: string; timezone: string; fromOn: string; toOn: string; startsAt: Date; endsAt: Date };
 export type OrganizationReportSource<S, T extends object> = {
   auditResource: "company_report" | "team_report" | "inventory_report" | "kpi_report";
   allowProperty?: boolean;
@@ -96,7 +96,7 @@ export async function readOrganizationPerformance<S, T extends object>(actor: Fi
       if (!limit.allowed) throw new PerformanceReportUnavailableError();
     }
     const propertyId = property?.id ?? null;
-    const capture = () => descriptor.capture(repository, { ...range, propertyId, currency, timezone, fromOn, toOn });
+    const capture = () => descriptor.capture(repository, { ...range, allowMaterialized: !output, propertyId, currency, timezone, fromOn, toOn });
     const source = await capture();
     const sourceFingerprint = commandFingerprint({ propertyId, fromOn, toOn, timezone, currency, dimensions: descriptor.dimensions ?? {}, source });
     const properties = descriptor.allowProperty && !output ? await repository.reportProperties() : [];
