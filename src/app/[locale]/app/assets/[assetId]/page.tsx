@@ -27,7 +27,7 @@ export default async function AssetDetailPage({ params, searchParams }: {
   const date = (day: string) => formatDate(appLocale, new Date(day), { timeZone: "UTC" });
   const amount = (cost: typeof asset.cost) => typeof cost === "string" ? cost : cost ? formatCurrencyAmount(appLocale, cost.amount, cost.currency) : t("notRecorded");
   return <AdminShell className="resource-page" testId="asset-detail">
-    <ShellHeader eyebrow={t("title")} title={asset.name} subtitle={asset.tag + " ? " + asset.propertyName}
+    <ShellHeader eyebrow={t("title")} title={asset.name} subtitle={asset.tag + " \u00b7 " + asset.propertyName}
       actions={<Link className="secondary-button" href={base}>{t("back")}</Link>} />
     <section className="panel">
       <p dir="auto">{asset.description}</p>
@@ -53,8 +53,8 @@ export default async function AssetDetailPage({ params, searchParams }: {
     <section aria-label={t("history")}>
       <h2>{t("history")}</h2>
       <ol className="resource-list">{history.map(revision => <li key={revision.number} className="resource-form">
-        <h3>{t("revision", { number: revision.number })}</h3><p dir="auto">{revision.name} ? {revision.category}</p>
-        <p>{t("conditions." + revision.condition)} ? {formatDateTime(appLocale, new Date(revision.updatedAt), { timeZone: "UTC" })}</p>
+        <h3>{t("revision", { number: revision.number })}</h3><p dir="auto">{revision.name}{" \u00b7 "}{revision.category}</p>
+        <p>{t("conditions." + revision.condition)}{" \u00b7 "}{formatDateTime(appLocale, new Date(revision.updatedAt), { timeZone: "UTC" })}</p>
         <p dir="auto">{revision.reason}</p><p className="money">{amount(revision.cost)}</p>
       </li>)}</ol>
       {next ? <Link className="secondary-button" href={base + "/" + asset.id + "?before=" + next}>{t("older")}</Link> : null}

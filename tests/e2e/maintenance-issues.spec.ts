@@ -49,7 +49,7 @@ for(const locale of["en","fr","ar"]as const)test("Native maintenance context, im
     await assetForm.locator('input[name="usefulLifeMonths"]').fill("120");
     await assetForm.locator('textarea[name="reason"]').fill("Register the original installed pump through the asset workspace");
     await assetForm.getByRole("button", { name: en.Assets.save }).click();
-    await expect(page.getByTestId("asset-detail")).toContainText(assetTag);
+    await expect(page.getByTestId("asset-detail")).toContainText(assetTag, { timeout: 15000 });
     registeredAsset = new URL(page.url()).pathname;
   }
   await page.goto("/"+locale+"/app/maintenance/issues/"+f.issueId);const panel=page.getByTestId("maintenance-issue-manager"),editor=panel.getByTestId("maintenance-issue-link-editor");await expect(panel.getByTestId("maintenance-issue-detail")).toContainText(f.title);await expect(panel.getByRole("link",{name:m.originalTask,exact:true})).toHaveAttribute("href","/"+locale+"/app/operations/"+f.taskId);

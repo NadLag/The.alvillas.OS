@@ -1,3 +1,4 @@
+import { canReadAssetWarrantyAlert } from "@/modules/assets/domain/warranty-alerts";
 import { z } from "zod";
 import { authorize, type AuthContext, type Resource } from "@/platform/authz/authorize";
 import { authorizeApprovalResource } from "@/platform/approvals/approval";
@@ -9,6 +10,7 @@ import {canReadDocumentExpiryNotice,type DocumentExpiryNoticeResource} from "@/m
 export const notificationEventType = "notification.requested";
 export class NotificationAudienceUnavailableError extends Error{}
 export const notificationInputSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("asset_warranty_expiring"), recipientId: z.uuid(), targetId: z.uuid() }).strict(),
   z.object({kind:z.literal("lead_reminder"),recipientId:z.uuid(),targetId:z.uuid()}).strict(),
   z.object({kind:z.literal("document_expiring"),recipientId:z.uuid(),targetId:z.uuid()}).strict(),
   z.object({kind:z.literal("ledger_integrity_failed"),recipientId:z.uuid(),targetId:z.uuid(),integrityNotice:ledgerIntegrityNoticeSchema.optional()}).strict(),
@@ -73,6 +75,7 @@ export function notificationDestination(
   if(input.kind==="receivable_reminder")return canReadReceivableReminder(ctx,target,new Date())?`/${locale}/app/finance/receivables`:null;
   if(input.kind==="ledger_integrity_failed")return canReadLedgerIntegrityFailure(ctx,target,new Date())?`/${locale}/app/audit`:null;
   if (!(input.kind==="approval_requested"||input.kind==="approval_decided"?authorizeApprovalResource:authorize)(ctx, "view", target)) return null;
+  if (input.kind === "asset_warranty_expiring") return canReadAssetWarrantyAlert(ctx, target) ? `/${locale}/app/assets/${target.id}` : null;
   if (input.kind === "expense_emergency") return target.type === "expense" ? `/${locale}/app/expenses/${target.id}` : null;
   if (input.kind === "supplier_invoice_emergency") return target.type === "supplier_invoice" ? `/${locale}/app/finance/supplier-invoice-notices/${input.targetId}` : null;
   if(input.kind==="employee_cost_emergency")return target.type==="expense"?`/${locale}/app/finance/employee-cost-notices/${input.targetId}`:null;

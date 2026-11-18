@@ -49,8 +49,8 @@ export function AssetForm({ locale, asset, properties }: Props) {
       if (!result.ok) { setStatus(result.code); return; }
       pending.current = null;
       setStatus("ready");
-      router.push("/" + locale + "/app/assets/" + result.asset.id);
-      router.refresh();
+      if (asset) router.refresh();
+      else router.push("/" + locale + "/app/assets/" + result.asset.id);
     } catch { setStatus("unavailable"); }
   }
 

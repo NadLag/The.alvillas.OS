@@ -1,3 +1,4 @@
+import { tickAssetWarrantyReminders } from "@/modules/assets/application/warranty-alerts";
 import { getAsset, listAssets, saveAsset } from "@/modules/assets/application/asset-service";
 import { AssetAccessError, AssetConflictError } from "@/modules/assets/domain/asset";
 import { changeWorkOrderAsset, readWorkOrderAssets } from "@/modules/maintenance/application/work-order-assets";
@@ -219,6 +220,27 @@ it("registers and links canonical property assets with exact cost, unchanged sou
   expect((await getAsset(f.actor, { assetId: asset.id }, f.deps)).asset.cost).toEqual(data.fields.cost);
   await expect(getAsset(f.actor, { assetId: foreign.id }, f.deps)).rejects.toBeInstanceOf(AssetAccessError);
   expect((await listAssets(f.actor, { query: "PUMP-0042" }, f.deps)).items.map(row => row.id)).toEqual([asset.id]);
+
+  await withTenant(db, f.organizationId, async tx => {
+    const rules = new ConfigRuleRepository(tx, f.organizationId);
+    const scope = { scopeType: "property", scopeId: f.property.id, createdBy: f.account.id,
+      effectiveFrom: new Date("2020-01-01"), reason: "Set warranty renewal alerts for the original pump manager" } as const;
+    await rules.createVersion({ ...scope, key: "ops.asset_warranty_alerts", value: { lead_days: [365, 30] } });
+    await rules.createVersion({ ...scope, key: "notification.routing.asset_warranty_expiring",
+      value: { roles: [], people: [f.person.id], assigned: false, channels: ["in_app"] } });
+    await tx.notificationPreference.upsert({
+      where: { organizationId_userAccountId: { organizationId: f.organizationId, userAccountId: f.account.id } },
+      update: { inAppEnabled: true, inAppOperations: true },
+      create: { organizationId: f.organizationId, userAccountId: f.account.id, inAppEnabled: true, inAppOperations: true }
+    });
+  });
+  expect(await tickAssetWarrantyReminders(external.organizationId, db)).toBe(0);
+  expect(await tickAssetWarrantyReminders(f.organizationId, db)).toBe(1);
+  expect(await tickAssetWarrantyReminders(f.organizationId, db)).toBe(0);
+  expect(await withTenant(db, f.organizationId, tx => tx.notification.count({ where: {
+    organizationId: f.organizationId, recipientId: f.account.id, kind: "asset_warranty_expiring"
+  } }))).toBe(1);
+
 
   const reviewed = await previewWorkOrderRegistration(f.actor, f.intent, f.deps);
   await publishWorkOrderRegistration(f.actor, { intent: f.intent, reviewFingerprint: reviewed.reviewFingerprint, idempotencyKey: randomUUID() }, f.deps);

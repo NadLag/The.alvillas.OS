@@ -69,6 +69,30 @@ export class AssetRepository {
       ORDER BY a.id DESC LIMIT 41`);
   }
 
+  warrantiesEnding(now: Date, after?: string) {
+    const cursor = after ? Prisma.sql`AND a.id > ${after}::uuid` : Prisma.empty;
+    return this.tx.$queryRaw<AssetHead[]>(Prisma.sql`SELECT ${columns} ${joins} ${latest}
+      WHERE a.organization_id=${this.organizationId}::uuid ${cursor}
+        AND r.warranty_ends_on BETWEEN timezone(p.timezone,${now}::timestamptz)::date
+          AND timezone(p.timezone,${now}::timestamptz)::date+3660
+      ORDER BY a.id LIMIT 50`);
+  }
+
+  warrantyTargets(ids: string[]) {
+    if (!ids.length) return Promise.resolve([]);
+    return this.tx.$queryRaw<Array<AssetProperty & { assetId: string; referenceId: string }>>(Prisma.sql`
+      SELECT ${propertyColumns}, a.id AS "assetId", original.id AS "referenceId" ${joins} ${latest}
+      JOIN asset_revision original ON original.organization_id=a.organization_id AND original.asset_id=a.id
+      WHERE a.organization_id=${this.organizationId}::uuid AND original.id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::uuid`))})
+        AND original.warranty_ends_on=r.warranty_ends_on`);
+  }
+
+  async recordedWarrantyAlerts(keys: string[]) {
+    const rows = keys.length ? await this.tx.outboxEvent.findMany({ where: { organizationId: this.organizationId,
+      type: "notification.requested", idempotencyKey: { in: keys } }, select: { idempotencyKey: true } }) : [];
+    return new Set(rows.map(row => row.idempotencyKey));
+  }
+
   async receipt(actorId: string, nonce: string) {
     const [row] = await this.tx.$queryRaw<Array<{ assetId: string; number: number; requestHash: string }>>(Prisma.sql`
       SELECT asset_id AS "assetId", number, request_hash AS "requestHash" FROM asset_revision
