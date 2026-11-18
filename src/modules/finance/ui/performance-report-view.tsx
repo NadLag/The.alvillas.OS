@@ -33,14 +33,14 @@ export async function PerformanceReportFilters({ report, locale, download, filte
 }
 
 export async function PerformancePropertyFilter({ report }: { report: Pick<OrganizationReportPeriod,
-  "propertyId" | "propertyName" | "properties" | "portfolioAvailable"> }) {
+  "propertyId" | "propertyName" | "propertyOptions" | "portfolioAvailable"> }) {
   const t = await getTranslations("PerformanceReports");
   return <label className="field"><span>{t("propertyFilter")}</span>
     <select name="propertyId" defaultValue={report.propertyId ?? ""}>
       {report.portfolioAvailable ? <option value="">{t("allProperties")}</option> : null}
-      {report.propertyId && report.propertyName && !report.properties.some(property => property.id === report.propertyId) ?
+      {report.propertyId && report.propertyName && !report.propertyOptions.some(property => property.id === report.propertyId) ?
         <option value={report.propertyId}>{report.propertyName}</option> : null}
-      {report.properties.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
+      {report.propertyOptions.map(property => <option key={property.id} value={property.id}>{property.name}</option>)}
     </select>
   </label>;
 }
