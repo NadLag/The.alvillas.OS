@@ -74,14 +74,16 @@ export function formatCurrency(locale: AppLocale, money: Money): string {
   return formatCurrencyAmount(locale, money.amount, money.currency);
 }
 
-/** Percentage points expressed at one decimal, formatted without a Number
- * conversion even when the original amounts exceed a safe integer. */
-export function formatPercentageAmount(locale:AppLocale,value:string):string{
-  if(!/^-?(?:0|[1-9]\d*)\.\d$/u.test(value))throw new RangeError("Exact percentage required");
-  const negative=value.startsWith("-"),digits=value.replace(/[-.]/gu,"").padStart(4,"0");
-  const ratio=(negative?"-":"")+digits.slice(0,-3)+"."+digits.slice(-3);
-  const formatter=new Intl.NumberFormat(locale,{style:"percent",minimumFractionDigits:1,maximumFractionDigits:1,signDisplay:"exceptZero"});
-  return (formatter.format.bind(formatter) as (value:number|bigint|string)=>string)(ratio);
+/** Format exact percentage points without converting the original amount to a Number. */
+export function formatPercentageAmount(locale: AppLocale, value: string, fractionDigits: 1 | 2 = 1): string {
+  const match = /^(-?)(0|[1-9][0-9]*)[.]([0-9]{1,2})$/u.exec(value);
+  if (!match || match[3].length !== fractionDigits) throw new RangeError("Exact percentage required");
+  const [, sign, integer, fraction] = match;
+  const digits = integer.padStart(3, "0") + fraction;
+  const ratio = sign + digits.slice(0, -(fractionDigits + 2)) + "." + digits.slice(-(fractionDigits + 2));
+  const formatter = new Intl.NumberFormat(locale, { style: "percent", minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits, signDisplay: "exceptZero" });
+  return (formatter.format.bind(formatter) as (value: number | bigint | string) => string)(ratio);
 }
 
 export function formatCurrencyAmount(

@@ -1,3 +1,4 @@
+import { PerformanceReportRepository } from "@/modules/finance/infrastructure/performance-report-repository";
 import {randomUUID} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {PrismaClient} from "@prisma/client";
@@ -146,6 +147,19 @@ describe("native exact service allocation journals",()=>{
  it("releases the original unallocated cash into exact owner and company claims with one durable source acknowledgement",async()=>{
   const f=await fixture(),admission=await admit(f),before=await financial(f),result=await recognizeServiceAllocation(f.ctx,command(admission),{db});expect(result).toMatchObject({sourceId:admission.sourceId,version:1,idempotent:false});
   await withTenant(db,f.org,async tx=>{const row=await new ServiceAllocationPostingRepository(tx,f.org).posting(result.postingId);expect(row?.transaction.sealed).toBe(true);expect(row?.transaction.postings.map(posting=>({code:posting.ledgerAccount.code,side:posting.side,amount:posting.amount.toFixed(2),bucket:posting.bucket}))).toEqual(expect.arrayContaining([{code:"UNALLOCATED_COLLECTIONS",side:"DEBIT",amount:"0.07",bucket:"SERVICE_ALLOCATION"},{code:"OWNER_PAYABLE",side:"CREDIT",amount:"0.04",bucket:"OWNER_SERVICES"},{code:"ALVILLAS_SERVICE_REVENUE",side:"CREDIT",amount:"0.03",bucket:"ALVILLAS_SERVICE_REVENUE"}]));expect(row?.transaction.postings).toHaveLength(3);expect(await tx.auditLog.count({where:{resourceType:"service_allocation",resourceId:admission.sourceId,action:"service_allocation.recognized"}})).toBe(1);});await originalRows(f,before);
+  await withTenant(db, f.org, async tx => {
+    const report = new PerformanceReportRepository(tx, f.org);
+    const now = await new FinanceRepository(tx, f.org).clock();
+    const period = now.toISOString().slice(0, 10);
+    const range = await report.range(period, period, "UTC");
+    const [company, property] = await Promise.all([
+      report.companyPostings({ currency: "MAD", ...range }),
+      report.propertyPostings({ propertyId: f.property.id, currency: "MAD", ...range })
+    ]);
+    expect(company).toContainEqual({ key: "companyServiceRevenue", propertyId: f.property.id, amount: "0.03" });
+    expect(property).toContainEqual({ key: "ownerServiceRevenue", amount: "0.04" });
+    expect(property).toContainEqual({ key: "companyServiceRevenue", amount: "0.03" });
+  });
  });
  it("recovers simultaneous duplicate recognition commands once and rejects a second active allocation",async()=>{const f=await fixture(),admission=await admit(f),input=command(admission),results=await Promise.all([recognizeServiceAllocation(f.ctx,input,{db}),recognizeServiceAllocation(f.ctx,input,{db})]);expect(new Set(results.map(row=>row.transactionId)).size).toBe(1);expect(results.map(row=>row.idempotent).sort()).toEqual([false,true]);await expect(recognizeServiceAllocation(f.ctx,{...input,idempotencyKey:randomUUID(),expectedPostingVersion:1},{db})).rejects.toBeInstanceOf(ServiceAllocationSourceChangedError);await withTenant(db,f.org,async tx=>expect(await tx.serviceAllocationPosting.count()).toBe(1));});
  it("appends an exact opposite, preserves original journals and admits a new reviewed allocation only after reversal",async()=>{

@@ -3,6 +3,8 @@ import { appLocales } from "@/i18n/routing";
 import { Money } from "@/platform/money/money";
 
 export const accountantReportKinds = ["TRANSACTIONS", "INCOME", "EXPENSES", "OWNER_STATEMENTS", "BANK_RECONCILIATION", "SUPPLIER_PAYMENTS", "STAFF_PAYMENTS"] as const;
+export const performanceReportKinds = ["PROPERTY_PERFORMANCE", "COMPANY_PERFORMANCE"] as const;
+const reportDocumentKinds = [...accountantReportKinds, ...performanceReportKinds] as const;
 export const accountantExportFormats = ["CSV", "EXCEL", "PDF"] as const;
 export const accountantExportInputSchema = z.object({ kind: z.enum(accountantReportKinds), format: z.enum(accountantExportFormats),
   locale: z.enum(appLocales), fromOn: z.iso.date(), toOn: z.iso.date(), currency: z.string().regex(/^[A-Z]{3}$/u),
@@ -25,12 +27,13 @@ export const accountantExportColumns = ["recordType", "sourceId", "transactionId
   "statementLineId", "reconciliationId", "releaseId", "postedOn", "allocated", "remaining", "paidAt", "paymentReference", "recognitionId", "submissionId", "invoiceNumber", "counterparty"] as const;
 export type AccountantExportColumn = typeof accountantExportColumns[number];
 export type AccountantReportKind = typeof accountantReportKinds[number];
+export type ReportDocumentKind = typeof reportDocumentKinds[number];
 export type AccountantExportFormat = typeof accountantExportFormats[number];
 const moneyColumns = new Set<AccountantExportColumn>(["amount", "opening", "debits", "credits", "closing", "expected", "actual", "variance", "allocated", "remaining"]);
 const identifierColumns = new Set<AccountantExportColumn>(["sourceId", "transactionId", "postingId", "accountId", "propertyId", "ownerId", "supplierId", "invoiceId", "personId", "claimId", "reversesTransactionId", "statementLineId", "reconciliationId", "releaseId", "recognitionId", "submissionId"]);
 export type AccountantExportCell = { kind: "TEXT" | "IDENTIFIER" | "TIMESTAMP" | "MONEY" | "DATE"; value: string | null };
 export type AccountantExportRow = { identity: string; cells: Partial<Record<AccountantExportColumn, AccountantExportCell>> };
-export type AccountantExportDocument = { organizationId: string; kind: AccountantReportKind; currency: string; fromOn: string; toOn: string;
+export type AccountantExportDocument = { organizationId: string; kind: ReportDocumentKind; currency: string; fromOn: string; toOn: string;
   scope: { propertyId: string | null; ownerId: string | null; accountId: string | null };
   timezone: string; policy: { id: string; version: number }; sourceFingerprint: string; generatedAt: string; columns: AccountantExportColumn[]; rows: AccountantExportRow[] };
 export type AccountantExportNativeSnapshot = { columns: AccountantExportColumn[]; rows: AccountantExportRow[]; fingerprint: string };
@@ -45,7 +48,7 @@ export function accountantExportRow(identity: string, columns: readonly Accounta
 }
 
 const cell = z.object({ kind: z.enum(["TEXT", "IDENTIFIER", "TIMESTAMP", "MONEY", "DATE"]), value: z.string().max(10000).nullable() }).strict();
-const documentSchema = z.object({ organizationId: z.uuid(), kind: z.enum(accountantReportKinds), currency: z.string().regex(/^[A-Z]{3}$/u),
+const documentSchema = z.object({ organizationId: z.uuid(), kind: z.enum(reportDocumentKinds), currency: z.string().regex(/^[A-Z]{3}$/u),
   scope: z.object({ propertyId: z.uuid().nullable(), ownerId: z.uuid().nullable(), accountId: z.uuid().nullable() }).strict().default({ propertyId: null, ownerId: null, accountId: null }),
   fromOn: z.iso.date(), toOn: z.iso.date(), timezone: z.string().min(1).max(120), policy: z.object({ id: z.uuid(), version: z.number().int().positive() }).strict(),
   sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), generatedAt: z.iso.datetime({ offset: true }),
