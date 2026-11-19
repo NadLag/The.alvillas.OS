@@ -6,16 +6,18 @@ type LocaleSwitchProps = {
   path: string;
   label: string;
   compact?: boolean;
+  displayNames?: Record<AppLocale, string>;
 };
 
 export function LocaleSwitch({
   currentLocale,
   path,
   label,
-  compact = false
+  compact = false,
+  displayNames
 }: LocaleSwitchProps) {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const labels = compact ? compactLocaleLabels : localeLabels;
+  const normalizedPath = path === "" || path.startsWith("/") ? path : `/${path}`;
+  const labels = displayNames ?? (compact ? compactLocaleLabels : localeLabels);
 
   return (
     <nav className="locale-switch" aria-label={label} data-testid="locale-switch">
@@ -24,6 +26,8 @@ export function LocaleSwitch({
           aria-current={locale === currentLocale ? "page" : undefined}
           data-testid={`locale-switch-${locale}`}
           href={`/${locale}${normalizedPath}`}
+          hrefLang={locale}
+          lang={locale}
           key={locale}
         >
           {labels[locale]}

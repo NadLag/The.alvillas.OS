@@ -1,4 +1,175 @@
 {
+  "WebsiteAnalytics": {
+    "title": "Website traffic",
+    "description": "Daily public page views recorded without visitor identifiers. Counts can include repeat visits.",
+    "date": "Date (UTC)",
+    "apply": "Show day",
+    "count": "Page views: {count}",
+    "noData": "No page views were recorded on this date."
+  },
+  "Website": {
+    "languages": { "en": "English", "fr": "Français", "ar": "العربية" },
+    "navigation": "Main navigation",
+    "language": "Choose a language",
+    "management": "Management",
+    "services": "Services",
+    "about": "About",
+    "signIn": "Sign in",
+    "assessment": "Get a Property Assessment",
+    "location": "Marrakech, Morocco",
+    "assessmentForm": {
+      "reload": "Reload the form",
+      "intro": "Tell us about the villa and the help you’re looking for.",
+      "unavailable": "Online assessment requests are currently unavailable.",
+      "ownerContact": "Your name",
+      "phone": "Phone",
+      "email": "Email",
+      "location": "Property location",
+      "propertyTypeKey": "Property type",
+      "bedrooms": "Bedrooms",
+      "currentRentalStatusKey": "Current rental status",
+      "currentOtaKeys": "Current booking platforms",
+      "objectives": "What would you like help with?",
+      "notes": "Additional details",
+      "choice": "Select an option",
+      "source": "How did you hear about us?",
+      "acknowledgement": "I have read the information about how my request will be handled.",
+      "contactEither": "Enter an email address or a phone number.",
+      "submit": "Send assessment request",
+      "sending": "Sending request",
+      "accepted": "Your assessment request has been received.",
+      "validation": "Check your details and the required fields.",
+      "rateLimited": "Too many requests. Please try again later.",
+      "failed": "We could not send your request. Try again.",
+      "changed": "Reload this page to review the current assessment form."
+    },
+    "hero": {
+      "title": "You own the villa. We run everything else.",
+      "description": "Professional villa management in Morocco, from preparing your property and welcoming guests to reporting back to you."
+    },
+    "pillars": {
+      "title": "What we manage",
+      "description": "One team coordinates the details that keep your villa ready and your guests looked after.",
+      "management": {
+        "title": "Property Management",
+        "description": "We help prepare your villa for rental and coordinate reservations and the day-to-day care of the property."
+      },
+      "operations": {
+        "title": "Operations",
+        "description": "We schedule cleaning, inspections, linen care and maintenance around each stay."
+      },
+      "guestExperience": {
+        "title": "Guest Experience",
+        "description": "We guide guests from arrival to departure and help arrange services during their stay."
+      },
+      "ownerControl": {
+        "title": "Owner Control",
+        "description": "Follow reservations, property activity, revenue and expenses from your owner portal."
+      }
+    },
+    "process": {
+      "title": "How it works",
+      "description": "Start with a review of your property and your plans for it.",
+      "assessment": {
+        "title": "Assessment",
+        "description": "We discuss your villa, its condition and what you want from rental management."
+      },
+      "agreement": {
+        "title": "Agreement",
+        "description": "We agree on the services, responsibilities and financial terms before management begins."
+      },
+      "onboarding": {
+        "title": "ALVILLAS onboarding",
+        "description": "Our team prepares the villa, records its condition and sets up the routines it needs."
+      },
+      "management": {
+        "title": "Professional management",
+        "description": "We coordinate stays, operations and reporting so you can see what is happening at your property."
+      }
+    },
+    "guestServices": {
+      "title": "Services for each stay",
+      "description": "Guests can request a private chef, transfers, groceries, wellness services and local experiences.",
+      "link": "Explore guest services"
+    },
+    "why": {
+      "title": "Why ALVILLAS",
+      "description": "A Marrakech-based team cares for the villa and looks after guests. Owners can see what work took place and how it affected their property and finances.",
+      "link": "About ALVILLAS"
+    },
+    "coverage": {
+      "title": "Where we work",
+      "description": "We manage villas in Marrakech. Tell us where your property is when you request an assessment."
+    },
+    "assessmentPrompt": {
+      "title": "Let’s talk about your villa",
+      "description": "Share a few details about the property and what you’d like help with."
+    },
+    "pages": {
+      "management": {
+        "title": "Villa management",
+        "description": "We agree on the responsibilities for your property up front, then coordinate the work that keeps it ready between stays.",
+        "items": {
+          "item1": {
+            "title": "Preparing the property",
+            "description": "We review the villa, document its condition and plan the work needed before receiving guests."
+          },
+          "item2": {
+            "title": "Reservations and arrivals",
+            "description": "We coordinate stay dates, arrival details and the handover to the team caring for the villa."
+          },
+          "item3": {
+            "title": "Care between stays",
+            "description": "We plan turnovers, linen, inspections and repairs around the reservation calendar."
+          },
+          "item4": {
+            "title": "Owner reporting",
+            "description": "Your owner portal brings together property activity and the financial records you’re authorized to see."
+          }
+        }
+      },
+      "services": {
+        "title": "Guest services",
+        "description": "Guests can request services through the Guest Hub. The team confirms the arrangements for the stay.",
+        "items": {
+          "item1": {
+            "title": "Private chef",
+            "description": "Arrange a meal at the villa and discuss the menu, timing and dietary needs in advance."
+          },
+          "item2": {
+            "title": "Transfers",
+            "description": "Share arrival and departure details so the team can help coordinate transport."
+          },
+          "item3": {
+            "title": "Groceries",
+            "description": "Request groceries ahead of arrival or during the stay."
+          },
+          "item4": {
+            "title": "Wellness and experiences",
+            "description": "Ask about wellness services and local experiences that fit the stay."
+          }
+        }
+      },
+      "about": {
+        "title": "About ALVILLAS",
+        "description": "ALVILLAS is a villa-management company in Morocco, starting with Marrakech.",
+        "items": {
+          "item1": {
+            "title": "Local operations",
+            "description": "We coordinate the people, suppliers and services involved in caring for a villa and receiving guests."
+          },
+          "item2": {
+            "title": "Clear responsibilities",
+            "description": "We establish the management scope with each owner before onboarding the villa."
+          },
+          "item3": {
+            "title": "Visibility for owners",
+            "description": "Owners can follow their property’s activity, supporting records and financial reporting from the owner portal."
+          }
+        }
+      }
+    }
+  },
   "CommandDashboard": {
     "loading": "Loading Command Center",
     "error": "Command Center could not load.",

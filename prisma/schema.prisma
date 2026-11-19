@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  publicWebsiteDailyMetrics PublicWebsiteDailyMetric[]
   reportRuns ReportRun[]
   reportCalendarSourceRevision ReportCalendarSourceRevision?
   reportCalendarMaterializations ReportCalendarMaterialization[]
@@ -7154,4 +7155,17 @@ model ReportRun {
   @@unique([organizationId, scheduleId, recipientId, scheduledOn], map: "report_run_schedule_occurrence_key")
   @@index([organizationId, recipientId, generatedAt(sort: Desc)], map: "report_run_recipient_idx")
   @@map("report_run")
+}
+
+
+model PublicWebsiteDailyMetric {
+  organizationId String       @map("organization_id") @db.Uuid
+  day            DateTime     @db.Date
+  locale         String       @db.Char(2)
+  pagePath       String       @map("page_path")
+  pageViews      BigInt       @map("page_views")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([organizationId, day, locale, pagePath])
+  @@map("public_website_daily_metric")
 }
