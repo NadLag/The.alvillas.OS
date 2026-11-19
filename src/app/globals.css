@@ -2937,6 +2937,18 @@ textarea:disabled {
 
 .service-catalog-list { overflow-wrap: anywhere; }
 
+.inventory-page { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.inventory-page > *,
+.inventory-page :is(.resource-form, fieldset, .field, .form-grid, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
+.inventory-page .resource-form,
+.inventory-page .service-catalog-list > li.detail-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
+.inventory-page :is(.primary-button, .secondary-button, .quiet-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.inventory-page :is(input, select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
+.inventory-page table { inline-size: 100%; min-inline-size: 36rem; border-collapse: collapse; text-align: start; }
+.inventory-page :is(th, td) { padding: var(--space-3); border-block-end: 1px solid var(--border-subtle); text-align: start; vertical-align: top; }
+.inventory-page .checkbox-field { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); }
+.inventory-page .checkbox-field input { inline-size: var(--target-compact); block-size: var(--target-compact); min-block-size: var(--target-compact); flex: 0 0 auto; }
+
 .inventory-location-page { overflow-wrap: anywhere; }
 .inventory-location-page :is(fieldset, .resource-form, .field, .form-grid, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
 .inventory-location-page .resource-form { grid-template-columns: minmax(0, 1fr); }

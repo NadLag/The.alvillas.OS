@@ -7305,5 +7305,103 @@
       "stock_held": "Du stock reste ici pour au moins un article. Rapprochez les mouvements réels avant de retirer l’emplacement.",
       "uncertain": "Le résultat est incertain. Retrouvez la demande d’origine avant toute nouvelle modification."
     }
+  },
+  "InventoryMovements": {
+    "eyebrow": "INVENTAIRE",
+    "title": "Mouvements de stock",
+    "subtitle": "Enregistrez les achats, transferts, consommations, blanchisserie et réservations de stock.",
+    "back": "Espace de travail",
+    "refresh": "Actualiser",
+    "retry": "Réessayer",
+    "create": "Enregistrer un mouvement",
+    "reverse": "Contrepasser le mouvement",
+    "reversed": "Contrepassé par une correction d’origine",
+    "reverseHelp": "Chaque mouvement d’origine sera compensé exactement. Les quantités déjà utilisées ou réservées peuvent empêcher la contrepassation.",
+    "kind": "Type de mouvement",
+    "quantity": "Quantité en unités d’origine",
+    "condition": "État du stock",
+    "direction": "Sens de l’ajustement",
+    "reason": "Motif",
+    "review": "Vérifier le mouvement",
+    "reviewTitle": "Vérifier les quantités",
+    "reviewHelp": "Vérifiez chaque emplacement avant d’enregistrer ce mouvement permanent.",
+    "publish": "Enregistrer le mouvement vérifié",
+    "saving": "Enregistrement…",
+    "changeReview": "Modifier la vérification",
+    "close": "Fermer",
+    "search": "Rechercher les données d’origine",
+    "searchAction": "Rechercher",
+    "firstPage": "Première page",
+    "nextPage": "Page suivante",
+    "noChoices": "Aucune donnée accessible ne correspond.",
+    "unselected": "Choisissez une donnée",
+    "clearReservation": "Utiliser du stock non réservé",
+    "unspecifiedUnit": "Unité de comptage d’origine",
+    "dimension": "Dimension du stock",
+    "before": "Avant",
+    "movement": "Mouvement",
+    "after": "Après",
+    "available": "Disponible après le mouvement",
+    "shortage": "Manque de stock restant",
+    "empty": "Aucun mouvement de stock visible.",
+    "privateHidden": "L’inventaire privé est masqué. Actualisez à votre retour.",
+    "saved": "Le mouvement d’origine a été enregistré.",
+    "notRecorded": "La demande d’origine n’a pas été enregistrée. Vous pouvez créer un nouveau mouvement vérifié.",
+    "unconfirmed": "Résolvez la demande d’origine avant d’enregistrer un autre mouvement.",
+    "fields": {
+      "item": "Article",
+      "location": "Emplacement source",
+      "destination": "Emplacement destinataire",
+      "reservation": "Réservation"
+    },
+    "choose": {
+      "item": "Choisir l’article",
+      "location": "Choisir la source",
+      "destination": "Choisir la destination",
+      "reservation": "Choisir la réservation"
+    },
+    "choices": {
+      "items": "Choisir un article d’origine",
+      "locations": "Choisir un emplacement physique",
+      "reservations": "Choisir une réservation d’origine"
+    },
+    "conditions": {
+      "USABLE": "Utilisable",
+      "DAMAGED": "Endommagé"
+    },
+    "directions": {
+      "ADD": "Ajouter des unités comptées",
+      "REMOVE": "Retirer des unités comptées"
+    },
+    "dimensions": {
+      "quantity": "Quantité physique",
+      "reserved": "Quantité réservée",
+      "damaged": "Quantité endommagée"
+    },
+    "kinds": {
+      "PURCHASE": "Achat",
+      "TRANSFER": "Transfert",
+      "CONSUMPTION": "Consommation",
+      "LAUNDRY_SEND": "Envoi en blanchisserie",
+      "LAUNDRY_RETURN": "Retour de blanchisserie",
+      "DAMAGE": "Dommage",
+      "LOSS": "Perte",
+      "DISPOSAL": "Mise au rebut",
+      "ADJUSTMENT": "Ajustement",
+      "RESERVATION": "Réserver du stock",
+      "RELEASE": "Libérer du stock",
+      "REVERSAL": "Contrepassation"
+    },
+    "states": {
+      "ready": "Prêt",
+      "loading": "Chargement…",
+      "offline": "Reconnectez-vous pour vérifier ou enregistrer les mouvements.",
+      "forbidden": "Votre accès actuel ne permet plus de consulter cet inventaire.",
+      "unavailable": "L’inventaire est indisponible. Réessayez.",
+      "validation": "Vérifiez les données d’origine, les quantités et le motif.",
+      "conflict": "Le stock ou l’accès a changé. Vérifiez à nouveau les quantités actuelles.",
+      "stock_held": "Le stock physique ou les réservations empêchent cette opération.",
+      "uncertain": "Le résultat reste incertain. Résolvez la demande d’origine."
+    }
   }
 }
