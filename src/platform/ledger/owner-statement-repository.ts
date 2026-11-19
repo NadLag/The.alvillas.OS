@@ -31,6 +31,19 @@ function jsonObject(value: Prisma.JsonValue | null): Record<string, unknown> | n
 
 export class OwnerStatementRepository {
   constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
+
+  async portfolioPayable(currency: string, endsAt: Date) {
+    const [row] = await this.tx.$queryRaw<{ balance: string }[]>(Prisma.sql`
+      SELECT coalesce(sum(CASE WHEN p.side='CREDIT' THEN p.amount ELSE -p.amount END),0)::text AS balance
+      FROM posting p
+      JOIN ledger_account a ON (a.organization_id,a.id)=(p.organization_id,p.ledger_account_id)
+      JOIN financial_transaction journal ON (journal.organization_id,journal.id)=(p.organization_id,p.transaction_id)
+      WHERE p.organization_id=${this.organizationId}::uuid AND a.code='OWNER_PAYABLE'
+        AND a.account_type='CLAIM_OWNERSHIP' AND a.normal_side='CREDIT'
+        AND p.currency=${currency} AND journal.sealed AND journal.occurred_at<${endsAt}`);
+    return row.balance;
+  }
+
   async listOwnerLedgerPostings(input: {
     ownerId: string;
     propertyId?: string;

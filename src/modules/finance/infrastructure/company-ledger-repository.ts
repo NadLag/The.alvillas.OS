@@ -26,7 +26,7 @@ export class CompanyLedgerRepository extends LedgerCalendarRepository {
   }
   private scope(input: Range) {
     return Prisma.sql`p.organization_id=${this.organizationId}::uuid AND a.account_type='ALVILLAS_OWN'
-      AND p.currency=${input.currency} AND ft.occurred_at < ${input.endsAt}`;
+      AND p.currency=${input.currency} AND ft.sealed AND ft.occurred_at < ${input.endsAt}`;
   }
 
   async totals(input: Range) {

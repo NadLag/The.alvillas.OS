@@ -20,7 +20,7 @@ import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { authorize, authorizeCollection, type Action } from "@/platform/authz/authorize";
 import { present } from "@/platform/authz/present";
-import { authContextForAccount } from "@/platform/authz/account-context";
+import { authContextForAccount, authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { reverseReservationAccommodationRevenue,verifyReservationAccommodationReversal } from "@/platform/reservations/finance";
 import {captureAuthorizationCap,restoreAuthorizationCap} from "@/platform/authz/authorization-cap";
@@ -413,6 +413,29 @@ export async function getReservationWorkspace(ctx: ReservationActorContext, quer
     return { ...workspace, reservations, properties };
   });
 }
+export async function reservationCommandExceptionPage(ctx: ReservationActorContext, group: "conflicts" | "sync", after?: string, deps: Deps = {}) {
+  allowed(ctx, "view");
+  if (after) z.uuid().parse(after);
+  return withTenant(database(deps), ctx.organizationId, async tx => {
+    const stored = { ...ctx, authContext: { ...await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId), personId: ctx.personId } };
+    allowed(stored, "view");
+    const [held, current] = await Promise.all([visibilityForContext(tx, ctx), visibilityForContext(tx, stored)]);
+    const wide = held.widePropertyIds.filter(id => current.widePropertyIds.includes(id));
+    const properties = held.properties.filter(row => current.properties.some(property => property.id === row.id));
+    const names = new Map(properties.map(row => [row.id, row.name]));
+    const kinds = group === "sync" ? ["FEED_SYNC_FAILED"] : [
+      "DOUBLE_BOOKING", "BLOCK_OVERLAP", "MISSING_FEED_ENTRY", "POSSIBLE_DUPLICATE", "CANCELLATION_REVIEW", "SOURCE_REOPEN_REVIEW", "SOURCE_IDENTITY_REVIEW"
+    ];
+    const rows = await new ReservationRepository(tx, ctx.organizationId).commandExceptionPage(
+      properties.map(row => row.id), { AND: [held.where, current.where] }, wide, kinds, after);
+    return { items: rows.slice(0, 20).map(row => {
+      const scope = { type: "property", organizationId: ctx.organizationId, id: row.propertyId, propertyId: row.propertyId,
+        city: properties.find(p => p.id === row.propertyId)?.cityId, region: properties.find(p => p.id === row.propertyId)?.regionId };
+      return { ...row, propertyName: [ctx, stored].every(actor => authorize(actor.authContext, "view", scope)) ? names.get(row.propertyId) : undefined };
+    }), next: rows.length > 20 ? rows[19].id : null };
+  });
+}
+
 export async function listReservationCommandExceptions(ctx: ReservationActorContext, deps: Deps = {}) {
   allowed(ctx, "view");
   return withTenant(database(deps), ctx.organizationId, async tx => {

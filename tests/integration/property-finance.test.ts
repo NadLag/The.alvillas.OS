@@ -1,3 +1,9 @@
+import { dashboardAccess } from "@/platform/command-center/dashboard";
+import { searchCommandCenter } from "@/platform/command-center/search";
+import { operationManagement } from "@/modules/reservations/application/operation-management";
+import { getCommandFinance } from "@/modules/finance/application/command-center-finance";
+import { commandExceptionsPage } from "@/platform/command-center/exceptions";
+import { getCommandCenterToday } from "@/modules/reservations/application/command-center-today";
 import { tickScheduledReports } from "@/modules/finance/application/scheduled-report-job";
 import { ScheduledReportRepository } from "@/modules/finance/infrastructure/scheduled-report-repository";
 import { notificationDestination } from "@/platform/notifications/notification";
@@ -180,6 +186,69 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(notificationDestination(await authContextForAccount(f.org, f.account.id, { db }), input, result.scope, "en")).toBeNull();
  });
 
+ it("shows local-day turnover and due work only from authorized native records", async () => {
+   const f = await fixture(), other = await fixture();
+   const authContext = await grantPerformanceReports(f);
+   await withTenant(db, f.org, async tx => {
+     await tx.property.update({ where: { id: f.property.id }, data: { timezone: "Pacific/Kiritimati" } });
+     const stay = { organizationId: f.org, propertyId: f.property.id, source: "DIRECT", guestName: "Private arrival name", nights: 1 };
+     await tx.reservation.create({ data: { ...stay, reference: "TODAY-OUT", checkIn: new Date("2026-03-08"),
+       checkOut: new Date("2026-03-09"), status: "CHECKED_OUT", idempotencyKey: randomUUID() } });
+     await tx.reservation.create({ data: { ...stay, reference: "TODAY-IN", checkIn: new Date("2026-03-09"),
+       checkOut: new Date("2026-03-10"), status: "CONFIRMED", idempotencyKey: randomUUID() } });
+     const task = { organizationId: f.org, propertyId: f.property.id, type: "TRANSFER",
+       titleTranslations: { en: "Actual transfer", fr: "Transfert réel" } };
+     await tx.operationTask.create({ data: { ...task, dueDate: new Date("2026-03-09"), state: "PLANNED", idempotencyKey: randomUUID() } });
+     await tx.operationTask.create({ data: { ...task, dueDate: new Date("2026-03-08"), state: "PLANNED", idempotencyKey: randomUUID() } });
+   });
+   const now = new Date("2026-03-08T12:00:00Z");
+   const actor = { ...authContext, personId: f.person.id };
+   const report = await getCommandCenterToday(actor, { db, now });
+   expect(report).toMatchObject({ arrivals: [{ reference: "TODAY-IN", date: "2026-03-09" }],
+     departures: [{ reference: "TODAY-OUT" }], turnovers: [{ propertyId: f.property.id }], incomplete: [{ date: "2026-03-09" }] });
+   expect(JSON.stringify(report)).not.toContain("Private arrival name");
+   const work = await operationManagement(actor, { propertyId: f.property.id, view: "LIST", from: "2026-03-09", until: "2026-03-09" },
+     { db, now, includeWorkload: true });
+   expect(work.workload).toEqual({ unassigned: 1, workers: [] });
+   expect(await getCommandCenterToday({ ...other.ctx, personId: other.person.id }, { db, now })).toBeNull();
+   await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { validTo: new Date("2026-02-28") } }));
+   expect(await getCommandCenterToday(actor, { db, now })).toBeNull();
+ });
+
+ it("reads only open authorized booking conflicts and failed syncs in Command Center", async () => {
+   const f = await fixture(), other = await fixture();
+   const actor = { ...await grantPerformanceReports(f), personId: f.person.id };
+   await withTenant(db, f.org, async tx => {
+     const source = { organizationId: f.org, propertyId: f.property.id, details: { private: "Private feed URL" } };
+     await tx.reservationException.createMany({ data: [
+       { ...source, kind: "DOUBLE_BOOKING", key: randomUUID() },
+       { ...source, kind: "FEED_SYNC_FAILED", key: randomUUID() },
+       { ...source, kind: "DOUBLE_BOOKING", status: "RESOLVED", key: randomUUID() }
+     ] });
+   });
+   const conflicts = await commandExceptionsPage(actor, { kind: "conflicts" }, db);
+   expect(conflicts).toMatchObject({ state: "ready", items: [{ kind: "DOUBLE_BOOKING", propertyName: f.property.name }] });
+   expect(JSON.stringify(conflicts)).not.toContain("Private feed URL");
+   expect(await commandExceptionsPage(actor, { kind: "sync" }, db)).toMatchObject({ state: "ready", items: [{ kind: "FEED_SYNC_FAILED" }] });
+   expect(await commandExceptionsPage({ ...other.ctx, personId: other.person.id }, { kind: "conflicts" }, db)).toEqual({ state: "denied" });
+   await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+   expect(await commandExceptionsPage(actor, { kind: "conflicts" }, db)).toEqual({ state: "denied" });
+ });
+
+ it("finds original records through full-text and trigram search under current tenant grants", async () => {
+   const f = await fixture(), other = await fixture(), actor = await grantPerformanceReports(f);
+   const fullText = await searchCommandCenter(actor, { q: "Actual property" }, "en", db);
+   expect(fullText.find(group => group.kind === "property")?.items).toEqual([
+     { id: f.property.id, title: f.property.name, href: "/properties/" + f.property.id }
+   ]);
+   const typo = await searchCommandCenter(actor, { q: "Actual morgtage property", kind: "property" }, "fr", db);
+   expect(typo[0].items.map(item => item.id)).toEqual([f.property.id]);
+   const foreign = await searchCommandCenter(other.ctx, { q: "Actual property", kind: "property" }, "ar", db);
+   expect(foreign[0].items.map(item => item.id)).toEqual([other.property.id]);
+   await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+   expect(await searchCommandCenter(actor, { q: "Actual property", kind: "property" }, "en", db)).toEqual([]);
+ });
+
  it("separates company profit and portfolio performance from location and owner claim balances", async () => {
    const f = await fixture(), ctx = await grantPerformanceReports(f);
    await withTenant(db, f.org, async tx => {
@@ -220,6 +289,15 @@ describe("actual property-attributed finance and immutable mortgage history",()=
    expect(report.profit.toJSON().amount).toBe("739.91");
    expect(report.cashPosition.toJSON().amount).toBe("1517.68");
    expect(report.outsidePortfolio.toJSON().amount).toBe("-9.99");
+   const asRole = (roleKey: string) => ({ ...ctx.authContext, assignments: ctx.authContext.assignments?.map(grant => ({ ...grant, roleKey })) });
+   expect(dashboardAccess(asRole("finance")).profiles).toEqual(["finance"]);
+   expect(dashboardAccess(asRole("operations_manager")).profiles).toEqual(["manager", "operations"]);
+   const dashboard = await getCommandFinance(ctx, filter, { db });
+   expect([dashboard.revenue, dashboard.expenses, dashboard.cash, dashboard.ownerPayable, dashboard.companyBalance]
+     .map(value => value.toJSON().amount)).toEqual(["1000.01", "260.10", "1517.68", "1077.77", "739.91"]);
+   const euroDashboard = await getCommandFinance(ctx, { ...filter, currency: "EUR" }, { db });
+   expect(euroDashboard.ownerPayable.toJSON()).toEqual({ amount: "0.00", currency: "EUR" });
+   await expect(getCommandFinance(f.ctx, filter, { db })).rejects.toBeInstanceOf(PerformanceReportAccessError);
    expect(report.margin).toBe("73.99");
    expect(report.properties[0]).toMatchObject({ propertyId: f.property.id, occupied: "1", available: "2", occupancy: "50.00" });
    const eur = await getCompanyPerformanceReport(ctx, { ...filter, currency: "EUR" }, { db });

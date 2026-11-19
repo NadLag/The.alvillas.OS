@@ -1,3 +1,8 @@
+import { dashboardAccess } from "@/platform/command-center/dashboard";
+import { commandSearchKinds } from "@/platform/command-center/search";
+import { canViewCommandFinance } from "@/modules/finance/application/command-center-finance";
+import { CommandCenterExceptionsLink } from "@/platform/command-center/exceptions-link";
+import { CommandCenterTodaySummary } from "@/modules/reservations/ui/command-center-today";
 import { ReservationCommandExceptions } from "@/modules/reservations/ui/command-exceptions";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import { getTranslations, setRequestLocale } from "next-intl/server";
@@ -177,7 +182,19 @@ export default async function AppPage({
           <p className="panel-label">{t("todayLabel")}</p>
           <h2>{t("welcome", { name: session.user?.name ?? session.user?.email ?? t("fallbackName") })}</h2>
           <p>{t("summary")}</p>
-          {reservationContext ? <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} /> : null}
+          {reservationContext ? <>
+            {dashboardAccess(reservationContext.authContext).profiles.length ?
+              <Link className="secondary-button" href={`/${appLocale}/app/command-center/dashboard`}>{(await getTranslations("CommandDashboard"))("title")}</Link> : null}
+            <CommandCenterExceptionsLink context={reservationContext.authContext} locale={appLocale} />
+            <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} />
+            <CommandCenterTodaySummary actor={reservationContext} locale={appLocale} />
+            {commandSearchKinds(reservationContext.authContext).length ?
+              <Link className="secondary-button" href={`/${appLocale}/app/command-center/search`}>{(await getTranslations("CommandSearch"))("title")}</Link> : null}
+            {authorizeCollection(reservationContext.authContext, "view", "task") ?
+              <Link className="secondary-button" href={`/${appLocale}/app/command-center/operations`}>{(await getTranslations("CommandOperations"))("title")}</Link> : null}
+            {canViewCommandFinance(reservationContext.authContext) ?
+              <Link className="secondary-button" href={`/${appLocale}/app/command-center/finance`}>{(await getTranslations("CommandFinance"))("title")}</Link> : null}
+          </> : null}
         </section>
         <aside className="workspace-side" aria-label={t("sessionLabel")}>
           <form

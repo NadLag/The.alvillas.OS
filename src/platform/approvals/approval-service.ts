@@ -114,7 +114,28 @@ export async function requestApproval(actor: NotificationActor, raw: unknown, de
     return { id: row.id };
   });
 }
-export async function getApproval(actor: NotificationActor, id: string, deps: Deps & { stageId?: string; afterStageId?: string } = {}) {
+export async function pendingApprovalQueue(actor: NotificationActor, after?: string, deps: Deps = {}) {
+  assertActor(actor);
+  if (after) z.uuid().parse(after);
+  return withTenant(deps.db ?? prisma, actor.organizationId, async tx => {
+    const rows = await new ApprovalRepository(tx, actor.organizationId).pendingForAccount(actor.accountId, after);
+    const db: TenantTransactionRunner = { $transaction: work => work(tx) };
+    const items = [];
+    for (const { id } of rows.slice(0, 20)) {
+      try {
+        const approval = await getApproval(actor, id, { db, recheckCurrent: true });
+        if (approval.state === "PENDING" && (approval.canApprove || approval.canReject)) {
+          items.push({ id, title: approval.title, propertyName: approval.propertyName, stageId: approval.stageId });
+        }
+      } catch (error) {
+        if (!(error instanceof ApprovalAccessError)) throw error;
+      }
+    }
+    return { items, next: rows.length > 20 ? rows[19].id : null };
+  });
+}
+
+export async function getApproval(actor: NotificationActor, id: string, deps: Deps & { stageId?: string; afterStageId?: string; recheckCurrent?: boolean } = {}) {
   z.string().uuid().parse(id); assertActor(actor);
   if (deps.stageId) z.uuid().parse(deps.stageId);
   if (deps.afterStageId) z.uuid().parse(deps.afterStageId);
@@ -122,7 +143,7 @@ export async function getApproval(actor: NotificationActor, id: string, deps: De
     const repository = new ApprovalRepository(tx, actor.organizationId), row = await repository.find(id);
     if (!row) throw new ApprovalAccessError();
     const financial = Boolean(row.expenseId || row.invoiceSubmissionId || row.employeeSubmissionId || row.maintenanceEstimateId),lineSource=Boolean(row.invoiceSubmissionId||row.employeeSubmissionId);
-    const authorities = financial ? [actor.authContext, (await currentFinancialActor(actor, tx)).authContext] : [actor.authContext];
+    const authorities = financial || deps.recheckCurrent ? [actor.authContext, (await currentFinancialActor(actor, tx)).authContext] : [actor.authContext];
     const now = await repository.clock();
     const allowed = (action: "view" | "approve" | "reject", stage?: Approval["financialStages"][number]) =>
       authorities.every(authority => authorizeApprovalResource(authority, action, approvalResource(row, stage?.ownerId, stage), now));

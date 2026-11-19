@@ -8,7 +8,7 @@ import type { PerformanceMetric } from "../domain/performance-report";
 
 type Period = { fromOn: string; toOn: string; today: string; currency: string; currencies: string[]; formats: AccountantExportFormat[] };
 
-export async function PerformanceReportFilters({ report, locale, download, filters, fields }: { report: Period; locale: AppLocale; download: string;
+export async function PerformanceReportFilters({ report, locale, download, filters, fields }: { report: Period; locale: AppLocale; download?: string;
   filters?: Record<string, string>; fields?: ReactNode }) {
   const t = await getTranslations("PerformanceReports");
   const query = new URLSearchParams({ ...filters, fromOn: report.fromOn, toOn: report.toOn, currency: report.currency });
@@ -24,7 +24,7 @@ export async function PerformanceReportFilters({ report, locale, download, filte
       </select></label>
       <button className="primary-button" type="submit">{t("apply")}</button>
     </form>
-    {formats.length ? <nav className="form-actions" aria-label={t("exports")}>
+    {download && formats.length ? <nav className="form-actions" aria-label={t("exports")}>
       {formats.map(format => <a key={format} download className="secondary-button" href={download + "/" + format + "?" + query.toString()}>
         {t("download." + format)}
       </a>)}

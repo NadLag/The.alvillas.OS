@@ -22,6 +22,11 @@ type FinancialApprovalInput = { requestedBy: string; title: string; details: str
 
 export class ApprovalRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
+  pendingForAccount(accountId: string, after?: string) {
+    return this.tx.approvalRequest.findMany({ where: { organizationId: this.organizationId, state: "PENDING",
+      recipients: { some: { organizationId: this.organizationId, userAccountId: accountId } },
+      ...(after ? { id: { lt: after } } : {}) }, select: { id: true }, orderBy: { id: "desc" }, take: 21 });
+  }
   property(id: string) {
     return this.tx.property.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null }, select: { id: true, name: true, regionId: true, cityId: true } });
   }

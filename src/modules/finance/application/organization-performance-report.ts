@@ -30,7 +30,7 @@ export type PerformanceExport<T> = {
 };
 export type ReportQuery = { allowMaterialized: boolean; propertyId: string | null; currency: string; timezone: string; fromOn: string; toOn: string; startsAt: Date; endsAt: Date };
 export type OrganizationReportSource<S, T extends object> = {
-  auditResource: "company_report" | "team_report" | "inventory_report" | "kpi_report";
+  auditResource: "company_report" | "team_report" | "inventory_report" | "kpi_report" | "command_finance";
   allowProperty?: boolean;
   dimensions?: Record<string, string>;
   resolveDates?: (today: string) => { fromOn: string; toOn: string };

@@ -24,12 +24,16 @@ async function login(page: Page, email: string, accountPassword = password) {
   await expect(page).toHaveURL(/\/en\/app/u);
 }
 
-async function invite(page: Page, email: string, phone: string, role: string) {
+async function invite(page: Page, email: string, phone: string, role: string, ownerId?: string) {
   await page.goto(`${origin}/en/app/identity`);
   await page.getByTestId("invite-display-name").fill(email);
   await page.getByTestId("invite-email").fill(email);
   await page.getByTestId("invite-phone").fill(phone);
   await page.getByTestId("invite-role").selectOption(role);
+  if (ownerId) {
+    await page.getByTestId("invite-scope-type").selectOption("owner");
+    await page.getByTestId("invite-scope-id").fill(ownerId);
+  }
   await page.getByTestId("invite-submit").click();
   const code = (await page.getByTestId("invitation-code").innerText()).split(":").pop()?.trim();
   if (!code) throw new Error("Expected a real invitation");
@@ -153,7 +157,15 @@ test.describe("identity closeout acceptance", () => {
     const phone = `+21262${Date.now().toString().slice(-7)}`;
     await ensureE2EAdmin(adminEmail, password);
     await login(page, adminEmail);
-    const code = await invite(page, ownerEmail, phone, "owner");
+    const db = new PrismaClient();
+    const ownerId = await withTenant(db as unknown as TenantTransactionRunner, bootstrapOrganizationId, async tx => {
+      const owner = await tx.owner.create({ data: {
+        organizationId: bootstrapOrganizationId, displayName: ownerEmail, email: ownerEmail,
+        phone, preferredLocale: "en"
+      } });
+      return owner.id;
+    }).finally(() => db.$disconnect());
+    const code = await invite(page, ownerEmail, phone, "owner", ownerId);
     await page.context().clearCookies();
     await activate(page, code, phone);
     await page.goto(`${origin}/en/app/security`);

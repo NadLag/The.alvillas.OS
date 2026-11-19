@@ -285,7 +285,8 @@ export class OperationRepository {
   }
   workerGroups(where: Prisma.OperationTaskWhereInput) {
     return this.tx.operationTask.groupBy({
-      by: ["assignedToPersonId", "propertyId"],
+      by: ["assignedToPersonId", "propertyId", "state"],
+      _count: { _all: true },
       where: {
         organizationId: this.organizationId,
         archivedAt: null,
