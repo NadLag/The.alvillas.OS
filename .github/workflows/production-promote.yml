@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       owner_approval_reference:
-        description: "Owner approval/ticket reference for production promotion"
+        description: "Owner approval reference with staging, database and restore-point evidence"
         required: true
         type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   disabled:
@@ -23,6 +24,9 @@ jobs:
     if: ${{ vars.PRODUCTION_PROMOTION_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: production
+    concurrency:
+      group: production-promotion
+      cancel-in-progress: false
     env:
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
@@ -33,21 +37,49 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
+      - name: Require exact main CI and staging acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_APPROVAL_REFERENCE: ${{ inputs.owner_approval_reference }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$OWNER_APPROVAL_REFERENCE" =~ [^[:space:]] ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$GITHUB_SHA"
+          run_id="$(gh run list --workflow ci.yml --branch main --event push --commit "$GITHUB_SHA" --limit 1 --json databaseId --jq '.[0].databaseId')"
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          gh run view "$run_id" --json workflowName,event,headBranch,headSha,status,conclusion,jobs > "$RUNNER_TEMP/release-ci.json"
+          node scripts/ci/check-release-evidence.mjs ci "$GITHUB_SHA" "$RUNNER_TEMP/release-ci.json"
       - run: npm ci
       - name: Install Vercel CLI
         run: npm install -g "vercel@${VERCEL_CLI_VERSION:?set VERCEL_CLI_VERSION}"
       - name: Pull production environment
-        run: vercel pull --yes --environment=production
+        run: |
+          set -euo pipefail
+          test -n "${VERCEL_ORG_ID:?production team is required}"
+          test -n "${VERCEL_PROJECT_ID:?production project is required}"
+          vercel pull --yes --environment=production --scope "$VERCEL_ORG_ID"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          const project = JSON.parse(readFileSync(".vercel/project.json", "utf8"));
+          if (project.orgId !== process.env.VERCEL_ORG_ID || project.projectId !== process.env.VERCEL_PROJECT_ID) {
+            throw new Error("Production linked project differs from the approved team and project");
+          }
+          NODE
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       - name: Build production
         run: vercel build --prod
+        env:
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          VERCEL_GIT_COMMIT_REF: main
       - name: Stage production deployment
         id: stage
         run: |
-          deployment_url="$(vercel deploy --prebuilt --prod --skip-domain)"
+          deployment_url="$(vercel deploy --prebuilt --prod --skip-domain --scope "$VERCEL_ORG_ID" --env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" --env VERCEL_GIT_COMMIT_REF=main --meta "githubCommitSha=$GITHUB_SHA" --meta githubCommitRef=main)"
           DEPLOYMENT_URL="$deployment_url" node --input-type=module -e '
             const value = process.env.DEPLOYMENT_URL;
             const url = new URL(value);
@@ -58,8 +90,22 @@ jobs:
           printf 'url=%s\n' "$deployment_url" >> "$GITHUB_OUTPUT"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      - name: Promote approved deployment
-        run: vercel promote "$DEPLOYMENT_URL"
+      - name: Verify the staged production deployment
         env:
           DEPLOYMENT_URL: ${{ steps.stage.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          for endpoint in health readiness version; do
+            vercel curl --scope "$VERCEL_ORG_ID" "/api/$endpoint" --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent -H 'Cache-Control: no-cache' > "$RUNNER_TEMP/production-$endpoint.json"
+          done
+          node scripts/ci/check-release-evidence.mjs deployment "$GITHUB_SHA" production "$RUNNER_TEMP/production-health.json" "$RUNNER_TEMP/production-readiness.json" "$RUNNER_TEMP/production-version.json"
+      - name: Promote approved deployment
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$GITHUB_SHA"
+          vercel promote --scope "$VERCEL_ORG_ID" "$DEPLOYMENT_URL"
+        env:
+          DEPLOYMENT_URL: ${{ steps.stage.outputs.url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          GH_TOKEN: ${{ github.token }}

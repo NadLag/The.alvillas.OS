@@ -473,25 +473,7 @@ jobs:
           vercel curl --scope "$VERCEL_ORG_ID" /api/health --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/health.json
           vercel curl --scope "$VERCEL_ORG_ID" /api/readiness --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/readiness.json
           vercel curl --scope "$VERCEL_ORG_ID" /api/version --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/version.json
-          node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            const health = JSON.parse(readFileSync("/tmp/health.json", "utf8"));
-            const readiness = JSON.parse(readFileSync("/tmp/readiness.json", "utf8"));
-            const version = JSON.parse(readFileSync("/tmp/version.json", "utf8"));
-            if (health.service !== "alvillas-os") throw new Error("Unexpected health payload");
-            if (!["ready", "not_ready"].includes(readiness.status)) throw new Error("Unexpected readiness status");
-            if (version.service !== "alvillas-os" || !version.version) throw new Error("Unexpected version payload");
-            if (version.version !== process.env.GITHUB_SHA) throw new Error(`Unexpected version SHA ${version.version}`);
-            if (version.environment !== "preview") throw new Error("Unexpected deployment environment");
-            if (version.commitRef !== "main") throw new Error(`Unexpected commit ref ${version.commitRef}`);
-            console.log(JSON.stringify({
-              deployment: process.env.DEPLOYMENT_URL,
-              health: health.status,
-              readiness: readiness.status,
-              version: version.version,
-              checks: readiness.checks?.map((check) => `${check.name}:${check.status}`).join(",")
-            }));
-          '
+          node scripts/ci/check-release-evidence.mjs deployment "$GITHUB_SHA" preview /tmp/health.json /tmp/readiness.json /tmp/version.json
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -515,22 +497,7 @@ jobs:
           done
           vercel curl --scope "$VERCEL_ORG_ID" /api/health --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-health.json
           vercel curl --scope "$VERCEL_ORG_ID" /api/readiness --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-readiness.json
-          node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            const health = JSON.parse(readFileSync("/tmp/staging-health.json", "utf8"));
-            const readiness = JSON.parse(readFileSync("/tmp/staging-readiness.json", "utf8"));
-            const version = JSON.parse(readFileSync("/tmp/staging-version.json", "utf8"));
-            if (health.service !== "alvillas-os" || readiness.status !== "ready") throw new Error("Stable staging health or readiness failed");
-            if (version.service !== "alvillas-os" || version.environment !== "preview" || version.commitRef !== "main") throw new Error("Unexpected stable staging service or environment");
-            if (version.version !== process.env.GITHUB_SHA) throw new Error(`Stable staging alias points at ${version.version}`);
-            console.log(JSON.stringify({
-              stagingUrl: `https://${process.env.STAGING_ALIAS}`,
-              health: health.status,
-              readiness: readiness.status,
-              version: version.version,
-              commitRef: version.commitRef
-            }));
-          '
+          node scripts/ci/check-release-evidence.mjs deployment "$GITHUB_SHA" preview /tmp/staging-health.json /tmp/staging-readiness.json /tmp/staging-version.json
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}

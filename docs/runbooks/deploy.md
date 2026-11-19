@@ -74,7 +74,7 @@ For acceptance, use labeled properties, import reservation CSV twice, modify dat
 
 ## Production
 
-Production promotion is manual and requires owner approval.
+Production promotion is manual and requires owner approval. The production workflow checks the exact successful main CI run, the staging smoke and stable alias steps, and the unaliased production candidate's health, readiness, environment and commit. The approval reference identifies the authenticated staging acceptance and the approved backup and migration evidence.
 
 Before production promotion:
 

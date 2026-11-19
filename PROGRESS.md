@@ -352,7 +352,7 @@ F-OPR-01 | TODO |
 F-OPR-02 | TODO |
 F-OPR-03 | TODO |
 F-OPR-04 | TODO |
-F-OPR-05 | TODO |
+F-OPR-05 | IN-PROGRESS | Exact main CI and staging proof required before production promotion. Both staging and production candidates require healthy, ready and exact-SHA responses before aliasing or traffic. Owner-authorized hosted rollback drill pending.
 F-DRC-01 | TODO |
 F-DRC-02 | TODO |
 F-DRC-03 | TODO |

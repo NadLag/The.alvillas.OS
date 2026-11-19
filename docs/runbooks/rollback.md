@@ -7,7 +7,7 @@ Purpose: roll back an application release while preserving database history and 
 1. Identify the last known-good deployment and commit SHA.
 2. Confirm whether the bad release included database migrations.
 3. If no production migration was applied, promote the last known-good deployment.
-4. Verify `/api/health`, login availability, and the current phase smoke tests.
+4. Verify `/api/health`, `/api/readiness` and `/api/version` against the intended rollback SHA. Exercise login and the current phase smoke tests before resuming affected workers.
 
 ## Migration Rollback Policy
 
