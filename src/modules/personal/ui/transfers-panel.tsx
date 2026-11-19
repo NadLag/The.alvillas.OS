@@ -45,6 +45,7 @@ export async function TransfersPanel({ locale, householdId, after }: { locale: A
           <bdi>{formatCurrencyAmount(locale, entry.amount, entry.currency)}</bdi>
           <time dateTime={entry.effectiveOn.toISOString().slice(0, 10)}>{formatDate(locale, entry.effectiveOn, { timeZone: "UTC" })}</time>
           <StatusBadge>{t(entry.status === "CONFIRMED" ? "confirmedTransfer" : entry.status === "CANCELLED" ? "cancelledTransfer" : "pendingTransfer")}</StatusBadge>
+          {entry.isReversal ? <StatusBadge>{t("reversal")}</StatusBadge> : null}
         </div>
         {entry.status === "PENDING" && page.canConfirm ? <details>
           <summary>{t("approveTransfer")}</summary>

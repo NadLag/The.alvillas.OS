@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { withTenant } from "@/platform/db/tenant";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
@@ -99,7 +100,7 @@ describe("Personal OS on isolated PostgreSQL", () => {
   it("preserves movements, dated revisions, savings progress and an encrypted document original", async () => {
     const { actor, household } = await fixture();
     const prior = process.env.PERSONAL_ENCRYPTION_KEYS;
-    process.env.PERSONAL_ENCRYPTION_KEYS = "personal-test:" + randomBytes(32).toString("base64");
+    delete process.env.PERSONAL_ENCRYPTION_KEYS;
     const pdf = "%PDF-1.7\n%%EOF";
     try {
       await households.scoped(actor, household, async (scope) => {
@@ -128,7 +129,11 @@ describe("Personal OS on isolated PostgreSQL", () => {
           { kind: "ASSET", currency: "MAD", category: "Private category", amount: "700.00" }
         ]);
         expect((await finance.report("2026-11-01", "2026-11-30")).find((entry) => entry.kind === "INCOME")?.amount).toBe("0.00");
-        await docs.upload({ id: randomUUID(), displayName: "Private file", file: new File([pdf], "file.pdf", { type: "application/pdf" }) });
+        const upload = { id: randomUUID(), displayName: "Private file", file: new File([pdf], "file.pdf", { type: "application/pdf" }) };
+        await expect(docs.upload(upload)).rejects.toThrow("Personal document key ring unavailable");
+        expect((await docs.list(false)).items).toEqual([]);
+        process.env.PERSONAL_ENCRYPTION_KEYS = "personal-test:" + randomBytes(32).toString("base64");
+        await docs.upload(upload);
         const item = (await docs.list(false)).items[0];
         const raw = await scope.tx.personalDocument.findFirstOrThrow({ where: { id: item.id } });
         expect(Buffer.from(raw.ciphertext).includes(Buffer.from(pdf))).toBe(false);
@@ -155,13 +160,6 @@ describe("Personal OS on isolated PostgreSQL", () => {
       }
       await tx.roleAssignment.create({ data: { organizationId, userAccountId: financeActor.accountId, personId: financeActor.personId,
         roleId: role.id, scopeType: "organization", validFrom: new Date("2020-01-01") } });
-      await new ConfigRuleRepository(tx, organizationId).createVersion({
-        key: businessPersonalTransferPolicyKey, scopeType: "organization", createdBy: financeActor.accountId,
-        effectiveFrom: new Date("2020-01-01"), reason: "Approved fixture categories",
-        value: { approval_reference: "CONFIRMED-FIXTURE", categories: [
-          { category: "Approved settlement", cash_account_code: "BANK", company_account_code: "CAPITAL" }
-        ] }
-      });
       const ledger = new FinanceRepository(tx, organizationId);
       const bank = await ledger.ensureLedgerAccount({ code: "BANK", name: "Bank", accountType: "ASSET_LOCATION", normalSide: "DEBIT" });
       const capital = await ledger.ensureLedgerAccount({ code: "CAPITAL", name: "Company capital", accountType: "ALVILLAS_OWN", normalSide: "CREDIT" });
@@ -192,6 +190,17 @@ describe("Personal OS on isolated PostgreSQL", () => {
     const confirm = { id, businessTransactionId: journal.id };
     await expect(households.scoped(actor, household, (scope) =>
       new PersonalTransferRepository(scope).confirm(confirm))).rejects.toBeInstanceOf(PersonalAccessDenied);
+    await expect(households.scoped(financeActor, household, (scope) =>
+      new PersonalTransferRepository(scope).confirm(confirm))).rejects.toBeInstanceOf(PersonalConflict);
+    await withTenant(db, organizationId, async (tx) => {
+      await new ConfigRuleRepository(tx, organizationId).createVersion({
+        key: businessPersonalTransferPolicyKey, scopeType: "organization", createdBy: financeActor.accountId,
+        effectiveFrom: new Date("2020-01-01"), reason: "Approved fixture categories",
+        value: { approval_reference: "CONFIRMED-FIXTURE", categories: [
+          { category: "Approved settlement", cash_account_code: "BANK", company_account_code: "CAPITAL" }
+        ] }
+      });
+    });
     await households.scoped(financeActor, household, async (scope) => {
       const transfers = new PersonalTransferRepository(scope);
       await transfers.confirm(confirm);
@@ -203,5 +212,57 @@ describe("Personal OS on isolated PostgreSQL", () => {
       expect(await transfers.settledTotals("2026-11-01", "2026-11-30")).toEqual([{ currency: "MAD", amount: "200.08" }]);
     });
     expect(await getJournal()).toEqual(before);
+
+    const reversal = await withTenant(db, organizationId, async (tx) => {
+      const row = await new FinanceRepository(tx, organizationId).createFinancialTransaction({
+        reference: "TRANSFER-REV-" + randomUUID(), description: "Company-posted reversal fixture",
+        idempotencyKey: randomUUID(), createdBy: financeActor.accountId, occurredAt: new Date("2026-11-20T12:00:00Z"),
+        reversesTransactionId: journal.id,
+        postings: journal.postings.map((posting) => ({
+          ledgerAccountId: posting.ledgerAccountId, side: posting.side === "CREDIT" ? "DEBIT" : "CREDIT",
+          amount: Money.of(posting.amount.toFixed(2), posting.currency), bucket: posting.bucket, dimensions: {}
+        }))
+      });
+      await writeAuditEvent(tx, {
+        organizationId, actorId: financeActor.accountId, action: "finance.fixture.reversed",
+        resourceType: "financial_transaction", resourceId: journal.id,
+        after: { transactionId: journal.id, reversalTransactionId: row.id },
+        reason: "Attributed reversal of the original company settlement", requestId: randomUUID(), occurredAt: row.occurredAt
+      });
+      return row;
+    });
+    const posted = await getJournal();
+    expect(posted).toHaveLength(2);
+    const opposite = { ...request, id: randomUUID(), direction: "TO_BUSINESS", effectiveOn: "2026-11-20" };
+    const oppositeId = await households.scoped(actor, household, async (scope) => {
+      const transfers = new PersonalTransferRepository(scope);
+      await transfers.request(opposite);
+      return (await transfers.list()).items[0].id;
+    });
+    const reversalCommand = { id: oppositeId, businessTransactionId: reversal.id };
+    await expect(households.scoped(actor, household, (scope) =>
+      new PersonalTransferRepository(scope).confirm(reversalCommand))).rejects.toBeInstanceOf(PersonalAccessDenied);
+
+    const otherHousehold = await households.provision(financeActor, "Separate private household", "Verifier");
+    await households.scoped(financeActor, otherHousehold, async (scope) => {
+      const transfers = new PersonalTransferRepository(scope);
+      await transfers.request(opposite);
+      const [item] = (await transfers.list()).items;
+      await expect(transfers.confirm({ id: item.id, businessTransactionId: reversal.id })).rejects.toBeInstanceOf(PersonalConflict);
+    });
+    await households.scoped(financeActor, household, async (scope) => {
+      const transfers = new PersonalTransferRepository(scope);
+      await transfers.confirm(reversalCommand);
+      await transfers.confirm(reversalCommand);
+      const [item] = (await transfers.list()).items;
+      expect(item).toMatchObject({ status: "CONFIRMED", isReversal: true });
+      expect(JSON.stringify(item)).not.toContain(reversal.id);
+      expect(await transfers.settledTotals("2026-11-01", "2026-11-30")).toEqual([{ currency: "MAD", amount: "0.00" }]);
+      expect((await scope.tx.personalAuditEvent.findMany({
+        where: { ...scope.key, resourceId: oppositeId, action: "personal.transfer_confirmed" },
+        select: { after: true }
+      }))).toEqual([{ after: { policyRuleId: expect.any(String), reversesTransferId: id } }]);
+    });
+    expect(await getJournal()).toEqual(posted);
   });
 });

@@ -7309,13 +7309,18 @@ model PersonalTransferResolution {
   kind String
   businessTransactionId String? @map("business_transaction_id") @db.Uuid
   policyRuleId String? @map("policy_rule_id") @db.Uuid
+  reversesTransferId String? @map("reverses_transfer_id") @db.Uuid
   actorId String @map("actor_id") @db.Uuid
   occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
   transfer BusinessPersonalTransfer @relation(fields: [organizationId, householdId, transferId], references: [organizationId, householdId, id], onDelete: Restrict, onUpdate: NoAction, map: "personal_transfer_resolution_transfer_fk")
   actor PersonalMember @relation(fields: [organizationId, householdId, actorId], references: [organizationId, householdId, accountId], onDelete: Restrict, onUpdate: NoAction, map: "personal_transfer_resolution_actor_fk")
   businessTransaction FinancialTransaction? @relation(fields: [organizationId, businessTransactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "personal_transfer_resolution_transaction_fk")
 
+  reversesTransfer PersonalTransferResolution? @relation("PersonalTransferReversal", fields: [organizationId, householdId, reversesTransferId], references: [organizationId, householdId, transferId], onDelete: Restrict, onUpdate: NoAction, map: "personal_transfer_resolution_reversed_fk")
+  reversedByTransfer PersonalTransferResolution? @relation("PersonalTransferReversal")
+
   @@id([organizationId, householdId, transferId])
   @@unique([organizationId, businessTransactionId], map: "personal_transfer_resolution_business_unique")
+  @@unique([organizationId, householdId, reversesTransferId], map: "personal_transfer_resolution_reversed_unique")
   @@map("personal_transfer_resolution")
 }

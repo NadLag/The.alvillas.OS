@@ -61,7 +61,8 @@ export class PersonalTransferRepository {
     const { id, businessTransactionId } = transferConfirmationSchema.parse(raw);
     const { organizationId, accountId } = this.identity;
     const { tx } = this.scope;
-    await advisoryTransactionLock(tx, `business-personal:${organizationId}:${businessTransactionId}`);
+    // Share the original journal's lock with the database reversal guard.
+    await advisoryTransactionLock(tx, `${organizationId}:journal-reversal:${businessTransactionId}`);
     if (!await this.canConfirm()) throw new PersonalAccessDenied();
     const request = await this.lookup(id);
     if (!request) throw new PersonalConflict();
@@ -92,22 +93,44 @@ export class PersonalTransferRepository {
       && line.ledgerAccount.accountType === "ASSET_LOCATION" && line.side === cashSide);
     const opposite = source?.postings.find((line) => line.ledgerAccount.code === category.company_account_code
       && line.ledgerAccount.accountType === "ALVILLAS_OWN" && line.side !== cashSide);
-    if (!source?.sealed || source.reversesTransactionId || source.reversedByTransactions.length
+    if (!source?.sealed || source.reversedByTransactions.length
       || source.postings.length !== 2 || !cash || !opposite
       || source.postings.some((line) => line.ledgerAccount.organizationId !== organizationId
         || !line.amount.eq(request.amount) || line.currency !== request.currency)
       || calendarDateAt(source.occurredAt, "Africa/Casablanca") !== request.effectiveOn.toISOString().slice(0, 10)) {
       throw new PersonalConflict();
     }
+    let reversesTransferId: string | undefined;
+    if (source.reversesTransactionId) {
+      const original = await tx.personalTransferResolution.findUnique({
+        where: {
+          organizationId_businessTransactionId: { organizationId, businessTransactionId: source.reversesTransactionId },
+          householdId: this.scope.id, kind: "CONFIRMED"
+        },
+        select: {
+          transferId: true,
+          transfer: { select: { direction: true, category: true, amount: true, currency: true } }
+        }
+      });
+      if (!original || original.transfer.direction === request.direction || original.transfer.category !== request.category
+        || !original.transfer.amount.eq(request.amount) || original.transfer.currency !== request.currency) {
+        throw new PersonalConflict();
+      }
+      reversesTransferId = original.transferId;
+    }
+    if (!await this.canConfirm()) throw new PersonalAccessDenied();
     try {
       await tx.personalTransferResolution.create({ data: {
-        ...this.scope.key, transferId: id, kind: "CONFIRMED", businessTransactionId, policyRuleId: rule.id, actorId: accountId
+        ...this.scope.key, transferId: id, kind: "CONFIRMED", businessTransactionId, policyRuleId: rule.id,
+        actorId: accountId, reversesTransferId
       } });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new PersonalConflict();
       throw error;
     }
-    await this.scope.audit("personal.transfer_confirmed", "personal_transfers", id, undefined, { policyRuleId: rule.id });
+    await this.scope.audit("personal.transfer_confirmed", "personal_transfers", id, undefined, {
+      policyRuleId: rule.id, reversesTransferId
+    });
   }
 
   async cancel(id: string) {
@@ -129,12 +152,12 @@ export class PersonalTransferRepository {
       where: { ...this.scope.key, ...(after ? { id: { lt: after } } : {}) },
       orderBy: { id: "desc" }, take: 51,
       select: { id: true, amount: true, currency: true, direction: true, category: true,
-        effectiveOn: true, requestedBy: true, resolution: { select: { kind: true } } }
+        effectiveOn: true, requestedBy: true, resolution: { select: { kind: true, reversesTransferId: true } } }
     });
     const items = rows.slice(0, 50).map(({ requestedBy, resolution, ...row }) =>
       presentPersonal(this.scope.authority, this.scope.id, "transfers", {
         ...row, amount: row.amount.toFixed(2), status: resolution?.kind ?? "PENDING",
-        requestedByMe: requestedBy === this.identity.accountId
+        isReversal: Boolean(resolution?.reversesTransferId), requestedByMe: requestedBy === this.identity.accountId
       }));
     return { items, next: rows.length > 50 ? rows[49].id : undefined };
   }

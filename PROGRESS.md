@@ -336,7 +336,7 @@ F-PER-07 | IN-PROGRESS | Investment valuation history with separate view and edi
 F-PER-08 | IN-PROGRESS | Dated assets, liabilities and currency-separated net worth from visible sources. CI and staging acceptance pending.
 F-PER-09 | IN-PROGRESS | Household document upload, private download, archive and recovery. Activation requires PERSONAL_ENCRYPTION_KEYS. CI and staging acceptance pending.
 F-PER-10 | IN-PROGRESS | Household reports filter every source by current grants. CI and staging acceptance pending.
-F-PER-11 | IN-PROGRESS | Categorized transfer requests reconcile against already posted company entries with separate approval. Activation requires approved account mappings. CI and staging acceptance pending.
+F-PER-11 | IN-PROGRESS | Locally verified approved original and opposite settlements, same-household provenance, exact totals and unchanged company journals. Approved production mapping, exact-head CI and staging acceptance pending.
 F-SEC-01 | TODO |
 F-SEC-02 | TODO |
 F-SEC-03 | TODO |
