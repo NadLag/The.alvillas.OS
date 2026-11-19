@@ -29,17 +29,23 @@ export default async function PropertiesPage({
 
   const session = await auth();
   const ctx = await coreActorContextFromSession(session);
-  const organizationCtx = await organizationActorContextFromSession(session);
 
   if (!ctx) {
     redirect(`/${appLocale}/login`);
   }
 
+  const canCreate = authorizeCollection(ctx.authContext, "create", "property")
+    && authorizeCollection(ctx.authContext, "view", "owner");
+  const emptyGeography = { cities: [], regions: [] };
+  const creationGeography = canCreate
+    ? organizationActorContextFromSession(session).then((organization) =>
+        organization ? listGeography(organization).catch(() => emptyGeography) : emptyGeography)
+    : emptyGeography;
   const [t, owners, properties, geography] = await Promise.all([
     getTranslations("Core"),
-    authorizeCollection(ctx.authContext, "view", "owner") ? listOwners(ctx) : [],
+    canCreate ? listOwners(ctx) : [],
     listProperties(ctx),
-    organizationCtx ? listGeography(organizationCtx).catch(() => ({ cities: [], regions: [] })) : { cities: [], regions: [] }
+    creationGeography
   ]).catch(error => { if (error instanceof CoreAuthorizationError) notFound(); throw error; });
   const dsnT = await getTranslations("DesignSystem");
   const propertyRows = properties.map((property) => ({
@@ -88,7 +94,7 @@ export default async function PropertiesPage({
           />
         </section>
 
-        {authorizeCollection(ctx.authContext, "create", "property") && authorizeCollection(ctx.authContext, "view", "owner") ? <aside className="workspace-side" aria-label={t("properties.createLabel")}>
+        {canCreate ? <aside className="workspace-side" aria-label={t("properties.createLabel")}>
           <p className="panel-label">{t("properties.createLabel")}</p>
           <PropertyCreateForm
             cities={geography.cities.map((city) => ({ id: city.id, name: city.name, regionName: city.regionName }))}
