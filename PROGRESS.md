@@ -353,10 +353,10 @@ F-OPR-02 | TODO |
 F-OPR-03 | TODO |
 F-OPR-04 | TODO |
 F-OPR-05 | TODO |
-F-DRC-01 | TODO |
-F-DRC-02 | TODO |
-F-DRC-03 | TODO |
-F-DRC-04 | TODO |
+F-DRC-01 | IN-PROGRESS | Blocked pending an owner-approved managed PostgreSQL backup and point-in-time-recovery window, plus an isolated hosted recovery target.
+F-DRC-02 | IN-PROGRESS | Local PostgreSQL dump and restore verified exact journals, audit evidence, 335 migrations, forced tenant policies, and encrypted document recovery. Quarterly hosted drill pending.
+F-DRC-03 | IN-PROGRESS | Blocked pending owner-provisioned R2 backup destination, object versioning or retention approval, and separate restore credentials.
+F-DRC-04 | IN-PROGRESS | Handbook targets RPO at most 15 minutes and RTO at most 4 hours. Owner sign-off and a timed hosted recovery drill are pending.
 F-QA-01 | TODO |
 F-QA-02 | TODO |
 F-QA-03 | TODO |

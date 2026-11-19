@@ -17,13 +17,13 @@ Automated local/CI rehearsal:
 npm run rehearse:restore
 ```
 
-This creates disposable PostgreSQL databases, applies migrations, writes rehearsal evidence, runs `pg_dump`, restores into a fresh database, re-runs migrations, and verifies the restored migration/audit evidence.
+This creates disposable PostgreSQL databases, applies migrations, writes rehearsal evidence, runs `pg_dump`, restores into a fresh database, re-runs migrations, and verifies migrations, forced tenant policies, immutable company postings, audit evidence and encrypted Personal OS document recovery. Docker is the CI default. A local PostgreSQL 17 cluster can run the same rehearsal by supplying its loopback maintenance URL through `REHEARSAL_LOCAL_POSTGRES_URL`. Each rehearsal uses disposable databases and an ephemeral document key.
 
 1. Provision an empty staging PostgreSQL database.
 2. Restore the selected backup or point-in-time snapshot into staging.
 3. Run `npm ci`.
 4. Run `npm run prisma:migrate:deploy` against the restored staging database.
-5. Run `npm run test:integration` with `TEST_DATABASE_URL` pointed at the restored staging database.
+5. Verify restore-specific acceptance on the recovered staging environment. Run mutating integration fixtures on a disposable clone.
 6. Run ledger integrity checks before exposing staging to users.
 7. Record the backup timestamp, restored database id, migration state, and verification output in the PR or incident ticket.
 

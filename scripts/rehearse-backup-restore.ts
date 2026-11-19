@@ -2,13 +2,23 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import assert from "node:assert/strict";
 import { PrismaClient } from "@prisma/client";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { withTenant } from "@/platform/db/tenant";
+import { Money } from "@/platform/money/money";
+import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
+import { HouseholdRepository } from "@/modules/personal/infrastructure/household-repository";
+import { PersonalDocumentRepository } from "@/modules/personal/infrastructure/personal-document-repository";
 
-type RehearsalDatabase = {
-  containerName: string;
-  databaseUrl: string;
-};
+type RehearsalDatabase = { databaseUrl: string } & (
+  | { containerName: string }
+  | { databaseName: string; postgresEnvironment: NodeJS.ProcessEnv }
+);
+
+const specimen = Buffer.from("%PDF-1.7\n%%EOF");
+const restoredTables = ["financial_transaction", "posting", "personal_document", "personal_audit_event", "audit_log"];
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): string {
   return execFileSync(command, args, {
@@ -98,7 +108,7 @@ function publishedPort(containerName: string): string {
   return port;
 }
 
-function startDatabase(label: string): RehearsalDatabase {
+function startContainer(label: string): RehearsalDatabase {
   const containerName = `alvillas-os-restore-${label}-${Date.now()}-${randomUUID().slice(0, 8)}`;
 
   docker([
@@ -128,137 +138,188 @@ function startDatabase(label: string): RehearsalDatabase {
   };
 }
 
-async function writeRehearsalEvidence(databaseUrl: string): Promise<string> {
-  const prisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } }
-  });
+function startDatabase(label: string): RehearsalDatabase {
+  const configured = process.env.REHEARSAL_LOCAL_POSTGRES_URL;
+  if (!configured) return startContainer(label);
+  const server = new URL(configured);
+  if (server.protocol !== "postgresql:" || server.hostname !== "127.0.0.1" || !server.port
+    || server.pathname !== "/postgres" || !server.username || server.search || server.hash) {
+    throw new Error("Local restore rehearsal requires an explicit PostgreSQL loopback maintenance database");
+  }
+  const databaseName = `alvillas_restore_${label}_${randomUUID().replaceAll("-", "")}`;
+  const postgresEnvironment = {
+    ...process.env,
+    PGHOST: server.hostname, PGPORT: server.port,
+    PGUSER: decodeURIComponent(server.username), PGPASSWORD: decodeURIComponent(server.password), PGDATABASE: "postgres"
+  };
+  runInherited("createdb", [databaseName], postgresEnvironment);
+  server.pathname = `/${databaseName}`;
+  server.search = "schema=public";
+  return { databaseName, databaseUrl: server.toString(), postgresEnvironment };
+}
 
+function backup(database: RehearsalDatabase, path: string) {
+  const options = ["--format=custom", "--no-owner", "--no-privileges"];
+  if ("databaseName" in database) {
+    runInherited("pg_dump", ["--dbname", database.databaseName, ...options, "--file", path], database.postgresEnvironment);
+    return;
+  }
+  const containerPath = "/tmp/alvillas-os.dump";
+  runInherited("docker", ["exec", database.containerName, "pg_dump", "-U", "postgres", "-d", "alvillas_os",
+    ...options, "--file", containerPath]);
+  runInherited("docker", ["cp", `${database.containerName}:${containerPath}`, path]);
+}
+
+function restore(database: RehearsalDatabase, path: string) {
+  const options = ["--no-owner", "--no-privileges", "--exit-on-error"];
+  if ("databaseName" in database) {
+    runInherited("pg_restore", ["--dbname", database.databaseName, ...options, path], database.postgresEnvironment);
+    return;
+  }
+  const containerPath = "/tmp/alvillas-os.dump";
+  runInherited("docker", ["cp", path, `${database.containerName}:${containerPath}`]);
+  runInherited("docker", ["exec", database.containerName, "pg_restore", "-U", "postgres", "-d", "alvillas_os",
+    ...options, containerPath]);
+}
+
+async function writeRehearsalEvidence(databaseUrl: string) {
+  const db = new PrismaClient({ datasourceUrl: databaseUrl });
   try {
-    const organization = await prisma.organization.create({
-      data: {
-        name: `ALVILLAS Restore Rehearsal ${new Date().toISOString()}`,
-        baseCurrency: "MAD"
-      }
+    const { id: organizationId } = await db.organization.create({
+      data: { name: "ALVILLAS isolated restore fixture", baseCurrency: "MAD" }
     });
-
-    await prisma.auditLog.create({
-      data: {
-        organizationId: organization.id,
-        action: "backup.restore.rehearsal",
-        resourceType: "organization",
-        resourceId: organization.id,
-        requestId: "restore-rehearsal"
-      }
+    const { actor, journal } = await withTenant(db, organizationId, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId, displayName: "Restore fixture operator" } });
+      const { id: accountId } = await tx.userAccount.create({ data: { organizationId, personId: person.id } });
+      const repository = new FinanceRepository(tx, organizationId);
+      const bank = await repository.ensureLedgerAccount({ code: "RESTORE_BANK", name: "Fixture bank", accountType: "ASSET_LOCATION", normalSide: "DEBIT" });
+      const capital = await repository.ensureLedgerAccount({ code: "RESTORE_CAPITAL", name: "Fixture capital", accountType: "ALVILLAS_OWN", normalSide: "CREDIT" });
+      const amount = Money.of("9007199254740993.07", "MAD");
+      const now = new Date();
+      const journal = await repository.createFinancialTransaction({
+        reference: "RESTORE-" + randomUUID(), occurredAt: now, description: "Synthetic exact-money recovery witness",
+        idempotencyKey: randomUUID(), createdBy: accountId, postings: [
+          { ledgerAccountId: bank.id, side: "DEBIT", amount, bucket: null, dimensions: {} },
+          { ledgerAccountId: capital.id, side: "CREDIT", amount, bucket: null, dimensions: {} }
+        ]
+      });
+      await writeAuditEvent(tx, { organizationId, actorId: accountId, action: "backup.restore.rehearsal", resourceType: "organization",
+        resourceId: organizationId, requestId: "restore-rehearsal", occurredAt: now });
+      return { actor: { organizationId, accountId }, journal };
     });
-
-    return organization.id;
+    const households = new HouseholdRepository(db);
+    const householdId = await households.provision(actor, "Restore fixture household", "Fixture steward");
+    const documentId = await households.scoped(actor, householdId, async (scope) => {
+      const documents = new PersonalDocumentRepository(scope);
+      await documents.upload({ id: randomUUID(), displayName: "Fixture document",
+        file: new File([specimen], "fixture.pdf", { type: "application/pdf" }) });
+      return (await documents.list(false)).items[0].id;
+    });
+    return { actor, householdId, documentId, journalId: journal.id };
   } finally {
-    await prisma.$disconnect();
+    await db.$disconnect();
   }
 }
 
-async function verifyRestoredDatabase(databaseUrl: string, organizationId: string): Promise<{
-  migrationCount: number;
-  organizationCount: number;
-  auditCount: number;
-}> {
-  const prisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } }
-  });
+type Evidence = Awaited<ReturnType<typeof writeRehearsalEvidence>>;
 
+async function evidenceSnapshot(databaseUrl: string, evidence: Evidence) {
+  const db = new PrismaClient({ datasourceUrl: databaseUrl });
+  const { actor, householdId, documentId, journalId } = evidence;
+  const { organizationId } = actor;
   try {
-    const [migrationRows, organizationCount, auditCount] = await Promise.all([
-      prisma.$queryRaw<Array<{ migrationCount: number }>>`
-        SELECT COUNT(*)::int AS "migrationCount" FROM "_prisma_migrations"
-      `,
-      prisma.organization.count({ where: { id: organizationId } }),
-      prisma.auditLog.count({
-        where: {
-          organizationId,
-          action: "backup.restore.rehearsal"
-        }
+    const [migrations, policies, business, personal] = await Promise.all([
+      db.$queryRaw<{ id: string; migration_name: string; checksum: string }[]>`
+        SELECT id, migration_name, checksum FROM "_prisma_migrations"
+        WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name`,
+      db.$queryRaw<{ table: string; rls: boolean; force: boolean; policyCount: bigint }[]>`
+        SELECT c.relname AS "table", c.relrowsecurity AS rls, c.relforcerowsecurity AS force,
+          (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid) AS "policyCount"
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = ANY(${restoredTables}::text[]) ORDER BY c.relname`,
+      withTenant(db, organizationId, async (tx) => ({
+        journal: await tx.financialTransaction.findUniqueOrThrow({
+          where: { organizationId_id: { organizationId, id: journalId } },
+          include: { postings: { orderBy: { id: "asc" } } }
+        }),
+        auditCount: await tx.auditLog.count({ where: { organizationId, action: "backup.restore.rehearsal" } })
+      })),
+      new HouseholdRepository(db).scoped(actor, householdId, async (scope) => {
+        const encrypted = await scope.tx.personalDocument.findUniqueOrThrow({
+          where: { organizationId_householdId_id: { ...scope.key, id: documentId } },
+          select: { ciphertext: true, contentHash: true }
+        });
+        const auditCount = await scope.tx.personalAuditEvent.count({
+          where: { ...scope.key, action: "personal.document_uploaded", resourceId: documentId }
+        });
+        return { encrypted, auditCount };
       })
     ]);
-
-    return {
-      migrationCount: migrationRows[0]?.migrationCount ?? 0,
-      organizationCount,
-      auditCount
-    };
+    assert(migrations.length > 0);
+    assert.equal(policies.length, restoredTables.length);
+    assert(policies.every((row) => row.rls && row.force && row.policyCount > 0n));
+    assert.equal(business.auditCount, 1);
+    assert.equal(business.journal.sealed, true);
+    assert.equal(business.journal.postings.length, 2);
+    assert(business.journal.postings.every((posting) => posting.amount.toFixed(2) === "9007199254740993.07"));
+    assert.equal(personal.auditCount, 1);
+    return { migrations, policies, business, personal };
   } finally {
-    await prisma.$disconnect();
+    await db.$disconnect();
+  }
+}
+
+async function verifyDocumentRecovery(databaseUrl: string, evidence: Evidence) {
+  const db = new PrismaClient({ datasourceUrl: databaseUrl });
+  try {
+    const file = await new HouseholdRepository(db).scoped(evidence.actor, evidence.householdId,
+      (scope) => new PersonalDocumentRepository(scope).download(evidence.documentId));
+    assert(file);
+    assert.deepEqual(Buffer.from(file.bytes), specimen);
+  } finally {
+    await db.$disconnect();
   }
 }
 
 async function main(): Promise<void> {
   const workspace = mkdtempSync(join(tmpdir(), "alvillas-restore-"));
   const dumpPath = join(workspace, "alvillas-os.dump");
-  const containers: string[] = [];
+  const databases: RehearsalDatabase[] = [];
+  const originalKeys = process.env.PERSONAL_ENCRYPTION_KEYS;
+  process.env.PERSONAL_ENCRYPTION_KEYS = "rehearsal:" + randomBytes(32).toString("base64");
 
   try {
     const source = startDatabase("source");
-    containers.push(source.containerName);
+    databases.push(source);
     runNpx(["prisma", "migrate", "deploy"], { ...process.env, DATABASE_URL: source.databaseUrl });
-    const organizationId = await writeRehearsalEvidence(source.databaseUrl);
-
-    const containerDumpPath = "/tmp/alvillas-os.dump";
-    runInherited("docker", [
-      "exec",
-      source.containerName,
-      "pg_dump",
-      "-U",
-      "postgres",
-      "-d",
-      "alvillas_os",
-      "--format=custom",
-      "--no-owner",
-      "--no-privileges",
-      "--file",
-      containerDumpPath
-    ]);
-    runInherited("docker", ["cp", `${source.containerName}:${containerDumpPath}`, dumpPath]);
-
-    if (!existsSync(dumpPath)) {
-      throw new Error("pg_dump did not create a backup artifact");
-    }
+    const evidence = await writeRehearsalEvidence(source.databaseUrl);
+    const original = await evidenceSnapshot(source.databaseUrl, evidence);
+    backup(source, dumpPath);
+    if (!existsSync(dumpPath)) throw new Error("pg_dump did not create a backup artifact");
 
     const target = startDatabase("target");
-    containers.push(target.containerName);
-    runInherited("docker", ["cp", dumpPath, `${target.containerName}:${containerDumpPath}`]);
-    runInherited("docker", [
-      "exec",
-      target.containerName,
-      "pg_restore",
-      "-U",
-      "postgres",
-      "-d",
-      "alvillas_os",
-      "--no-owner",
-      "--no-privileges",
-      containerDumpPath
-    ]);
+    databases.push(target);
+    restore(target, dumpPath);
     runNpx(["prisma", "migrate", "deploy"], { ...process.env, DATABASE_URL: target.databaseUrl });
-
-    const verification = await verifyRestoredDatabase(target.databaseUrl, organizationId);
-
-    if (verification.migrationCount < 1 || verification.organizationCount !== 1 || verification.auditCount !== 1) {
-      throw new Error(`Restore verification failed: ${JSON.stringify(verification)}`);
-    }
-
-    console.log(
-      JSON.stringify({
-        status: "ok",
-        migrationCount: verification.migrationCount,
-        organizationCount: verification.organizationCount,
-        auditCount: verification.auditCount
-      })
-    );
+    assert.deepEqual(await evidenceSnapshot(target.databaseUrl, evidence), original);
+    await verifyDocumentRecovery(target.databaseUrl, evidence);
+    console.log(JSON.stringify({
+      status: "ok", migrationCount: original.migrations.length, tenantPolicies: original.policies.length,
+      ledgerPostings: original.business.journal.postings.length, auditCount: original.business.auditCount,
+      protectedDocumentRecovered: true
+    }));
   } finally {
-    for (const containerName of containers.reverse()) {
+    if (originalKeys === undefined) delete process.env.PERSONAL_ENCRYPTION_KEYS;
+    else process.env.PERSONAL_ENCRYPTION_KEYS = originalKeys;
+    for (const database of databases.reverse()) {
       try {
-        execFileSync("docker", ["stop", containerName], { stdio: "ignore" });
+        if ("databaseName" in database) {
+          runInherited("dropdb", ["--if-exists", "--force", database.databaseName], database.postgresEnvironment);
+        } else {
+          execFileSync("docker", ["stop", database.containerName], { stdio: "ignore" });
+        }
       } catch {
-        // Rehearsal cleanup is best-effort after a failed start/stop race.
+        console.warn("Could not clean up a disposable restore database");
       }
     }
     rmSync(workspace, { recursive: true, force: true });
