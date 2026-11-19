@@ -44,10 +44,39 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
     const setup = await ensureReservationRevenuePostingSetup({ ownerEmail, propertyName, password: process.env.ADMIN_PASSWORD ?? "correct horse battery staple" });
     await withTenant(f.db, f.organizationId, tx => new ConfigRuleRepository(tx, f.organizationId).createVersion({ key: "ops.reservation_task_templates", scopeType: "property", scopeId: setup.propertyId,
       effectiveFrom: new Date("2020-01-01"), reason: "Explicit local financial guard workflow", value: { tasks: [{ key: "arrival", type: "ARRIVAL_PREPARATION", title: { en: "Arrival", fr: "Arrivée", ar: "الوصول" }, due: "CHECK_IN", priority: "NORMAL", checklist: [] }] } }));
-    await admin.goto(`/${locale}/app/reservations`); await admin.getByTestId("reservation-property").selectOption(setup.propertyId); await admin.getByTestId("reservation-guest-name").fill(guestName);
-    await admin.getByTestId("reservation-guest-email").fill(`guard-guest-${suffix}@example.test`); await admin.getByTestId("reservation-check-in").fill("2028-06-10"); await admin.getByTestId("reservation-check-out").fill("2028-06-14");
-    await admin.getByTestId("reservation-adults").fill("2"); await admin.getByTestId("reservation-children").fill("0"); await admin.getByTestId("reservation-submit").click(); await expect(admin).toHaveURL(/\/app\/operations/u);
-    await admin.goto(`/${locale}/app/reservations`); const row = admin.getByTestId("reservation-row").filter({ hasText: guestName });
+    const reservationsPath = `/${locale}/app/reservations`;
+    const operationsPath = `/${locale}/app/operations?propertyId=${setup.propertyId}`;
+    await admin.goto(reservationsPath);
+    const booking = admin.getByTestId("reservation-create-form");
+    await booking.getByTestId("reservation-property").selectOption(setup.propertyId);
+    await booking.getByTestId("reservation-guest-name").fill(guestName);
+    await booking.getByTestId("reservation-guest-email").fill(`guard-guest-${suffix}@example.test`);
+    await booking.getByTestId("reservation-check-in").fill("2028-06-10");
+    await booking.getByTestId("reservation-check-out").fill("2028-06-14");
+    await booking.getByTestId("reservation-adults").fill("2");
+    await booking.getByTestId("reservation-children").fill("0");
+    const bookingNonce = await booking.locator('input[name="idempotencyKey"]').inputValue();
+    expect(bookingNonce).toMatch(/^[a-f0-9-]{36}$/u);
+    const [acknowledgement] = await Promise.all([
+      admin.waitForResponse(response => {
+        const request = response.request();
+        return request.method() === "POST" && request.url() === new URL(reservationsPath, origin).href
+          && Boolean(request.headers()["next-action"] && request.postData()?.includes(bookingNonce));
+      }),
+      booking.getByTestId("reservation-submit").click()
+    ]);
+    expect(acknowledgement.status()).toBe(200);
+    expect((await acknowledgement.headerValue("x-action-redirect"))?.split(";")[0]).toBe(operationsPath);
+    // The router can only apply the streamed response after the action has acknowledged the booking.
+    expect(await acknowledgement.finished()).toBeNull();
+    await expect(admin).toHaveURL(new URL(operationsPath, origin).href);
+    const savedBooking = await withTenant(f.db, f.organizationId, tx => tx.reservation.findMany({
+      where: { organizationId: f.organizationId, propertyId: setup.propertyId, idempotencyKey: bookingNonce },
+      select: { status: true, operationTasks: { select: { type: true } } }
+    }));
+    expect(savedBooking).toEqual([{ status: "CONFIRMED", operationTasks: [{ type: "ARRIVAL_PREPARATION" }] }]);
+
+    await admin.goto(reservationsPath); const row = admin.getByTestId("reservation-row").filter({ hasText: guestName });
     await row.getByTestId("reservation-revenue-amount").fill("100.00"); await selectPaymentAccount(row,"reservation-revenue-account",{ label: setup.bankName });
     const bankId = await row.getByTestId("reservation-revenue-account").inputValue();
     const revenue = await captureAction(admin, row.getByTestId("reservation-revenue-submit")); await expect(row.getByTestId("reservation-revenue-posted")).toBeVisible();
