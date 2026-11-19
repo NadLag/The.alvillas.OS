@@ -61,7 +61,14 @@ test.describe("event notification routing", () => {
       await page.getByTestId("reservation-guest-name").fill(`Routing guest ${suffix}`);
       await page.getByTestId("reservation-check-in").fill("2027-11-10"); await page.getByTestId("reservation-check-out").fill("2027-11-14");
       await page.getByTestId("reservation-adults").fill("2"); await page.getByTestId("reservation-children").fill("0");
-      await page.getByTestId("reservation-submit").click(); await expect(page).toHaveURL(/\/en\/app\/operations/u);
+      const reservationSaved = page.waitForResponse(response => {
+        const request = response.request();
+        return request.method() === "POST" && new URL(response.url()).pathname === "/en/app/reservations"
+          && Boolean(request.headers()["next-action"]) && Boolean(request.postData()?.includes(`Routing guest ${suffix}`));
+      });
+      await page.getByTestId("reservation-submit").click();
+      expect((await reservationSaved).ok()).toBe(true);
+      await expect(page).toHaveURL(url => url.pathname === "/en/app/operations" && url.searchParams.get("propertyId") === property.id);
       expect(await page.evaluate((width) => document.documentElement.scrollWidth <= width, page.viewportSize()!.width)).toBe(true);
       await page.getByTestId("notification-bell").click();
       const notice = page.getByTestId("notification-item").filter({ hasText: "A reservation was created." });
