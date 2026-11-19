@@ -344,7 +344,7 @@ F-SEC-04 | TODO |
 F-SEC-05 | TODO |
 F-SEC-06 | TODO |
 F-SEC-07 | TODO |
-F-PRF-01 | TODO |
+F-PRF-01 | IN-PROGRESS | k6 profiles for 10, 100 and 500 properties verify scoped fixture volume and exact app revision before exercising the directory, company reports and field sync. Local harness validation passed. Full representative dataset and approved staging load run pending.
 F-PRF-02 | TODO |
 F-PRF-03 | TODO |
 F-PRF-04 | TODO |
