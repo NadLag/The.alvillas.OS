@@ -84,7 +84,7 @@ export async function dispatchOutboxBatch(
     throw new Error("outbox backoffSeconds must be an integer between 1 and 3600");
   }
 
-  return withTenant(db, organizationId, async (tx) => {
+  const batch = await withTenant(db, organizationId, async (tx) => {
     const repository = new OutboxRepository(tx, organizationId);
     await repository.lockDispatcher();
     const now = options.now ?? new Date();
@@ -136,8 +136,17 @@ export async function dispatchOutboxBatch(
       }
     }
 
-    return result;
+    const oldestDueMs = Math.max(0, ...events.map((event) =>
+      now.getTime() - (event.nextAttemptAt ?? event.occurredAt).getTime()));
+    return { result, selected: events.length, oldestDueMs };
   });
+
+  if (batch.selected > 0) {
+    logger.info("outbox.batch.committed", { organizationId }, {
+      ...batch.result, selected: batch.selected, oldestDueMs: batch.oldestDueMs, atCapacity: batch.selected === limit
+    });
+  }
+  return batch.result;
 }
 
 export async function dispatchOutboxForAllOrganizations(

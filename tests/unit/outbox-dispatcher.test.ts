@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { logger } from "@/platform/observability/logger";
 import {
   dispatchOutboxBatch,
   dispatchOutboxForAllOrganizations
@@ -55,6 +56,30 @@ function runner(events: ReturnType<typeof outboxEvent>[], organizations = [{ id:
 }
 
 describe("dispatchOutboxBatch", () => {
+  it("publishes committed lag and batch outcomes without event identifiers", async () => {
+    const { db } = runner([outboxEvent("private-event", "reservation.created")]);
+    const originalTransaction = db.$transaction;
+    let committed = false;
+    db.$transaction = async (callback) => {
+      const result = await originalTransaction(callback);
+      committed = true;
+      return result;
+    };
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {
+      expect(committed).toBe(true);
+    });
+    try {
+      await dispatchOutboxBatch(db, organizationId, { "reservation.created": async () => {} }, {
+        now: new Date("2026-10-11T00:00:42.000Z"), limit: 1
+      });
+      expect(info).toHaveBeenCalledExactlyOnceWith("outbox.batch.committed", { organizationId }, {
+        dispatched: 1, failed: 0, skipped: 0, selected: 1, oldestDueMs: 42_000, atCapacity: true
+      });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it("dispatches pending events through registered handlers", async () => {
     const { db, update } = runner([outboxEvent("evt-1", "reservation.created")]);
     const handler = vi.fn(() => Promise.resolve());

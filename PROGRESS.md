@@ -348,7 +348,7 @@ F-PRF-01 | TODO |
 F-PRF-02 | TODO |
 F-PRF-03 | TODO |
 F-PRF-04 | TODO |
-F-OPR-01 | TODO |
+F-OPR-01 | IN-PROGRESS | Committed, tenant-scoped outbox batch lag and dispatch outcomes are observable without payloads or identifiers. Local regression passed. Hosted monitoring sinks, alert policies and delivery acceptance pending.
 F-OPR-02 | TODO |
 F-OPR-03 | TODO |
 F-OPR-04 | TODO |
