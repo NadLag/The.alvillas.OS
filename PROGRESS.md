@@ -317,15 +317,15 @@ F-CMD-03 | IN-PROGRESS | Currency-specific ledger view separates revenue and exp
 F-CMD-04 | IN-PROGRESS | Operations tabs show native workload, property readiness and delayed tasks with scoped filters and links. Hosted acceptance pending.
 F-CMD-05 | IN-PROGRESS | Indexed PostgreSQL full-text and trigram search across authorized operational records and the native document archive. Hosted acceptance pending.
 F-CMD-06 | IN-PROGRESS | Manager, operations and finance dashboards use authorized native sections and default to the active account role. Hosted acceptance pending.
-F-WEB-01 | TODO |
-F-WEB-02 | TODO |
-F-WEB-03 | TODO |
-F-WEB-04 | TODO |
-F-WEB-05 | TODO |
-F-WEB-06 | TODO |
-F-WEB-07 | TODO |
-F-WEB-08 | TODO |
-F-WEB-09 | TODO |
+F-WEB-01 | IN-PROGRESS | Localized ALVILLAS homepage with the four pillars, management process, services, Marrakech coverage and assessment entry. CI and hosted acceptance pending.
+F-WEB-02 | IN-PROGRESS | EN/FR/AR Management, Services and About routes with shared navigation and assessment entry. CI and hosted acceptance pending.
+F-WEB-03 | IN-PROGRESS | Configured multilingual assessment uses native CRM capture, approved notice, signed form proof, honeypot, durable quota, audit and outbox. Activation requires the approved notice and runtime keys. Hosted acceptance pending.
+F-WEB-04 | IN-PROGRESS | Public navigation links to the existing localized sign-in and MFA flow. CI and hosted acceptance pending.
+F-WEB-05 | IN-PROGRESS | Localized canonicals, alternate languages, sitemap, Open Graph artwork and organization structured data. Private workspace pages are noindex. CI and hosted acceptance pending.
+F-WEB-06 | IN-PROGRESS | Opt-in first-party daily route counters with privacy signals, tenant-scoped storage and organization report authorization. Hosted acceptance and analytics processing approval pending.
+F-WEB-07 | IN-PROGRESS | Server-rendered public layout avoids shipping the private message catalog. Sized brand assets, static social artwork and mobile Lighthouse budget check in place. Hosted Lighthouse and interaction measurements pending.
+F-WEB-08 | IN-PROGRESS | Public navigation, marketing and assessment copy is available in EN, FR and AR with localized routes and RTL. CI and hosted acceptance pending.
+F-WEB-09 | TODO | Awaiting lawyer-approved publishable legal text and approval references.
 F-PER-01 | TODO |
 F-PER-02 | TODO |
 F-PER-03 | TODO |

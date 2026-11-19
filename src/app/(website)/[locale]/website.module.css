@@ -1,0 +1,183 @@
+.site {
+  min-block-size: 100vh;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.frame {
+  inline-size: min(100% - clamp(2rem, 7vw, 8rem), 76rem);
+  margin-inline: auto;
+}
+
+.header {
+  background: var(--surface-panel);
+  border-block-end: 1px solid var(--border-subtle);
+}
+
+.header .frame, .footer .frame {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-8);
+  padding-block: var(--space-4);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-block-size: var(--target-min);
+  color: inherit;
+  font-size: 1.2rem;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: .13em;
+  text-decoration: none;
+}
+
+.navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) clamp(.5rem, 2vw, 1.6rem);
+}
+
+.navigation a, .signIn, .textLink, .footer a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--target-min);
+  color: inherit;
+  font-weight: var(--font-weight-semibold);
+  text-underline-offset: .25em;
+}
+
+.navigation a, .signIn { text-decoration: none; }
+.navigation a:hover, .signIn:hover { text-decoration: underline; }
+.signIn { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding-inline: var(--space-5); }
+
+.hero {
+  background: var(--color-ink-950);
+  color: var(--color-white);
+}
+
+.heroFrame {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr);
+  align-items: center;
+  gap: clamp(2rem, 5vw, 5rem);
+  padding-block: clamp(3rem, 8vw, 7rem);
+}
+
+.heroCopy, .sectionIntro, .callout {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: var(--space-5);
+}
+
+.site h1, .site h2, .site h3, .site p { margin: 0; overflow-wrap: anywhere; }
+.site h1 {
+  font-size: clamp(2.5rem, 6.1vw, 5.7rem);
+  line-height: 1.04;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -.045em;
+  text-wrap: balance;
+}
+.site:dir(rtl) h1 { line-height: 1.22; letter-spacing: normal; }
+.site h2 { font-size: clamp(1.9rem, 3.6vw, 3.45rem); line-height: var(--line-height-tight); text-wrap: balance; }
+.site h3 { font-size: 1.15rem; line-height: var(--line-height-tight); }
+.site p { max-inline-size: 55ch; line-height: var(--line-height-copy); }
+.lede { font-size: clamp(1.04rem, 1.6vw, 1.25rem); }
+.eyebrow { color: var(--color-green-100); font-weight: var(--font-weight-semibold); }
+
+.relief {
+  position: relative;
+  aspect-ratio: 5 / 4;
+  background: var(--color-rust-100);
+  isolation: isolate;
+  overflow: hidden;
+}
+.relief span {
+  position: absolute;
+  inset-block: 13% -10%;
+  inset-inline: 10%;
+  border-radius: 50% 50% 0 0 / 44% 44% 0 0;
+  background: var(--color-rust-700);
+}
+.relief span:nth-child(2) {
+  inset-block-start: 27%;
+  inset-inline: 20%;
+  background: var(--color-mist-200);
+}
+.relief span:nth-child(3) {
+  inset-block-start: 41%;
+  inset-inline: 31%;
+  background: linear-gradient(to bottom, var(--color-green-700), var(--color-green-800));
+}
+
+.section { padding-block: clamp(2.6rem, 6.5vw, 6rem); }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(1.5rem, 5vw, 5.5rem); }
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-7);
+  list-style: none;
+  padding: 0;
+  margin-block: var(--space-9) 0;
+}
+.pillars li { border-block-start: 2px solid var(--accent); padding-block: var(--space-5); }
+.pillars p, .steps p { margin-block-start: var(--space-3); color: var(--text-soft); }
+.process { background: var(--surface-muted); }
+.steps { display: grid; gap: var(--space-5); margin: 0; padding-inline-start: 2rem; }
+.steps li { padding-inline-start: var(--space-3); padding-block-end: var(--space-5); border-block-end: 1px solid var(--border-subtle); }
+.steps li::marker { color: var(--accent-active); font-weight: var(--font-weight-bold); }
+.location { background: var(--color-green-100); }
+.textLink { color: var(--accent-active); }
+.callout { justify-items: center; text-align: center; }
+.callout h2 { max-inline-size: 25ch; }
+.footer { border-block-start: 1px solid var(--border-subtle); }
+.navigation .assessmentNav { color: var(--accent-active); }
+.hero :global(.locale-switch a) { color: var(--color-white); border-color: rgb(255 255 255 / 38%); }
+.hero :global(.locale-switch a[aria-current="page"]) { background: var(--color-white); color: var(--color-ink-950); }
+.detailList h2 { font-size: var(--font-size-xl); }
+.detailList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-8);
+  list-style: none;
+  padding: 0;
+  margin-block: var(--space-9);
+}
+.detailList li {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  border-block-start: 1px solid var(--border-subtle);
+  padding-block-start: var(--space-5);
+}
+
+@media (max-width: 850px) {
+  .pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .header .frame { row-gap: 0; }
+  .navigation { order: 1; flex-basis: 100%; }
+  .heroFrame, .split, .detailList, .pillars { grid-template-columns: minmax(0, 1fr); }
+  .relief { aspect-ratio: 2 / 1; }
+}
+
+.assessment { display: grid; gap: var(--space-9); max-inline-size: 54rem; }
+.assessmentForm { padding: clamp(1rem, 4vw, 2rem); border: 1px solid var(--border-subtle); background: var(--surface-panel); }
+.assessmentFields { display: grid; gap: var(--space-6); min-inline-size: 0; padding: 0; border: 0; margin: 0; }
+.assessmentGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
+.assessmentForm :is(input, textarea, select) { max-inline-size: 100%; }
+.assessmentForm textarea { min-block-size: 5rem; }
+.contactHint { grid-column: 1 / -1; color: var(--text-secondary); }
+.assessmentNotice { display: grid; gap: var(--space-5); background: var(--surface-muted); padding: var(--space-5); }
+.assessmentNotice p { white-space: pre-wrap; max-inline-size: none; }
+.assessmentNotice label, .checkboxes label { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); }
+.assessmentNotice input, .checkboxes input { flex: none; accent-color: var(--accent); }
+.checkboxes { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-6); }
+
+@media (max-width: 640px) {
+  .assessmentGrid { grid-template-columns: minmax(0, 1fr); }
+}

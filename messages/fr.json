@@ -1,4 +1,175 @@
 {
+  "WebsiteAnalytics": {
+    "title": "Fréquentation du site",
+    "description": "Pages publiques vues chaque jour, sans identifiant de visiteur. Les visites répétées peuvent être comptées.",
+    "date": "Date (UTC)",
+    "apply": "Afficher la journée",
+    "count": "Pages vues : {count}",
+    "noData": "Aucune page vue n’a été enregistrée à cette date."
+  },
+  "Website": {
+    "languages": { "en": "English", "fr": "Français", "ar": "العربية" },
+    "navigation": "Navigation principale",
+    "language": "Choisir une langue",
+    "management": "Gestion",
+    "services": "Services",
+    "about": "À propos",
+    "signIn": "Se connecter",
+    "assessment": "Demander une évaluation",
+    "location": "Marrakech, Maroc",
+    "assessmentForm": {
+      "reload": "Actualiser le formulaire",
+      "intro": "Présentez-nous la villa et les services dont vous avez besoin.",
+      "unavailable": "Les demandes d’évaluation en ligne sont momentanément indisponibles.",
+      "ownerContact": "Votre nom",
+      "phone": "Téléphone",
+      "email": "Adresse e-mail",
+      "location": "Emplacement du bien",
+      "propertyTypeKey": "Type de bien",
+      "bedrooms": "Chambres",
+      "currentRentalStatusKey": "Situation locative actuelle",
+      "currentOtaKeys": "Plateformes de réservation utilisées",
+      "objectives": "De quelle aide avez-vous besoin ?",
+      "notes": "Précisions",
+      "choice": "Sélectionnez une option",
+      "source": "Comment nous avez-vous connus ?",
+      "acknowledgement": "J’ai lu les informations sur le traitement de ma demande.",
+      "contactEither": "Indiquez une adresse e-mail ou un numéro de téléphone.",
+      "submit": "Envoyer la demande",
+      "sending": "Envoi de la demande",
+      "accepted": "Votre demande d’évaluation a été reçue.",
+      "validation": "Vérifiez vos informations et les champs obligatoires.",
+      "rateLimited": "Trop de demandes. Veuillez réessayer plus tard.",
+      "failed": "Votre demande n’a pas pu être envoyée. Réessayez.",
+      "changed": "Actualisez la page pour consulter le formulaire à jour."
+    },
+    "hero": {
+      "title": "Votre villa. Nous nous occupons du reste.",
+      "description": "Gestion professionnelle de villas au Maroc, de la préparation du bien à l’accueil des voyageurs et au suivi de votre activité."
+    },
+    "pillars": {
+      "title": "Ce que nous prenons en charge",
+      "description": "Une seule équipe coordonne la préparation de votre villa et veille au bon déroulement des séjours.",
+      "management": {
+        "title": "Gestion de la propriété",
+        "description": "Nous préparons votre villa à la location et coordonnons les réservations et l’entretien courant."
+      },
+      "operations": {
+        "title": "Opérations",
+        "description": "Nous organisons le ménage, les inspections, l’entretien du linge et les interventions autour de chaque séjour."
+      },
+      "guestExperience": {
+        "title": "Expérience voyageurs",
+        "description": "Nous accompagnons les voyageurs de l’arrivée au départ et les aidons à organiser des services sur place."
+      },
+      "ownerControl": {
+        "title": "Suivi propriétaire",
+        "description": "Retrouvez les réservations, l’activité de votre bien, les revenus et les dépenses dans votre espace propriétaire."
+      }
+    },
+    "process": {
+      "title": "Comment ça fonctionne",
+      "description": "Tout commence par un échange sur votre villa et vos objectifs.",
+      "assessment": {
+        "title": "Évaluation",
+        "description": "Nous faisons le point sur votre villa, son état et vos attentes pour la location."
+      },
+      "agreement": {
+        "title": "Accord",
+        "description": "Nous convenons des services, des responsabilités et des conditions financières avant le début de la gestion."
+      },
+      "onboarding": {
+        "title": "Mise en place par ALVILLAS",
+        "description": "Notre équipe prépare la villa, documente son état et organise les interventions régulières."
+      },
+      "management": {
+        "title": "Gestion professionnelle",
+        "description": "Nous coordonnons les séjours et les opérations, et vous informons de l’activité de votre bien."
+      }
+    },
+    "guestServices": {
+      "title": "Des services pour chaque séjour",
+      "description": "Les voyageurs peuvent demander un chef privé, des transferts, des courses, des prestations de bien-être et des activités locales.",
+      "link": "Découvrir les services"
+    },
+    "why": {
+      "title": "Pourquoi ALVILLAS",
+      "description": "Une équipe à Marrakech prend soin de votre villa et de vos voyageurs. Vous pouvez suivre les interventions et leurs effets sur votre bien et vos finances.",
+      "link": "À propos d’ALVILLAS"
+    },
+    "coverage": {
+      "title": "Où nous intervenons",
+      "description": "Nous gérons des villas à Marrakech. Indiquez l’emplacement de votre bien lors de votre demande d’évaluation."
+    },
+    "assessmentPrompt": {
+      "title": "Parlons de votre villa",
+      "description": "Présentez-nous votre propriété et les services dont vous avez besoin."
+    },
+    "pages": {
+      "management": {
+        "title": "Gestion de villas",
+        "description": "Nous définissons ensemble les responsabilités, puis coordonnons les interventions pour que votre villa soit prête entre deux séjours.",
+        "items": {
+          "item1": {
+            "title": "Préparation de la propriété",
+            "description": "Nous examinons la villa, documentons son état et planifions les interventions avant l’accueil des voyageurs."
+          },
+          "item2": {
+            "title": "Réservations et arrivées",
+            "description": "Nous coordonnons les dates, les informations d’arrivée et le relais avec l’équipe sur place."
+          },
+          "item3": {
+            "title": "Entretien entre les séjours",
+            "description": "Nous planifions le ménage, le linge, les inspections et les réparations en fonction du calendrier des réservations."
+          },
+          "item4": {
+            "title": "Suivi propriétaire",
+            "description": "Votre espace rassemble l’activité du bien et les documents financiers auxquels vous avez accès."
+          }
+        }
+      },
+      "services": {
+        "title": "Services aux voyageurs",
+        "description": "Les voyageurs peuvent envoyer leurs demandes depuis leur espace. L’équipe confirme les dispositions pour le séjour.",
+        "items": {
+          "item1": {
+            "title": "Chef privé",
+            "description": "Organisez un repas à la villa et précisez à l’avance le menu, l’horaire et les besoins alimentaires."
+          },
+          "item2": {
+            "title": "Transferts",
+            "description": "Communiquez vos informations d’arrivée et de départ pour que l’équipe puisse vous aider à organiser le transport."
+          },
+          "item3": {
+            "title": "Courses",
+            "description": "Demandez des courses avant l’arrivée ou pendant le séjour."
+          },
+          "item4": {
+            "title": "Bien-être et activités",
+            "description": "Renseignez-vous sur les prestations de bien-être et les activités locales adaptées à votre séjour."
+          }
+        }
+      },
+      "about": {
+        "title": "À propos d’ALVILLAS",
+        "description": "ALVILLAS est une société marocaine de gestion de villas, implantée d’abord à Marrakech.",
+        "items": {
+          "item1": {
+            "title": "Une équipe locale",
+            "description": "Nous coordonnons les personnes, les fournisseurs et les services qui prennent soin des villas et accueillent les voyageurs."
+          },
+          "item2": {
+            "title": "Des responsabilités claires",
+            "description": "Nous définissons le périmètre de la gestion avec chaque propriétaire avant la mise en place."
+          },
+          "item3": {
+            "title": "Un suivi accessible",
+            "description": "Les propriétaires peuvent suivre l’activité de leur bien, les justificatifs et les rapports financiers dans leur espace."
+          }
+        }
+      }
+    }
+  },
   "CommandDashboard": {
     "loading": "Chargement du centre de pilotage",
     "error": "Impossible de charger le centre de pilotage.",

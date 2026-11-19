@@ -3,9 +3,10 @@ import {PrismaClient,type Prisma} from "@prisma/client";
 import {afterAll,beforeAll,describe,expect,it,vi} from "vitest";
 import {withTenant,type TenantTransaction,type TenantTransactionRunner} from "@/platform/db/tenant";
 import {authContextForAccount} from "@/platform/authz/account-context";
+import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import * as auditWriter from "@/platform/audit/audit-writer";
-import {captureLead,captureWebsiteLead,readLead} from "@/modules/crm/application/lead-capture-service";
+import {captureLead,captureWebsiteLead,getWebsiteAssessmentForm,readLead} from "@/modules/crm/application/lead-capture-service";
 import {leadCapturePolicyKey,type LeadCapturePolicy} from "@/modules/crm/domain/lead-capture";
 import {provisionIntegrationRole} from "./support/database-role";
 import {appendNativeLeadFinancialSentinel,nativeLeadFinancialGuard,nativeLeadFixture,nativeLeadInput,nativeWebsiteLeadInput} from "./support/lead-fixture";
@@ -39,6 +40,34 @@ describe("actual private native CRM acquisition capture",()=>{
     expect(JSON.stringify({receipt:result,audit:native.audit,event:native.event})).not.toContain(input.fields.email);
     expect(await readLead(f.ctx,{leadId:result.id},deps())).toMatchObject({id:result.id,fields:input.fields});expect(await counts(f)).toEqual({leads:1,captures:1,events:1});
   });
+  it("binds an assessment submission to the published notice and its server-issued form", async () => {
+    const notice = { en: "Browser acceptance notice", fr: "Avis de vérification", ar: "إشعار للتحقق" };
+    const noticeSha256 = jsonbFingerprint(notice);
+    const approvalReference = "website-acceptance-fixture";
+    const f = await fixture({ website_notice: {
+      approval_reference: approvalReference, notice_sha256: noticeSha256,
+      form: { notice_content: notice, minimum_seconds: 1, maximum_seconds: 600 }
+    } });
+    const website = { db, env: { ...env, AUTH_SECRET: randomBytes(32).toString("hex"), ALVILLAS_PUBLIC_ORGANIZATION_ID: f.organizationId } };
+    const form = await getWebsiteAssessmentForm("ar", website);
+    expect(form?.notice).toBe(notice.ar);
+    if (!form) throw new Error("Approved website assessment form expected");
+    const input = {
+      ...nativeWebsiteLeadInput(), locale: "ar", idempotencyKey: form.idempotencyKey,
+      websiteAcknowledgement: { approvalReference, noticeSha256, affirmed: true }
+    };
+    const proof = { issuedAt: form.issuedAt, signature: form.signature, website: "" };
+    await expect(captureWebsiteLead(f.organizationId, input, website)).rejects.toThrow("lead_validation");
+    await expect(captureWebsiteLead(f.organizationId, { ...input, websiteForm: { ...proof, website: "automated" } }, website)).rejects.toThrow();
+    await expect(captureWebsiteLead(f.organizationId, { ...input, idempotencyKey: randomUUID(), websiteForm: proof }, website)).rejects.toThrow("lead_validation");
+    expect(await counts(f)).toEqual({ leads: 0, captures: 0, events: 0 });
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    const accepted = await captureWebsiteLead(f.organizationId, { ...input, websiteForm: proof }, website);
+    expect(accepted).toMatchObject({ locale: "ar", channel: "WEBSITE", replayed: false });
+    expect(await captureWebsiteLead(f.organizationId, { ...input, websiteForm: proof }, website)).toMatchObject({ id: accepted.id, replayed: true });
+    expect(await counts(f)).toEqual({ leads: 1, captures: 1, events: 1 });
+  });
+
   it("canonicalizes an uppercase nonce for durable exact recovery",async()=>{
     const f=await fixture(),input=nativeLeadInput(),first=await captureLead(f.ctx,{...input,idempotencyKey:input.idempotencyKey.toUpperCase()},deps()),again=await captureLead(f.ctx,input,deps());
     expect(again).toEqual({...first,replayed:true});expect(await counts(f)).toEqual({leads:1,captures:1,events:1});

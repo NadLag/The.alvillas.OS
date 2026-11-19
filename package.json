@@ -34,6 +34,7 @@
     "check:schema-drift": "tsx tests/scripts/check-schema-drift.ts",
     "check:ledger": "tsx tests/scripts/check-ledger.ts",
     "check:audit": "tsx tests/scripts/check-audit.ts",
+    "check:public-performance": "node scripts/check-public-performance.mjs",
     "check:progress": "tsx tests/scripts/check-progress.ts",
     "progress:report": "tsx tests/scripts/progress-report.ts",
     "progress:set": "tsx tests/scripts/set-progress-note.ts",

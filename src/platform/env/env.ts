@@ -11,6 +11,7 @@ export const envSchema = z.object({
   ADMIN_PASSWORD: z.string().optional(),
   ENCRYPTION_KEYS: z.string().optional(),
   ALVILLAS_PUBLIC_ORGANIZATION_ID: z.preprocess(value=>typeof value==="string"&&value.trim()===""?undefined:value,z.uuid().optional()),
+  ALVILLAS_PUBLIC_ANALYTICS: z.enum(["0", "1"]).optional(),
   RESEND_API_KEY: z.string().optional(),
   RESEND_WEBHOOK_SECRET: z.string().optional(),
   EMAIL_FROM: z.string().email().optional().or(z.literal("")),

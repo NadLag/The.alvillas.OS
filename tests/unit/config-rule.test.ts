@@ -135,13 +135,22 @@ describe("config rule registry", () => {
       "staff.compensation_percentage_earnings",
       "staff.compensation_percentage_runs",
       "staff.compensation_runs",
-      "staff.management_policy"
+      "staff.management_policy",
+      "website.analytics"
     ]);
 
     expect(schemaForConfigKey("feature_flag.owner_portal")).toBeTruthy();
   });
 
   it("parses known config values and rejects unregistered keys", () => {
+    const analytics = {
+      enabled: true, approval_reference: "POLICY-123", window_seconds: 60, maximum_events: 120
+    };
+    expect(parseConfigRuleValue("website.analytics", analytics)).toEqual(analytics);
+    expect(() => parseConfigRuleValue("website.analytics", { ...analytics, approval_reference: " " })).toThrow();
+    expect(() => parseConfigRuleValue("website.analytics", { ...analytics, maximum_events: 0 })).toThrow();
+    expect(() => parseConfigRuleValue("website.analytics", { ...analytics, visitor_tracking: true })).toThrow();
+
     const attachments={source:"ORIGINAL_SEALED_FINANCIAL_TRANSACTION",content_types:["application/pdf"],max_bytes:102400,intent_lifetime_seconds:600,storage_read_ttl_seconds:60,encryption:"APP_MANAGED_AUTHENTICATED_ENCRYPTION",history:"APPEND_ONLY_WITH_RETAINED_SUPERSEDED_FILES",rate_limit:{requests:10,window_seconds:60}};
     expect(parseConfigRuleValue("finance.transaction_attachments",attachments)).toEqual(attachments);
     expect(()=>parseConfigRuleValue("finance.transaction_attachments",{...attachments,encryption:"NONE"})).toThrow();

@@ -1,7 +1,7 @@
 import {LeadWorkRepository} from "../infrastructure/lead-work-repository";
 import {leadResource} from "./lead-resource";
 import type {AssignmentSource} from "./lead-resource";
-import {createHash,randomUUID,timingSafeEqual} from "node:crypto";
+import {createHash,createHmac,randomUUID,timingSafeEqual} from "node:crypto";
 import {z,ZodError} from "zod";
 import type {Lead} from "@prisma/client";
 import {withTenant,assertOrganizationId,type TenantTransaction,type TenantTransactionRunner} from "@/platform/db/tenant";
@@ -11,7 +11,7 @@ import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
 import {captureAuthorizationCap} from "@/platform/authz/authorization-cap";
 import {present,catalogFieldPolicy} from "@/platform/authz/present";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
-import {commandFingerprint} from "@/platform/http/command-fingerprint";
+import {commandFingerprint,jsonbFingerprint} from "@/platform/http/command-fingerprint";
 import {consumeRateLimit} from "@/platform/rate-limit/postgres-rate-limiter";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
@@ -20,8 +20,11 @@ import {LeadProfileRepository} from "../infrastructure/lead-profile-repository";
 import {retainedLeadProfile} from "./lead-profile-snapshot";
 import {LeadStageRepository} from "../infrastructure/lead-stage-repository";
 import {leadCaptureInputSchema,leadCapturePolicyKey,leadCapturePolicySchema,leadCaptureMaximumRequestBytes,parseConfiguredLeadCapture,
-  LeadAccessError,LeadConfigurationError,LeadConflictError,LeadValidationError,LeadRateLimitError} from "../domain/lead-capture";
-import {encryptLeadPayload,decryptLeadPayload,type LeadPayloadBinding} from "../domain/lead-payload";
+  LeadAccessError,LeadConfigurationError,LeadConflictError,LeadValidationError,LeadRateLimitError,websiteLeadSubmissionSchema,type WebsiteLeadFormProof} from "../domain/lead-capture";
+import {localizedText} from "@/i18n/content";
+import type {AppLocale} from "@/i18n/routing";
+import {configuredWebsiteOrganization} from "@/platform/website/website-environment";
+import {encryptLeadPayload,decryptLeadPayload,requireLeadPayloadKeys,type LeadPayloadBinding} from "../domain/lead-payload";
 
 export type LeadDependencies={db:TenantTransactionRunner;requestId?:string;env?:NodeJS.ProcessEnv};
 const referenceSchema=z.object({leadId:z.uuid().transform(value=>value.toLowerCase())}).strict();
@@ -55,9 +58,69 @@ async function finalCaptureFence(actor:AccountActorContext,tx:TenantTransaction,
   await captureAuthority(actor,tx,now,resource(actor.organizationId,row.id,row.createdAt,position.stage,await new LeadWorkRepository(tx,actor.organizationId).currentAssignment(row.id)),website);
 }
 
+function websiteFormSignature(organizationId: string, nonce: string, issuedAt: number, configured: Settings, env = process.env) {
+  if (!env.AUTH_SECRET) throw new LeadConfigurationError();
+  return createHmac("sha256", env.AUTH_SECRET)
+    .update(JSON.stringify(["website-assessment", organizationId, nonce, issuedAt, configured.rule.id, configured.rule.version]))
+    .digest("hex");
+}
+
+function websiteFormPolicy(configured: Settings) {
+  const notice = configured.policy.website_notice;
+  if (!notice?.form) return null;
+  if (jsonbFingerprint(notice.form.notice_content) !== notice.notice_sha256) throw new LeadConfigurationError();
+  return { ...notice.form, approvalReference: notice.approval_reference, noticeSha256: notice.notice_sha256 };
+}
+
+function validateWebsiteForm(organizationId: string, key: string, proof: WebsiteLeadFormProof, configured: Settings, now: Date, env?: NodeJS.ProcessEnv) {
+  const form = websiteFormPolicy(configured);
+  if (!form && !proof) return;
+  if (!form || !proof) throw new LeadValidationError();
+  const seconds = Math.floor(now.getTime() / 1000) - proof.issuedAt;
+  if (seconds < form.minimum_seconds) throw new LeadValidationError();
+  const expected = websiteFormSignature(organizationId, key, proof.issuedAt, configured, env);
+  if (!timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(proof.signature, "hex"))) throw new LeadValidationError();
+  if (seconds > form.maximum_seconds) throw new LeadConflictError();
+}
+
+export async function getWebsiteAssessmentForm(locale: AppLocale, deps: LeadDependencies) {
+  try {
+    const organizationId = configuredWebsiteLeadOrganization(deps.env);
+    requireLeadPayloadKeys(deps.env ?? process.env, true);
+    return await withTenant(deps.db, organizationId, async tx => {
+      const now = await new LeadRepository(tx, organizationId).clock();
+      const configured = await settings(tx, organizationId, now);
+      const policy = configured.policy;
+      const form = websiteFormPolicy(configured);
+      const sources = policy.sources.filter(source => source.channels.includes("WEBSITE"));
+      if (!form || !policy.channels.includes("WEBSITE") || sources.length === 0) return null;
+      const idempotencyKey = randomUUID();
+      const issuedAt = Math.floor(now.getTime() / 1000);
+      const actorId = configured.rule.createdBy!;
+      const actor = {organizationId, actorId, authContext: await authContextForAccountInTransaction(tx, organizationId, actorId)};
+      await captureAuthority(actor, tx, now, resource(organizationId, idempotencyKey, now), true);
+      const choices = (values: typeof policy.property_types) =>
+        values.map(value => ({ key: value.key, label: localizedText(value.label, locale) }));
+      return {
+        locale, idempotencyKey, issuedAt,
+        signature: websiteFormSignature(organizationId, idempotencyKey, issuedAt, configured, deps.env),
+        notice: form.notice_content[locale], approvalReference: form.approvalReference, noticeSha256: form.noticeSha256,
+        requiredFields: policy.required_fields, contactRequirement: policy.contact_requirement,
+        sources: choices(sources), propertyTypes: choices(policy.property_types),
+        rentalStatuses: choices(policy.rental_statuses), otas: choices(policy.otas)
+      };
+    });
+  } catch (error) {
+    if (error instanceof LeadConfigurationError || error instanceof LeadAccessError) return null;
+    throw error;
+  }
+}
+
 async function capture(organizationInput:string,raw:unknown,actor:AccountActorContext|null,deps:LeadDependencies){
   assertOrganizationId(organizationInput);const organizationId=organizationInput.toLowerCase();
-  const input=parsedInput(raw),website=actor===null;
+  const website = actor === null;
+  const { websiteForm, ...submitted } = website ? websiteLeadSubmissionSchema.parse(raw) : { ...parsedInput(raw), websiteForm: undefined };
+  const input = parsedInput(submitted);
   if(website?input.channel!=="WEBSITE":input.channel==="WEBSITE")throw new LeadValidationError();
   if(actor&&(actor.organizationId!==organizationId||actor.actorId!==actor.authContext.userAccountId||actor.authContext.organizationId!==organizationId))throw new LeadAccessError();
   const candidateId=randomUUID();
@@ -90,6 +153,7 @@ async function capture(organizationInput:string,raw:unknown,actor:AccountActorCo
         after:{principalId:caller.actorId,leadId:original.id,channel:original.channel,commandHash:original.commandHash},requestId,occurredAt:now});
       await finalCaptureFence(caller,tx,original,configured,website);return receipt(original,true);
     }
+    if (website) validateWebsiteForm(organizationId, input.idempotencyKey, websiteForm, configured, now, deps.env);
     const value=parseConfiguredLeadCapture(input,configured.policy),identity:LeadPayloadBinding={organizationId,leadId:candidateId,createdBy:caller.actorId,policyId:configured.rule.id,policyVersion:configured.rule.version,channel:value.channel,sourceKey:value.sourceKey,idempotencyKey:value.idempotencyKey};
     const encryptedPayload=encryptLeadPayload(value,identity,deps.env),payloadSha256=createHash("sha256").update(encryptedPayload).digest("hex"),authorizationCap=captureAuthorizationCap(caller.authContext);
     const commandHash=commandFingerprint({protocol:"ALVILLAS_LEAD_CAPTURE_V1",...identity,locale:value.locale,payloadSha256});
@@ -108,8 +172,9 @@ export function captureWebsiteLead(organizationId:string,raw:unknown,deps:LeadDe
 
 /** Public routing selects this trusted server binding; intake payloads never select a tenant. */
 export function configuredWebsiteLeadOrganization(env:NodeJS.ProcessEnv=process.env):string{
-  const value=env.ALVILLAS_PUBLIC_ORGANIZATION_ID;
-  if(!value)throw new LeadConfigurationError();try{assertOrganizationId(value);}catch{throw new LeadConfigurationError();}return value.toLowerCase();
+  const value = configuredWebsiteOrganization(env);
+  if (!value) throw new LeadConfigurationError();
+  return value;
 }
 
 export async function readLead(actor:AccountActorContext,raw:unknown,deps:LeadDependencies){

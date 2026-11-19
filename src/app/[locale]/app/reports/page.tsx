@@ -34,6 +34,8 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
   const properties = owner ? (await listOwnerPortalProperties(owner)).filter(property => property.canViewFinances) : [];
   if (!hasReportAccess && !properties.length) notFound();
 
+  const websiteTitle = canViewCompany ? (await getTranslations("WebsiteAnalytics"))("title") : null;
+
   return (
     <AdminShell className="resource-page" testId="reports-workspace">
       <ShellHeader eyebrow={t("eyebrow")} title={t("title")} actions={
@@ -46,6 +48,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ locale
         {canViewInventory ? <Link className="secondary-button" href={`}/${locale}/app/reports/inventory`}>{t("inventoryReports")}</Link> : null}
         {canViewCompany && finance && authorizeOrganizationSource(finance.authContext, "view", { type: "team_member", organizationId: finance.organizationId }, new Date())
           ? <Link className="secondary-button" href={`/${locale}/app/reports/team`}>{t("teamReports")}</Link> : null}
+        {websiteTitle && <Link className="secondary-button" href={`/${locale}/app/reports/website`}>{websiteTitle}</Link>}
       </nav> : null}
       {canGenerate ? (
         <section className="detail-panel">

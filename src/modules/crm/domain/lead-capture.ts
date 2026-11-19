@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { localizedTextSchema } from "@/i18n/content";
 import { configSlugSchema } from "@/platform/config/identifiers";
+import { websiteAssessmentFields } from "./lead-field-limits";
 
 export const leadCaptureChannels = ["WEBSITE", "MANUAL", "REFERRAL"] as const;
 export const leadCapturePolicyKey = "crm.lead_capture";
@@ -15,22 +16,32 @@ const contact = z.object({
 
 /** Claimed acquisition details never identify or modify an existing private person or owner. */
 export const leadFieldsSchema = z.object({
-  ownerContact: text(240).optional(),
-  phone: text(80).optional(),
-  email: z.email().max(320).optional(),
-  location: text(1000).optional(),
+  ownerContact: text(websiteAssessmentFields.ownerContact).optional(),
+  phone: text(websiteAssessmentFields.phone).optional(),
+  email: z.email().max(websiteAssessmentFields.email).optional(),
+  location: text(websiteAssessmentFields.location).optional(),
   propertyTypeKey: configSlugSchema.optional(),
   bedrooms: z.number().int().min(0).max(2147483647).optional(),
   currentRentalStatusKey: configSlugSchema.optional(),
   currentOtaKeys: z.array(configSlugSchema).max(100).refine(values => new Set(values).size === values.length).optional(),
-  objectives: text(8000).optional(),
-  notes: text(8000).optional(),
+  objectives: text(websiteAssessmentFields.objectives).optional(),
+  notes: text(websiteAssessmentFields.notes).optional(),
   referralContact: contact.optional()
 }).strict();
 
 export const leadRequiredFieldKeys = [
   "ownerContact", "phone", "email", "location", "propertyTypeKey", "bedrooms", "currentRentalStatusKey", "currentOtaKeys", "objectives", "notes"
 ] as const;
+export const websiteAssessmentNoticeSchema = z.object({
+  en: text(8000), fr: text(8000), ar: text(8000)
+}).strict();
+
+const websiteAssessmentFormSchema = z.object({
+  notice_content: websiteAssessmentNoticeSchema,
+  minimum_seconds: z.number().int().positive(),
+  maximum_seconds: z.number().int().positive()
+}).strict().refine(value => value.maximum_seconds > value.minimum_seconds);
+
 const distinct = <T,>(values: T[]) => new Set(values).size === values.length;
 const rateLimit = z.object({
   requests: z.number().int().positive().max(2147483647),
@@ -55,7 +66,8 @@ export const leadCapturePolicySchema = z.object({
   otas: catalog,
   processing_approval_reference: text(1000),
   website_notice: z.object({
-    approval_reference: text(1000), notice_sha256: z.string().regex(/^[a-f0-9]{64}$/u)
+    approval_reference: text(1000), notice_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    form: websiteAssessmentFormSchema.optional()
   }).strict().nullable(),
   encryption: z.literal("APP_MANAGED_AUTHENTICATED_ENCRYPTION"),
   history: z.literal("APPEND_ONLY_ORIGINAL_CAPTURE"),
@@ -76,6 +88,15 @@ export const leadCaptureInputSchema = z.object({
   }).strict().optional()
 }).strict();
 
+export const websiteLeadSubmissionSchema = leadCaptureInputSchema.extend({
+  websiteForm: z.object({
+    issuedAt: z.number().int().nonnegative(),
+    signature: z.string().regex(/^[a-f0-9]{64}$/u),
+    website: z.literal("")
+  }).strict().optional()
+});
+
+export type WebsiteLeadFormProof = z.infer<typeof websiteLeadSubmissionSchema>["websiteForm"];
 export type LeadCaptureInput = z.infer<typeof leadCaptureInputSchema>;
 export type LeadCapturePolicy = z.infer<typeof leadCapturePolicySchema>;
 
