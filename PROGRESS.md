@@ -349,8 +349,8 @@ F-PRF-02 | TODO |
 F-PRF-03 | TODO |
 F-PRF-04 | TODO |
 F-OPR-01 | IN-PROGRESS | Committed, tenant-scoped outbox batch lag and dispatch outcomes are observable without payloads or identifiers. Local regression passed. Hosted monitoring sinks, alert policies and delivery acceptance pending.
-F-OPR-02 | TODO |
-F-OPR-03 | TODO |
+F-OPR-02 | IN-PROGRESS | Deployment, rollback, restore and ledger integrity runbooks are paired with provider outage, stuck payout, field sync storm and administrator recovery procedures. The secret-rotation runbook is on the security branch. Hosted operator drills and acceptance pending.
+F-OPR-03 | IN-PROGRESS | Incident procedures define escalation, containment, verification, evidence and follow-up owners. Owner-approved on-call routing and an exercised incident pending.
 F-OPR-04 | TODO |
 F-OPR-05 | IN-PROGRESS | Exact main CI and staging proof required before production promotion. Both staging and production candidates require healthy, ready and exact-SHA responses before aliasing or traffic. Owner-authorized hosted rollback drill pending.
 F-DRC-01 | TODO |
