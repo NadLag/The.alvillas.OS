@@ -1,7 +1,9 @@
-import { getTranslations } from "next-intl/server";
+﻿"use client";
+
+import { useTranslations } from "next-intl";
 import { SkeletonBlock } from "@/design-system/shells";
 
-export default async function LoadingPersonal() {
-  const t = await getTranslations({ namespace: "Personal" });
+export default function LoadingPersonal() {
+  const t = useTranslations("Personal");
   return <div role="status" aria-label={t("loading")}><SkeletonBlock /></div>;
 }
