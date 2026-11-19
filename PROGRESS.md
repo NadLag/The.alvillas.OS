@@ -347,7 +347,7 @@ F-SEC-07 | TODO |
 F-PRF-01 | IN-PROGRESS | k6 profiles for 10, 100 and 500 properties verify scoped fixture volume and exact app revision before exercising the directory, company reports and field sync. Local harness validation passed. Full representative dataset and approved staging load run pending.
 F-PRF-02 | IN-PROGRESS | Property directory reads skip creation-only owner, authorization and geography queries unless the actor can use the create form. Zero-retry core browser journey passed. Representative-tenant execution plans remain pending.
 F-PRF-03 | TODO |
-F-PRF-04 | IN-PROGRESS | Production-build field-mobile test passed with zero retries. Cached offline reload restored its draft in 913 ms at 360 px with 4x CPU throttling. Checklist and completion touch targets passed 48 px and offline operation replay preserved the draft and queue. Physical low-end Android acceptance pending.
+F-PRF-04 | IN-PROGRESS | Production-build field-mobile test passed with zero retries. Cached offline reload restored its draft in 913 ms at 360 px with 4x CPU throttling. Checklist and completion touch targets passed 48 px. A second offline reload preserved the queued operation. Physical low-end Android acceptance pending.
 F-OPR-01 | TODO |
 F-OPR-02 | TODO |
 F-OPR-03 | TODO |
