@@ -88,8 +88,24 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
     await admin.getByTestId("invite-role").selectOption("field_staff"); await admin.getByTestId("invite-scope-type").selectOption("job"); await admin.getByTestId("invite-scope-id").fill(f.taskId);
     await admin.getByTestId("invite-preferred-locale").selectOption(locale); await admin.getByTestId("invite-submit").click();
     const code = (await admin.getByTestId("invitation-code").innerText()).split(":").at(-1)?.trim(); expect(Boolean(code)).toBe(true);
-    await employee.goto(`/${locale}/activate/${code}`); await employee.getByTestId("activation-phone").fill(phone); await employee.getByTestId("activation-pin").fill(pin); await employee.getByTestId("activation-submit").click();
-    await expect(employee).toHaveURL(new RegExp(`/${locale}/login$`, "u")); await employee.goto(`/${locale}/login?surface=field`);
+    const activationUrl = new URL(`/${locale}/activate/${code}`, origin).href;
+    const loginPath = `/${locale}/login`;
+    const loginUrl = new URL(loginPath, origin).href;
+    await employee.goto(activationUrl);
+    await employee.getByTestId("activation-phone").fill(phone);
+    await employee.getByTestId("activation-pin").fill(pin);
+    const [activation] = await Promise.all([
+      employee.waitForResponse(response => {
+        const request = response.request();
+        return request.method() === "POST" && request.url() === activationUrl && Boolean(request.headers()["next-action"]);
+      }),
+      employee.waitForURL(loginUrl, { waitUntil: "commit" }),
+      employee.getByTestId("activation-submit").click()
+    ]);
+    expect(activation.status()).toBe(200);
+    expect((await activation.headerValue("x-action-redirect"))?.split(";")[0]).toBe(loginPath);
+    await expect(employee).toHaveURL(loginUrl);
+    await employee.goto(`${loginPath}?surface=field`);
     await employee.getByTestId("login-phone").fill(phone); await employee.getByTestId("login-pin").fill(pin); await employee.getByTestId("login-submit").click(); await expect(employee).toHaveURL(new RegExp(`/${locale}/app/field$`, "u"));
     const accountSchema = z.object({ user: z.object({ id: z.uuid(), personId: z.uuid(), organizationId: z.uuid() }) });
     const user = accountSchema.parse(await (await employee.request.get("/api/auth/session")).json()).user; expect(user.organizationId).toBe(f.organizationId);
