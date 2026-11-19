@@ -1,0 +1,15 @@
+import {z} from "zod";
+import {actualLaundryExpectedSchema,actualLaundryInvoiceDraftSchema,actualLaundryInvoiceLinesSchema,actualLaundryInvoiceReceiptSchema,actualLaundrySourceSchema} from "./actual-laundry-invoice";
+const id=z.uuid(),hash=z.string().regex(/^[a-f0-9]{64}$/u),choice=z.object({id,label:z.string()}).strict(),total=z.object({amount:z.string(),currency:z.string()}).strict();
+export const actualLaundryContextSchema=z.object({batchId:id,expectedInvoiceId:id,supplier:choice,sources:z.array(z.object({kind:z.enum(["PROPERTY","RESERVATION","SUPPLIER"]),id,label:z.string()}).strict()).min(1).max(7),expected:actualLaundryExpectedSchema,capabilities:z.object({record:z.boolean(),void:z.boolean()}).strict()}).strict();
+export const actualLaundryReviewSchema=z.object({draft:actualLaundryInvoiceDraftSchema,reviewFingerprint:hash,sourceFingerprint:hash,expected:actualLaundryExpectedSchema,actual:actualLaundrySourceSchema}).strict();
+export const actualLaundryPublishedSchema=actualLaundryInvoiceReceiptSchema.safeExtend({replayed:z.boolean()});
+export const actualLaundryRecoverySchema=z.discriminatedUnion("recorded",[z.object({recorded:z.literal(true),receipt:actualLaundryInvoiceReceiptSchema}).strict(),z.object({recorded:z.literal(false),receipt:z.null()}).strict()]);
+export const actualLaundryDetailSchema=z.object({receipt:actualLaundryInvoiceReceiptSchema,receiptNumber:z.number().int().positive(),successorId:id.nullable(),active:z.boolean(),needsReview:z.boolean()}).strict();
+export const actualLaundryHistorySchema=z.object({items:z.array(z.object({id,operation:z.enum(["LINK","REPLACE","VOID"]),invoiceNumber:z.string(),total,createdAt:z.iso.datetime(),active:z.boolean()}).strict()).max(20),next:id.nullable()}).strict();
+export const actualLaundryInvoiceChoicesSchema=z.object({items:z.array(choice).max(50),next:id.nullable()}).strict();
+export const actualLaundryInvoiceChoiceSchema=z.object({id,label:z.string(),revisionId:id,currency:z.string(),lines:actualLaundryInvoiceLinesSchema}).strict();
+export const actualLaundryDocumentsSchema=z.object({items:z.array(choice).max(50),next:z.string().nullable(),receipt:z.object({versionId:id,documentId:id,title:z.string(),fileName:z.string(),sha256:hash}).strict().nullable()}).strict();
+export type ActualLaundryContext=z.infer<typeof actualLaundryContextSchema>;
+export type ActualLaundryReview=z.infer<typeof actualLaundryReviewSchema>;
+export type ActualLaundryDetail=z.infer<typeof actualLaundryDetailSchema>;

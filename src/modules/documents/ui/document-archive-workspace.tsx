@@ -57,15 +57,15 @@ export function DocumentArchiveWorkspace({locale,scope,initialReference,initialS
   },[wipe]);
   const controller=useCallback(()=>{const value=new AbortController();requests.current.add(value);return value;},[]);
   const loadSources=useCallback(async(kind:Source["kind"],text:string,cursor?:string)=>{
-    const own=generation.current,sequence=++sequences.current.sources,abort=controller();setSources(null);if(!busyRef.current)setState("loading");
+    const own=generation.current,sequence=++sequences.current.sources,abort=controller();setSources(null);if(!busyRef.current)setState(current=>current==="saved"?current:"loading");
     try{const response=await documentRequest(scope,"sources",{kind,query:text,...cursor?{cursor}:{}},abort.signal),data=documentSourceChoicesSchema.parse(await response.json());
-      if(active(own)&&sequence===sequences.current.sources){setSources(data);if(!busyRef.current)setState("ready");}}
+      if(active(own)&&sequence===sequences.current.sources){setSources(data);if(!busyRef.current)setState(current=>current==="saved"?current:"ready");}}
     catch(error){if(active(own)&&sequence===sequences.current.sources&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);}
   },[active,controller,failed,scope]);
   const loadWorkspace=useCallback(async(reference:Source,mode:"FILE"|"TEMPLATE",cursor?:string)=>{
-    const own=generation.current,sequence=++sequences.current.workspace,abort=controller();setWorkspace(null);if(!busyRef.current)setState("loading");
+    const own=generation.current,sequence=++sequences.current.workspace,abort=controller();setWorkspace(null);if(!busyRef.current)setState(current=>current==="saved"?current:"loading");
     try{const response=await documentRequest(scope,"read",{source:reference,kind:mode,...cursor?{cursor}:{}},abort.signal),data=documentSourceWorkspaceSchema.parse(await response.json());
-      if(active(own)&&sequence===sequences.current.workspace){setWorkspace(data);setEditor({types:data.types,policyFingerprint:data.policyFingerprint});if(!busyRef.current)setState("ready");return data;}}
+      if(active(own)&&sequence===sequences.current.workspace){setWorkspace(data);setEditor({types:data.types,policyFingerprint:data.policyFingerprint});if(!busyRef.current)setState(current=>current==="saved"?current:"ready");return data;}}
     catch(error){if(active(own)&&sequence===sequences.current.workspace&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);}
   },[active,controller,failed,scope]);
   const openBookmarkedSource=useCallback(async(reference:Source)=>{

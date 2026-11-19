@@ -4,11 +4,12 @@ import { authorizeStaffVarianceSource } from "@/modules/finance/application/vari
 import type { VarianceSourceAuthority } from "@/modules/finance/application/variance-workflow-service";
 import { VarianceWorkflowSourceError } from "@/modules/finance/domain/variance-workflow";
 import { authorizeInventoryVarianceSource } from "../inventory/variance-workflow-source";
+import {authorizeLaundryVarianceSource} from "../inventory/laundry-variance-source";
 
 /** Register only adapters backed by real native records; missing host modules fail closed. */
 export const authorizeVarianceSource: VarianceSourceAuthority = (ctx, source, tx, access) => {
   const adapter = source.provider === "OTA" ? authorizeOtaVarianceSource : source.provider === "BANK" ? authorizeBankVarianceSource :
-    source.provider === "STAFF" ? authorizeStaffVarianceSource : source.provider === "INVENTORY" ? authorizeInventoryVarianceSource : null;
+    source.provider === "STAFF" ? authorizeStaffVarianceSource : source.provider === "INVENTORY" ? authorizeInventoryVarianceSource : source.provider==="LAUNDRY"?authorizeLaundryVarianceSource:null;
   if (!adapter) throw new VarianceWorkflowSourceError();
   return adapter(ctx, source, tx, access);
 };

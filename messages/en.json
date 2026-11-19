@@ -4553,7 +4553,7 @@
     "provider_BANK": "Bank reconciliation",
     "provider_STAFF": "Employee earnings",
     "provider_INVENTORY": "Physical inventory",
-    "provider_LAUNDRY": "Laundry invoice",
+    "provider_LAUNDRY": "Laundry supplier invoices",
     "provider_OWNER_PAYOUT": "Owner payout",
     "status_OPEN": "Open",
     "status_RESOLVED": "Resolved",
@@ -4625,7 +4625,14 @@
     "emptyPage": "No differences match on this page.",
     "assignedColleague": "Another colleague",
     "queueForbidden": "You need organization-wide access to browse this source. Open individual differences from their existing workspaces.",
-    "refreshRequired": "Refresh this list from the original sources before continuing."
+    "refreshRequired": "Refresh this list from the original sources before continuing.",
+    "variancePercentage": "Variance percentage",
+    "percentageUndefined": "Undefined: expected amount is zero.",
+    "comparison_NO_ACTUAL": "No active actual invoice is associated with this estimate. Review the original batch before comparing.",
+    "comparison_BASELINE_CHANGED": "The active invoices use another retained estimate. Review the current batch association.",
+    "comparison_CURRENCY_MISMATCH": "The original currencies differ. Amounts remain separate; no conversion or variance has been invented.",
+    "varianceLink": "Review laundry variance",
+    "reviewPriceChange": "Review supplier price change · invoice {number}"
   },
   "AccountantExports": {
     "eyebrow": "Finance",
@@ -7956,7 +7963,20 @@
       "USABLE": "Usable",
       "DAMAGED": "Damaged"
     },
-    "billingHelp": "Select the agreed supplier terms explicitly. Missing terms prevent an invoice estimate; excluded conditions are not billed. A new version preserves earlier agreements."
+    "billingHelp": "Select the agreed supplier terms explicitly. Missing terms prevent an invoice estimate; excluded conditions are not billed. A new version preserves earlier agreements.",
+    "priceChangeTitle": "Review supplier price changes",
+    "priceChangeHelp": "An invoice difference can also reflect quantity, damage, tax or other charges. Read the original receipt, confirm the supplier-stated unit rates and change only the affected linen prices. The latest scoped price list is copied; billing terms and other prices are preserved.",
+    "priceChangeStates": {
+      "POSSIBLE_CHANGE": "Possible price change: review the original evidence.",
+      "MATCHED": "The original totals match. Verify unit prices before publishing any change.",
+      "CURRENCY_MISMATCH": "The original currencies differ. This workflow cannot convert or reprice them."
+    },
+    "retainedExpected": "Retained expected invoice",
+    "actualInvoice": "Original actual invoice",
+    "priceEvidenceReceipt": "Read the original supplier receipt",
+    "priceEvidenceInvoice": "Open the original invoice",
+    "priceRatesConfirmed": "I checked the original supplier evidence and confirmed the entered unit rates; these rates are not inferred from the invoice total.",
+    "priceChange": "Review price change"
   },
   "ExpectedLaundry": {
     "eyebrow": "Inventory · Laundry",
@@ -8020,6 +8040,85 @@
       "conflict": "Stock or access changed. Review the current quantities again.",
       "stock_held": "Original physical stock or commitments prevent this operation.",
       "uncertain": "The result is unconfirmed. Resolve the original request."
-    }
+    },
+    "actualInvoice": "Associate actual invoice"
+  },
+  "ActualLaundry": {
+    "eyebrow": "Inventory · Laundry",
+    "title": "Actual laundry invoices",
+    "subtitle": "Associate original supplier invoices and uploaded evidence with the batch and its retained estimate.",
+    "refresh": "Refresh",
+    "originalBatch": "Original batch",
+    "expectedInvoice": "Expected invoice",
+    "expectedTotal": "Original expected total",
+    "actualTotal": "Original actual total",
+    "accountingHelp": "Invoice entry, approval, posting and payment remain in Finance. This workflow records the association and its evidence; it creates no additional expense, payment, owner charge or stock movement.",
+    "sourceHelp": "Enter the original invoice in Finance and upload its original file to the private archive. Return here, refresh, and select the original lines and file for this batch.",
+    "enterInvoice": "Enter supplier invoice",
+    "uploadReceipt": "Upload original invoice or receipt",
+    "associateTitle": "Associate original evidence",
+    "replaceTitle": "Correct the selected association",
+    "invoiceSearch": "Invoice number or reference",
+    "searchInvoices": "Find original invoice",
+    "noInvoices": "No matching invoice on this page. Enter it in Finance or continue to the next page.",
+    "next": "Next page",
+    "lineHelp": "Select the whole original invoice lines belonging to this batch. Amounts and currency come directly from Finance.",
+    "originalInvoice": "Open original supplier invoice",
+    "receiptSource": "Original file location",
+    "sourceKinds": {
+      "PROPERTY": "Property",
+      "RESERVATION": "Reservation",
+      "SUPPLIER": "Supplier"
+    },
+    "findReceipt": "Find uploaded original file",
+    "noReceipts": "No eligible original file on this page. Upload it in the private archive or continue to the next page.",
+    "reason": "Reason",
+    "review": "Review association",
+    "reviewTitle": "Review original invoice and evidence",
+    "invoiceState": "Native invoice status",
+    "differentCurrencies": "The invoice and estimate have different currencies. Both original amounts are retained; this association applies no conversion.",
+    "saving": "Recording…",
+    "record": "Record reviewed association",
+    "originalAssociation": "Original recorded association",
+    "active": "Current association",
+    "historical": "Retained history",
+    "needsReview": "The native invoice has changed. Inspect its current revision and correct the association when needed; the recorded original remains unchanged.",
+    "originalReceipt": "Open original file version",
+    "correctionReason": "Reason for unlinking",
+    "correctionHelp": "Corrections and unlinking append history. They do not reverse or modify the original invoice, expense, payment or financial posting.",
+    "replace": "Correct association",
+    "void": "Review unlinking",
+    "operations": {
+      "LINK": "Original association",
+      "REPLACE": "Correcting association",
+      "VOID": "Association unlinked"
+    },
+    "history": "Immutable invoice association history",
+    "inspect": "Inspect original",
+    "empty": "No actual invoice has been associated with this batch.",
+    "older": "Older history",
+    "saved": "Original invoice association recorded.",
+    "notRecorded": "The unrecorded command is now closed.",
+    "unconfirmed": "Checking the original save outcome…",
+    "privateHidden": "Private invoice and receipt information is hidden.",
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading…",
+      "offline": "Reconnect to review or record stock movements.",
+      "forbidden": "Your current access no longer permits this inventory.",
+      "unavailable": "Inventory is unavailable. Try again.",
+      "validation": "Check the original records, quantities and reason.",
+      "conflict": "Stock or access changed. Review the current quantities again.",
+      "stock_held": "Original physical stock or commitments prevent this operation.",
+      "uncertain": "The result is unconfirmed. Resolve the original request."
+    },
+    "invoiceStates": {
+      "DRAFT": "Draft",
+      "PENDING_APPROVAL": "Awaiting approval",
+      "APPROVED": "Approved",
+      "REJECTED": "Rejected"
+    },
+    "varianceLink": "Review laundry variance",
+    "priceChange": "Review price change"
   }
 }

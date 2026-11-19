@@ -402,6 +402,8 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  actualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryOrganization")
+  actualLaundryInvoiceLines LaundryActualInvoiceLine[] @relation("ActualLaundryLineOrganization")
   laundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryOrganization")
   supplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceOrganization")
   laundryBatches LaundryBatch[] @relation("LaundryBatchOrganization")
@@ -853,6 +855,7 @@ model Person {
 }
 
 model UserAccount {
+  createdActualLaundryInvoices LaundryActualInvoice[] @relation("ActualLaundryCreator")
   createdLaundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryCreator")
   createdSupplierPriceListVersions SupplierPriceListVersion[] @relation("SupplierPriceCreator")
   createdLaundryBatches LaundryBatch[] @relation("LaundryBatchCreator")
@@ -2377,6 +2380,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  actualLaundryInvoices LaundryActualInvoice[]
   laundryExpectedInvoices LaundryExpectedInvoice[]
   supplierPriceListVersions SupplierPriceListVersion[]
   serviceOrders ServiceOrder[]
@@ -3561,6 +3565,7 @@ model Supplier {
 }
 
 model SupplierInvoice {
+  laundryAssociations LaundryActualInvoice[] @relation("ActualLaundryInvoice")
   recognitionRequests SupplierInvoiceRecognitionRequest[]
   recognition         SupplierInvoiceRecognition?
   currentSubmissionId String?                     @map("current_submission_id") @db.Uuid
@@ -3598,6 +3603,7 @@ model SupplierInvoice {
 }
 
 model SupplierInvoiceRevision {
+  laundryAssociations LaundryActualInvoice[] @relation("ActualLaundryRevision")
   submissions    SupplierInvoiceSubmission[]
   id             String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String                      @map("organization_id") @db.Uuid
@@ -3626,6 +3632,7 @@ model SupplierInvoiceRevision {
 }
 
 model SupplierInvoiceLine {
+  laundryAssociations LaundryActualInvoiceLine[] @relation("ActualLaundryOriginalLine")
   serviceAllocationProviderBindings ServiceAllocationProviderBinding[]
   companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
   recognition    SupplierInvoiceRecognitionLine?
@@ -5216,6 +5223,7 @@ model DocumentAdmission {
 }
 
 model DocumentVersion {
+  laundryInvoiceAssociations LaundryActualInvoice[] @relation("ActualLaundryReceipt")
   expiryRevisions DocumentExpiryRevision[]
   retentionRevisions DocumentRetentionRevision[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -6625,6 +6633,7 @@ model ExpensePurchase {
 }
 
 model LaundryBatch {
+  actualInvoices LaundryActualInvoice[] @relation("ActualLaundryBatch")
   expectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryBatch")
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -6747,6 +6756,7 @@ model SupplierPriceListVersion {
 }
 
 model LaundryExpectedInvoice {
+  actualInvoices LaundryActualInvoice[] @relation("ActualLaundryExpected")
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   batchId String @map("batch_id") @db.Uuid
@@ -6775,4 +6785,56 @@ model LaundryExpectedInvoice {
   @@unique([organizationId,idempotencyKey],map:"expected_laundry_nonce")
   @@index([organizationId,batchId,createdAt(sort:Desc),id(sort:Desc)],map:"expected_laundry_batch_idx")
   @@map("laundry_expected_invoice")
+}
+
+model LaundryActualInvoice {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  batchId String @map("batch_id") @db.Uuid
+  expectedInvoiceId String @map("expected_invoice_id") @db.Uuid
+  invoiceId String @map("invoice_id") @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  receiptVersionId String @map("receipt_version_id") @db.Uuid
+  supersedesId String? @map("supersedes_id") @db.Uuid
+  operation String @db.VarChar(12)
+  currency String @db.Char(3)
+  total Decimal @db.Decimal(65,2)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  snapshot Json
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation("ActualLaundryOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("ActualLaundryCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  batch LaundryBatch @relation("ActualLaundryBatch",fields:[organizationId,batchId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  expected LaundryExpectedInvoice @relation("ActualLaundryExpected",fields:[organizationId,expectedInvoiceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  invoice SupplierInvoice @relation("ActualLaundryInvoice",fields:[organizationId,invoiceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  revision SupplierInvoiceRevision @relation("ActualLaundryRevision",fields:[organizationId,revisionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  receipt DocumentVersion @relation("ActualLaundryReceipt",fields:[organizationId,receiptVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  prior LaundryActualInvoice? @relation("ActualLaundryHistory",fields:[organizationId,supersedesId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  next LaundryActualInvoice[] @relation("ActualLaundryHistory")
+  currencyDefinition Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  lines LaundryActualInvoiceLine[] @relation("ActualLaundryLines")
+  @@unique([organizationId,id],map:"actual_laundry_org_id")
+  @@unique([organizationId,idempotencyKey],map:"actual_laundry_nonce")
+  @@unique([organizationId,supersedesId],map:"actual_laundry_successor")
+  @@index([organizationId,batchId,id(sort:Desc)],map:"actual_laundry_batch_idx")
+  @@index([organizationId,invoiceId],map:"actual_laundry_invoice_idx")
+  @@map("laundry_actual_invoice")
+}
+model LaundryActualInvoiceLine {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  associationId String @map("association_id") @db.Uuid
+  invoiceLineId String @map("invoice_line_id") @db.Uuid
+  organization Organization @relation("ActualLaundryLineOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  association LaundryActualInvoice @relation("ActualLaundryLines",fields:[organizationId,associationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  invoiceLine SupplierInvoiceLine @relation("ActualLaundryOriginalLine",fields:[organizationId,invoiceLineId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"actual_laundry_line_org_id")
+  @@unique([organizationId,associationId,invoiceLineId],map:"actual_laundry_line_once")
+  @@index([organizationId,invoiceLineId],map:"actual_laundry_original_line_idx")
+  @@map("laundry_actual_invoice_line")
 }

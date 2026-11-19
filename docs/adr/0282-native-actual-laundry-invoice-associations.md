@@ -1,0 +1,7 @@
+# 0282 — Actual laundry invoices remain native financial and archive records
+
+F-LND-06 associates whole original supplier-invoice lines and an original encrypted document version with a laundry batch and its immutable expected estimate. Entry, revision, approval, expense allocation, posting and payment remain in the existing supplier-invoice workflow. Upload, encryption, file validation and download remain in the existing private archive.
+
+Associations and original-line claims are tenant-scoped and append-only. A correction or unlink event points to the prior association; it never edits that association or the underlying invoice, document, expense, payment or posting. One original invoice line can belong to only one current association. Current associations for a batch share one explicitly retained expected estimate, and two revisions of the same invoice cannot become concurrent actual costs for that batch.
+
+Every command rechecks the held and current financial, configuration, operational and document source permissions. Audit disclosure uses the same complete source authorities, including independent export grants. Source and command locks, immutable database provenance checks, same-transaction audit/outbox evidence, actor-bound nonce recovery and durable negative closure protect uncertain outcomes. Different currencies remain explicit; this association performs no conversion or tax interpretation.

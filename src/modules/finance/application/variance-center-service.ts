@@ -16,13 +16,15 @@ import { captureVarianceWorkflowActor, inspectVarianceWorkflowSource, type Varia
 import { encodeVarianceCenterCursor, decodeVarianceCenterCursor } from "./variance-center-cursor";
 import type { FinanceActorContext } from "./finance-access";
 import {authorizeNativeInventoryVarianceBrowsing} from "@/platform/inventory/variance-workflow-source";
+import {authorizeLaundryVarianceBrowsing} from "@/platform/inventory/laundry-variance-source";
 
 type Deps = { db: TenantTransactionRunner; authorizeSource: VarianceSourceAuthority; requestId?: string; env?: NodeJS.ProcessEnv };
 const roots: Record<VarianceCenterProvider, readonly string[]> = { OTA: ["financial_transaction"], BANK: ["bank_statement", "financial_transaction"],
-  STAFF: ["employee_payable", "staff_compensation", "financial_transaction", "expense"], INVENTORY: ["task"] };
+  STAFF: ["employee_payable", "staff_compensation", "financial_transaction", "expense"], INVENTORY: ["task"], LAUNDRY:["supplier_invoice"] };
 
 async function gate(ctx: FinanceActorContext, provider: VarianceCenterProvider, tx: TenantTransaction) {
   const now = await new FinanceRepository(tx, ctx.organizationId).clock();
+  if(provider==="LAUNDRY"){try{await authorizeLaundryVarianceBrowsing(ctx,tx);}catch(error){if(error instanceof VarianceWorkflowSourceError)throw new VarianceCenterAccessError();throw error;}}
   try{await recheckAccountAuthorization(ctx, tx, now, roots[provider].map(type => ({ action: "view" as const,
     resource: { type, organizationId: ctx.organizationId, dataClass: provider === "INVENTORY" ? "operational" as const : "financial" as const }, organizationOnly: true })), new VarianceCenterAccessError());}
   catch(error){if(provider!=="INVENTORY"||!(error instanceof VarianceCenterAccessError))throw error;try{await authorizeNativeInventoryVarianceBrowsing(ctx,tx);}catch(denied){if(denied instanceof VarianceWorkflowSourceError)throw new VarianceCenterAccessError();throw denied;}}
