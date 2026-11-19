@@ -402,6 +402,10 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  assetLifecycleEvents AssetLifecycleEvent[]
+  workOrderAssetRevisions MaintenanceWorkOrderAsset[]
+  assets Asset[]
+  assetRevisions AssetRevision[]
   maintenanceContractorAssignments MaintenanceContractorAssignment[]
   maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderOrganization")
@@ -859,6 +863,9 @@ model Person {
 }
 
 model UserAccount {
+  assetLifecycleEvents AssetLifecycleEvent[]
+  workOrderAssetRevisions MaintenanceWorkOrderAsset[]
+  assetRevisions AssetRevision[]
   maintenanceContractorAssignments MaintenanceContractorAssignment[]
   maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   maintenanceWorkOrders MaintenanceWorkOrder[] @relation("MaintenanceWorkOrderActor")
@@ -1340,6 +1347,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  assets Asset[]
   laundryExpectedInvoices LaundryExpectedInvoice[] @relation("ExpectedLaundryProperty")
   serviceOrders ServiceOrder[]
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkProperty")
@@ -2392,6 +2400,8 @@ model ReferenceSequence {
 }
 
 model Currency {
+  assetLifecycleEvents AssetLifecycleEvent[]
+  assetRevisions AssetRevision[]
   maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   actualLaundryInvoices LaundryActualInvoice[]
   laundryExpectedInvoices LaundryExpectedInvoice[]
@@ -6892,6 +6902,7 @@ model MaintenanceIssueContext {
 }
 
 model MaintenanceWorkOrder {
+  workOrderAssetRevisions MaintenanceWorkOrderAsset[]
   maintenanceContractorAssignments MaintenanceContractorAssignment[]
   maintenanceFinanceHistory MaintenanceWorkOrderFinance[]
   id String @id @db.Uuid
@@ -6973,4 +6984,103 @@ model MaintenanceContractorAssignment {
   @@unique([organizationId, taskId, revision(sort: Desc)], map: "maintenance_contractor_task_revision")
   @@unique([organizationId, actorId, idempotencyKey], map: "maintenance_contractor_actor_nonce")
   @@map("maintenance_contractor_assignment")
+}
+
+model Asset {
+  lifecycleEvents AssetLifecycleEvent[] @relation("LifecycleAsset")
+  predecessorEvents AssetLifecycleEvent[] @relation("LifecycleSuccessor")
+  workOrderAssetRevisions MaintenanceWorkOrderAsset[]
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  propertyId String @map("property_id") @db.Uuid
+  tag String @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property Property @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_property_tenant_fk")
+  revisions AssetRevision[]
+  @@unique([organizationId, id], map: "asset_org_id")
+  @@unique([organizationId, tag], map: "asset_org_tag")
+  @@index([organizationId, propertyId, id], map: "asset_property_index")
+  @@map("asset")
+}
+model AssetRevision {
+  workOrderAssetRevisions MaintenanceWorkOrderAsset[]
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  assetId String @map("asset_id") @db.Uuid
+  number Int
+  actorId String @map("actor_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  name String @db.VarChar(160)
+  category String @db.VarChar(120)
+  description String @db.VarChar(2000)
+  condition String @db.VarChar(16)
+  purchaseOn DateTime? @map("purchase_on") @db.Date
+  purchaseAmount Decimal? @map("purchase_amount") @db.Decimal(18, 2)
+  currency String? @db.Char(3)
+  warrantyProvider String? @map("warranty_provider") @db.VarChar(160)
+  warrantyReference String? @map("warranty_reference") @db.VarChar(120)
+  warrantyStartsOn DateTime? @map("warranty_starts_on") @db.Date
+  warrantyEndsOn DateTime? @map("warranty_ends_on") @db.Date
+  usefulLifeMonths Int? @map("useful_life_months")
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  asset Asset @relation(fields: [organizationId, assetId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_revision_asset_tenant_fk")
+  actor UserAccount @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_revision_actor_tenant_fk")
+  costCurrency Currency? @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([organizationId, assetId, number(sort: Desc)], map: "asset_revision_number")
+  @@unique([organizationId, actorId, idempotencyKey], map: "asset_revision_nonce")
+  @@map("asset_revision")
+}
+
+model MaintenanceWorkOrderAsset {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  taskId String @map("task_id") @db.Uuid
+  assetId String? @map("asset_id") @db.Uuid
+  assetRevisionId String? @map("asset_revision_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  number Int
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  workOrder MaintenanceWorkOrder @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "work_order_asset_task_fk")
+  asset Asset? @relation(fields: [organizationId, assetId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "work_order_asset_asset_fk")
+  revision AssetRevision? @relation(fields: [assetRevisionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  actor UserAccount @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "work_order_asset_actor_fk")
+  @@unique([organizationId, taskId, number(sort: Desc)], map: "work_order_asset_number")
+  @@unique([organizationId, actorId, idempotencyKey], map: "work_order_asset_nonce")
+  @@map("maintenance_work_order_asset")
+}
+
+model AssetLifecycleEvent {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  assetId String @map("asset_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  number Int
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  kind String @db.VarChar(12)
+  effectiveOn DateTime? @map("effective_on") @db.Date
+  successorId String? @map("successor_id") @db.Uuid
+  method String? @db.VarChar(12)
+  reference String? @db.VarChar(160)
+  plannedAmount Decimal? @map("planned_amount") @db.Decimal(18, 2)
+  currency String? @db.Char(3)
+  reason String @db.VarChar(1000)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  asset Asset @relation("LifecycleAsset", fields: [organizationId, assetId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_lifecycle_asset_tenant_fk")
+  successor Asset? @relation("LifecycleSuccessor", fields: [organizationId, successorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_lifecycle_successor_tenant_fk")
+  actor UserAccount @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "asset_lifecycle_actor_tenant_fk")
+  budgetCurrency Currency? @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([organizationId, assetId, number(sort: Desc)], map: "asset_lifecycle_number")
+  @@unique([organizationId, actorId, idempotencyKey], map: "asset_lifecycle_nonce")
+  @@unique([organizationId, successorId], map: "asset_lifecycle_successor")
+  @@map("asset_lifecycle_event")
 }

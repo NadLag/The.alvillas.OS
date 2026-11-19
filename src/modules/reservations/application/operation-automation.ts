@@ -1,3 +1,4 @@
+import { activeAssetsForScheduling, AssetAccessError, assetPreventivePrefix, authorizeAssetScheduleChange } from "@/platform/assets/preventive-task-source";
 import { z } from "zod";
 import { OperationRepository } from "../infrastructure/operation-repository";
 import {
@@ -96,6 +97,13 @@ export async function saveOperationSeries(
       )
     )
       throw new ReservationConflictError();
+    const assetId = value.definition.key.startsWith(assetPreventivePrefix) ? value.definition.key.slice(assetPreventivePrefix.length) : null;
+    if (assetId !== null) {
+      if (!z.uuid().safeParse(assetId).success || value.definition.type !== "MAINTENANCE") throw new AssetAccessError();
+      await authorizeAssetScheduleChange(ctx, tx, p.id, assetId, value.definition.enabled, [
+        { action: "create", resource }, ...(existing ? [{ action: "edit", resource } as const] : [])
+      ]);
+    }
     const series = before
       .filter((s) => s.key !== value.definition.key)
       .concat(value.definition);
@@ -192,7 +200,11 @@ export async function generateRecurringOperations(
       );
     let created = 0,
       existing = 0;
-    for (const definition of series.filter((s) => s.enabled))
+    const preventiveIds = series.filter(definition => definition.enabled && definition.key.startsWith(assetPreventivePrefix))
+      .map(definition => definition.key.slice(assetPreventivePrefix.length)).filter(id => z.uuid().safeParse(id).success);
+    const activeAssets = await activeAssetsForScheduling(tx, ctx.organizationId, property.id, preventiveIds);
+    for (const definition of series.filter(definition => definition.enabled &&
+      (!definition.key.startsWith(assetPreventivePrefix) || activeAssets.has(definition.key.slice(assetPreventivePrefix.length)))))
       for (
         let stamp = first.getTime();
         stamp <= last.getTime();

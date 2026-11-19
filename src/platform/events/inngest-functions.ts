@@ -1,3 +1,4 @@
+import { tickAssetWarrantyReminders } from "@/modules/assets/application/warranty-alerts";
 import {tickLeadWorkReminders} from "@/modules/crm/application/lead-work-reminders";
 import {inventoryReorderConfigurationRequested} from "@/platform/config/inventory-reorder-reference";
 import {consumeInventoryReorderConfiguration} from "@/platform/inventory/reorder-configuration";
@@ -85,6 +86,7 @@ export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", na
     const operationProperties=await step.run(`operations-properties-${id}`,()=>operationSchedulerProperties(id));
     for(const propertyId of operationProperties)await step.run(`schedule-operations-${id}-${propertyId}`,()=>scheduleOperationTasks(id,{propertyId}));
     await step.run(`schedule-staff-documents-${id}`, () => scheduleTeamDocumentReminders(id));
+    if (event.name === "inngest/scheduled.timer") await step.run(`schedule-asset-warranty-${id}`, () => tickAssetWarrantyReminders(id));
     await step.run(`schedule-document-expiry-${id}`,()=>tickDocumentExpiryReminders(id));
     await step.run(`schedule-lead-work-reminders-${id}`,()=>tickLeadWorkReminders(id));
     await step.run(`schedule-receivable-reminders-${id}`,()=>tickReceivableReminders(id));

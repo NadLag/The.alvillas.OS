@@ -1,3 +1,4 @@
+import { canReadAssetWarrantyAlert } from "@/modules/assets/domain/warranty-alerts";
 import { z } from "zod";
 import { authorize, type AuthContext, type Resource } from "@/platform/authz/authorize";
 import { authorizeApprovalResource } from "@/platform/approvals/approval";
@@ -9,6 +10,7 @@ import {canReadDocumentExpiryNotice,type DocumentExpiryNoticeResource} from "@/m
 export const notificationEventType = "notification.requested";
 export class NotificationAudienceUnavailableError extends Error{}
 export const notificationInputSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("asset_warranty_expiring"), recipientId: z.uuid(), targetId: z.uuid() }).strict(),
   z.object({kind:z.literal("lead_reminder"),recipientId:z.uuid(),targetId:z.uuid()}).strict(),
   z.object({kind:z.literal("document_expiring"),recipientId:z.uuid(),targetId:z.uuid()}).strict(),
   z.object({kind:z.literal("ledger_integrity_failed"),recipientId:z.uuid(),targetId:z.uuid(),integrityNotice:ledgerIntegrityNoticeSchema.optional()}).strict(),
@@ -57,7 +59,7 @@ export function ownNotificationContext(ctx: AuthContext, accountId: string): Aut
 export function notificationDestination(
   ctx: AuthContext, input: NotificationInput, target: Resource | null, locale: "en" | "fr" | "ar"
 ): string | null {
-  const referenceId = input.kind === "lead_reminder"||input.kind === "document_expiring"||input.kind === "supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed" ? target?.notificationEventId : input.kind === "staff_document_expiring" ? target?.documentId :
+  const referenceId = input.kind === "asset_warranty_expiring" || input.kind === "lead_reminder"||input.kind === "document_expiring"||input.kind === "supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed" ? target?.notificationEventId : input.kind === "staff_document_expiring" ? target?.documentId :
     input.kind === "approval_requested" || input.kind === "approval_decided" ? target?.approvalId ?? target?.id : target?.id;
   if (input.recipientId !== ctx.userAccountId || !target || referenceId !== input.targetId) return null;
   if(input.kind==="lead_reminder")return target.type==="lead"&&(target as Resource&{leadWorkRecipientId?:string}).leadWorkRecipientId===input.recipientId&&authorize(ctx,"view",target)?`/${locale}/app/crm?lead=${target.id}`:null;
@@ -73,6 +75,7 @@ export function notificationDestination(
   if(input.kind==="receivable_reminder")return canReadReceivableReminder(ctx,target,new Date())?`/${locale}/app/finance/receivables`:null;
   if(input.kind==="ledger_integrity_failed")return canReadLedgerIntegrityFailure(ctx,target,new Date())?`/${locale}/app/audit`:null;
   if (!(input.kind==="approval_requested"||input.kind==="approval_decided"?authorizeApprovalResource:authorize)(ctx, "view", target)) return null;
+  if (input.kind === "asset_warranty_expiring") return canReadAssetWarrantyAlert(ctx, target) ? `/${locale}/app/assets/${target.id}` : null;
   if (input.kind === "expense_emergency") return target.type === "expense" ? `/${locale}/app/expenses/${target.id}` : null;
   if (input.kind === "supplier_invoice_emergency") return target.type === "supplier_invoice" ? `/${locale}/app/finance/supplier-invoice-notices/${input.targetId}` : null;
   if(input.kind==="employee_cost_emergency")return target.type==="expense"?`/${locale}/app/finance/employee-cost-notices/${input.targetId}`:null;

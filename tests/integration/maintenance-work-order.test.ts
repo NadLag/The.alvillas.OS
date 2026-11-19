@@ -1,3 +1,15 @@
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { notificationDestination } from "@/platform/notifications/notification";
+import { readAssetLifecycle, recordAssetLifecycle } from "@/modules/assets/application/asset-lifecycle";
+import { generateRecurringOperations } from "@/modules/reservations/application/operation-automation";
+import { readAssetPreventiveSchedule, saveAssetPreventiveSchedule } from "@/modules/assets/application/preventive-schedule";
+import { tickAssetWarrantyReminders } from "@/modules/assets/application/warranty-alerts";
+import { getAsset, listAssets, saveAsset } from "@/modules/assets/application/asset-service";
+import { AssetAccessError, AssetConflictError } from "@/modules/assets/domain/asset";
+import { changeWorkOrderAsset, readWorkOrderAssets } from "@/modules/maintenance/application/work-order-assets";
+import { maintenanceIssueSourceChoices } from "@/modules/maintenance/application/issue-source-choices";
+import { previewMaintenanceIssueLink, publishMaintenanceIssueLink } from "@/modules/maintenance/application/issue-link-service";
+import { readMaintenanceIssue } from "@/modules/maintenance/application/issue-read-service";
 import {randomUUID} from "node:crypto";
 import {PrismaClient} from "@prisma/client";
 import {it,expect,beforeAll,afterAll,afterEach,vi} from "vitest";
@@ -193,4 +205,125 @@ it("runs native estimate approval, task completion and expense posting with immu
     where: { id: f.grants["supplier_invoice:view"] }, data: { archivedAt: new Date() }
   }));
   expect((await readWorkOrderFinance(f.actor, { taskId }, f.deps)).items[0]).toEqual({ masked: true });
+});
+
+it("registers and links canonical property assets with exact cost, unchanged sources and scoped history", async () => {
+  const keys = ["asset:view", "asset:create", "asset:edit", "asset_cost:view", "asset_cost:edit", "asset:void", "task:create"];
+  const f = await fixture(keys), external = await fixture(keys);
+  const data = {
+    tag: "PUMP-0042", propertyId: f.property.id, idempotencyKey: randomUUID(), reason: "Record the original installed pool pump",
+    fields: { name: "Installed pool pump", category: "Pool equipment", description: "Original pump near the pool",
+      condition: "GOOD", purchaseOn: "2024-02-29", cost: { amount: "9999999999999999.99", currency: "MAD" },
+      warrantyProvider: "Original warranty supplier", warrantyReference: "WR-9001", warrantyStartsOn: "2024-02-29",
+      warrantyEndsOn: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10), usefulLifeMonths: 120 }
+  };
+  const asset = await saveAsset(f.actor, data, f.deps);
+  const replay = await saveAsset(f.actor, data, f.deps);
+  expect(replay).toEqual(asset);
+  await expect(saveAsset(f.actor, { ...data, idempotencyKey: randomUUID() }, f.deps)).rejects.toBeInstanceOf(AssetConflictError);
+  const foreign = await saveAsset(external.actor, { ...data, tag: "FOREIGN-PUMP", propertyId: external.property.id, idempotencyKey: randomUUID() }, external.deps);
+  const successor = await saveAsset(f.actor, { ...data, tag: "PUMP-0043", idempotencyKey: randomUUID(),
+    fields: { ...data.fields, warrantyEndsOn: null, warrantyStartsOn: null } }, f.deps);
+  expect((await getAsset(f.actor, { assetId: asset.id }, f.deps)).asset.cost).toEqual(data.fields.cost);
+  await expect(getAsset(f.actor, { assetId: foreign.id }, f.deps)).rejects.toBeInstanceOf(AssetAccessError);
+  expect((await listAssets(f.actor, { query: "PUMP-0042" }, f.deps)).items.map(row => row.id)).toEqual([asset.id]);
+
+  await withTenant(db, f.organizationId, async tx => {
+    const rules = new ConfigRuleRepository(tx, f.organizationId);
+    const scope = { scopeType: "property", scopeId: f.property.id, createdBy: f.account.id,
+      effectiveFrom: new Date("2020-01-01"), reason: "Set warranty renewal alerts for the original pump manager" } as const;
+    await rules.createVersion({ ...scope, key: "ops.asset_warranty_alerts", value: { lead_days: [365, 30] } });
+    await rules.createVersion({ ...scope, key: "notification.routing.asset_warranty_expiring",
+      value: { roles: [], people: [f.person.id], assigned: false, channels: ["in_app"] } });
+    await tx.notificationPreference.upsert({
+      where: { organizationId_userAccountId: { organizationId: f.organizationId, userAccountId: f.account.id } },
+      update: { inAppEnabled: true, inAppOperations: true },
+      create: { organizationId: f.organizationId, userAccountId: f.account.id, inAppEnabled: true, inAppOperations: true }
+    });
+  });
+  expect(await tickAssetWarrantyReminders(external.organizationId, db)).toBe(0);
+  expect(await tickAssetWarrantyReminders(f.organizationId, db)).toBe(1);
+  expect(await tickAssetWarrantyReminders(f.organizationId, db)).toBe(0);
+  await withTenant(db, f.organizationId, async tx => {
+    const matching = await tx.notification.findMany({ where: {
+      organizationId: f.organizationId, recipientId: f.account.id, kind: "asset_warranty_expiring"
+    } });
+    expect(matching).toHaveLength(1);
+    const [notice] = matching;
+    const target = (await new NotificationRepository(tx, f.organizationId).targets([notice])).get(notice.targetId)!;
+    expect(notificationDestination(f.actor.authContext, {
+      kind: "asset_warranty_expiring", recipientId: f.account.id, targetId: notice.targetId
+    }, target, "en")).toBe("/en/app/assets/" + asset.id);
+  });
+
+
+  const now = new Date(), today = now.toISOString().slice(0, 10);
+  const schedule = { assetId: asset.id, expectedVersion: 0, cancelFuture: false, reason: "Service the original installed pool pump",
+    definition: { title: { en: "Service pool pump", fr: "Entretenir la pompe" },
+      starts_on: today, ends_on: null, start_minute: 540, every_days: 1, weekdays: [0, 1, 2, 3, 4, 5, 6],
+      checklist_template_key: "maintenance_original", priority: "NORMAL", enabled: true } };
+  await saveAssetPreventiveSchedule(f.actor, schedule, f.deps);
+  const range = { propertyId: f.property.id, from: today, until: today };
+  expect(await generateRecurringOperations(f.actor, range, { ...f.deps, now: new Date(Date.now() + 1000) })).toMatchObject({ created: 1 });
+  expect(await generateRecurringOperations(f.actor, range, { ...f.deps, now: new Date(Date.now() + 1000) })).toMatchObject({ created: 0, existing: 1 });
+  expect(await readAssetPreventiveSchedule(f.actor, asset.id, db)).toMatchObject({
+    version: 1, schedule: { enabled: true }, tasks: [{ state: "PLANNED" }]
+  });
+
+  const reviewed = await previewWorkOrderRegistration(f.actor, f.intent, f.deps);
+  await publishWorkOrderRegistration(f.actor, { intent: f.intent, reviewFingerprint: reviewed.reviewFingerprint, idempotencyKey: randomUUID() }, f.deps);
+  const choices = await maintenanceIssueSourceChoices(f.actor, { issueId: f.issueId, kind: "ASSET", query: "PUMP-0042" }, f.deps);
+  expect(choices).toMatchObject({ ready: true, items: [{ reference: { kind: "ASSET", id: asset.id }, navigation: { kind: "ASSET", id: asset.id } }] });
+  const issueLink = { issueId: f.issueId, expectedVersion: "0", operation: "ATTACH",
+    source: { kind: "ASSET", id: asset.id }, reason: "Link the original damaged pump to the maintenance observation" };
+  const linkReview = await previewMaintenanceIssueLink(f.actor, issueLink, f.deps);
+  await publishMaintenanceIssueLink(f.actor, { intent: issueLink, reviewFingerprint: linkReview.reviewFingerprint, idempotencyKey: randomUUID() }, f.deps);
+  expect((await readMaintenanceIssue(f.actor, { issueId: f.issueId }, f.deps)).sources).toMatchObject([
+    { state: "VISIBLE", reference: { kind: "ASSET", id: asset.id } }
+  ]);
+  const orderLink = { taskId: f.task.id, assetId: asset.id, expectedRevision: 0, idempotencyKey: randomUUID(),
+    reason: "Link the same original pump to this work order" };
+  await expect(changeWorkOrderAsset(f.actor, { ...orderLink, assetId: foreign.id }, f.deps)).rejects.toBeInstanceOf(WorkOrderAccessError);
+  await changeWorkOrderAsset(f.actor, orderLink, f.deps);
+  await expect(changeWorkOrderAsset(f.actor, orderLink, f.deps)).resolves.toEqual({ recorded: true });
+  expect((await readWorkOrderAssets(f.actor, { taskId: f.task.id }, f.deps)).current).toMatchObject({ state: "LINKED", assetId: asset.id });
+  await changeWorkOrderAsset(f.actor, { ...orderLink, expectedRevision: 1, assetId: null, idempotencyKey: randomUUID() }, f.deps);
+  expect((await readWorkOrderAssets(f.actor, { taskId: f.task.id }, f.deps)).items).toMatchObject([{ state: "CLEARED" }, { state: "LINKED", assetId: asset.id }]);
+  const plan = { assetId: asset.id, kind: "PLAN", expectedVersion: 0, effectiveOn: today, budget: { amount: "4500.05", currency: "MAD" },
+    reason: "Plan replacement of the original installed pump", idempotencyKey: randomUUID() };
+  await expect(recordAssetLifecycle(f.actor, plan, f.deps)).resolves.toEqual({ version: 1 });
+  await expect(recordAssetLifecycle(f.actor, plan, f.deps)).resolves.toEqual({ version: 1 });
+  const withoutCostEdit = (permissions: ReadonlySet<string>) => new Set([...permissions].filter(key => key !== "asset_cost:edit"));
+  const readOnlyBudget = { ...f.actor, authContext: { ...f.actor.authContext, permissions: withoutCostEdit(f.actor.authContext.permissions),
+    assignments: f.actor.authContext.assignments?.map(assignment => ({ ...assignment, permissions: withoutCostEdit(assignment.permissions) })) } };
+  await expect(recordAssetLifecycle(readOnlyBudget, { ...plan, expectedVersion: 1, budget: null, idempotencyKey: randomUUID() }, f.deps))
+    .rejects.toBeInstanceOf(AssetAccessError);
+  const replacement = { assetId: asset.id, kind: "REPLACE", expectedVersion: 1, effectiveOn: today,
+    reason: "Record installation of the original replacement pump", successorTag: "PUMP-0043", idempotencyKey: randomUUID() };
+  await expect(recordAssetLifecycle(f.actor, { ...replacement, successorTag: "FOREIGN-PUMP" }, f.deps)).rejects.toBeInstanceOf(AssetConflictError);
+  await expect(recordAssetLifecycle(f.actor, replacement, f.deps)).resolves.toEqual({ version: 2 });
+  await expect(recordAssetLifecycle(f.actor, { assetId: asset.id, kind: "DISPOSE", expectedVersion: 2, effectiveOn: today,
+    reason: "Retire the original pump using the recycling certificate", method: "RECYCLED", reference: "CERT-42", idempotencyKey: randomUUID() }, f.deps)).resolves.toEqual({ version: 3 });
+  expect(await readAssetLifecycle(f.actor, asset.id, undefined, f.deps)).toMatchObject({
+    current: "DISPOSE", items: [{ kind: "DISPOSE", method: "RECYCLED" }, { kind: "REPLACE", successor: { id: successor.id } },
+      { kind: "PLAN", budget: { amount: "4500.05", currency: "MAD" } }]
+  });
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  expect(await generateRecurringOperations(f.actor, { propertyId: f.property.id, from: tomorrow, until: tomorrow },
+    { ...f.deps, now: new Date() })).toMatchObject({ created: 0 });
+  expect(await readAssetPreventiveSchedule(f.actor, asset.id, db)).toMatchObject({ schedule: { enabled: false }, tasks: [{ state: "PLANNED" }] });
+  await withTenant(db, f.organizationId, tx => tx.roleAssignment.update({
+    where: { id: f.grants["asset_cost:view"] }, data: { archivedAt: new Date() }
+  }));
+  const { cost, ...operational } = data.fields;
+  await saveAsset(f.actor, { assetId: asset.id, expectedRevision: 1, idempotencyKey: randomUUID(),
+    reason: "Record the condition after original inspection", fields: { ...operational, condition: "FAIR" } }, f.deps);
+  const restricted = await getAsset(f.actor, { assetId: asset.id }, f.deps);
+  expect(restricted.asset.canEditCost).toBe(false);
+  expect(JSON.stringify(restricted)).not.toContain(cost.amount);
+  expect(JSON.stringify(await readAssetLifecycle(f.actor, asset.id, undefined, f.deps))).not.toContain("4500.05");
+  await expect(withTenant(db, f.organizationId, tx => tx.$executeRawUnsafe(
+    "UPDATE asset_revision SET name='changed' WHERE organization_id=$1::uuid AND asset_id=$2::uuid", f.organizationId, asset.id)))
+    .rejects.toThrow(/append-only/u);
+  expect((await originals(f)).money).toBe(0);
 });

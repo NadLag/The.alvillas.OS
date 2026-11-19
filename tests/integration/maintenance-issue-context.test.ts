@@ -7,7 +7,7 @@ import {nativeSupplierPriceFixture} from "./support/laundry-pricing-fixture";
 import {provisionIntegrationRole} from "./support/database-role";
 import {reportOperationIssue} from "@/modules/reservations/application/operation-evidence";
 import {previewMaintenanceIssueContext} from "@/modules/maintenance/application/issue-context-service";
-import {MaintenanceIssueAccessError,MaintenanceIssueSourceUnavailableError} from "@/modules/maintenance/domain/issue-context";
+import {MaintenanceIssueAccessError} from "@/modules/maintenance/domain/issue-context";
 import {DocumentRepository} from "@/modules/documents/infrastructure/document-repository";
 import {previewMaintenanceIssueLink,publishMaintenanceIssueLink,recoverMaintenanceIssueLink,maintenanceIssueCommandStatus} from "@/modules/maintenance/application/issue-link-service";
 import {MaintenanceIssueContextRepository} from "@/modules/maintenance/infrastructure/issue-context-repository";
@@ -41,7 +41,7 @@ it("reviews original task issues with independent native property, reservation, 
  const f=await fixture(),sourceIds=[{kind:"PROPERTY",id:f.property.id},{kind:"RESERVATION",id:f.reservation.id},{kind:"GUEST",id:f.reservation.guestId!},{kind:"TASK",id:f.task.id},{kind:"PERSON",id:f.person.id},{kind:"SUPPLIER",id:f.supplier.id}],before=await withTenant(db,f.organizationId,async tx=>({issues:await tx.operationIssue.count({where:{organizationId:f.organizationId}}),money:await tx.financialTransaction.count({where:{organizationId:f.organizationId}}),stock:await tx.inventoryMovement.count({where:{organizationId:f.organizationId}})}));
  const result=await previewMaintenanceIssueContext(f.actor,{issueId:f.issueId,sources:sourceIds},f.deps);expect(result.issue).toMatchObject({id:f.issueId,taskId:f.task.id,propertyId:f.property.id,title:"Original maintenance report"});expect(result.sources.map(source=>source.reference)).toEqual(sourceIds);expect(result.sources.map(source=>source.dataClass)).toEqual(["operational","operational","guest","operational","personal","personal"]);expect(result.reviewFingerprint).toMatch(/^[a-f0-9]{64}$/u);
  expect(await withTenant(db,f.organizationId,async tx=>({issues:await tx.operationIssue.count({where:{organizationId:f.organizationId}}),money:await tx.financialTransaction.count({where:{organizationId:f.organizationId}}),stock:await tx.inventoryMovement.count({where:{organizationId:f.organizationId}})}))).toEqual(before);
- await expect(previewMaintenanceIssueContext(f.actor,{issueId:f.issueId,sources:[{kind:"ASSET",id:randomUUID()}]},f.deps)).rejects.toBeInstanceOf(MaintenanceIssueSourceUnavailableError);
+ await expect(previewMaintenanceIssueContext(f.actor,{issueId:f.issueId,sources:[{kind:"ASSET",id:randomUUID()}]},f.deps)).rejects.toBeInstanceOf(MaintenanceIssueAccessError);
 });
 it("rejects a source withdrawn during disclosure and foreign native issues before exposing their context",async()=>{
  const f=await fixture(),other=await fixture();await expect(previewMaintenanceIssueContext(f.actor,{issueId:other.issueId,sources:[]},f.deps)).rejects.toBeInstanceOf(MaintenanceIssueAccessError);
@@ -85,7 +85,7 @@ it("pages original source choices with opaque actor/filter/permission-bound curs
  const first=await maintenanceIssueSourceChoices(f.actor,{issueId:f.issueId,kind:"SUPPLIER",query},f.deps);expect(first.items).toHaveLength(20);expect(first.next).not.toBeNull();expect(first.authorizationStamp).toMatch(/^[a-f0-9]{64}$/u);
  const second=await maintenanceIssueSourceChoices(f.actor,{issueId:f.issueId,kind:"SUPPLIER",query,cursor:first.next!},f.deps);expect(second.items).toHaveLength(1);expect(second.next).toBeNull();expect(new Set([...first.items,...second.items].map(row=>row.reference.id))).toEqual(new Set(ids));
  await expect(maintenanceIssueSourceChoices(f.actor,{issueId:f.issueId,kind:"SUPPLIER",query:query+" changed",cursor:first.next!},f.deps)).rejects.toBeInstanceOf(MaintenanceIssueConflictError);
- expect(await maintenanceIssueSourceChoices(f.actor,{issueId:f.issueId,kind:"ASSET"},f.deps)).toMatchObject({ready:false,items:[],next:null});
+ expect(await maintenanceIssueSourceChoices(f.actor,{issueId:f.issueId,kind:"ASSET"},f.deps)).toMatchObject({ready:true,items:[],next:null});
  // A time boundary invalidates a cursor even when no grant row is edited.
  const expires=new Date(Date.now()+60000);await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants["supplier:view"]},data:{validTo:expires}}));
  const beforeExpiry=await maintenanceIssueSourceChoices(f.actor,{issueId:f.issueId,kind:"SUPPLIER",query},f.deps);expect(beforeExpiry.next).not.toBeNull();

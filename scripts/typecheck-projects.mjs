@@ -10,7 +10,7 @@ import { fileURLToPath, URL } from "node:url";
 const worker = fileURLToPath(new URL("./typecheck-worker.mjs", import.meta.url));
 // A technical compiler resource bound; every original root remains checked.
 export const nativeCompilerMaxRoots = 24;
-export const unitCompilerMaxRoots = 96;
+export const unitCompilerMaxRoots = 48;
 export function compilerProjectNames(nativeRootCount, unitRootCount) {
   if (!Number.isSafeInteger(nativeRootCount) || nativeRootCount < 0) throw RangeError("A complete native root count is required");
   if (!Number.isSafeInteger(unitRootCount) || unitRootCount < 0) throw RangeError("A complete unit root count is required");
@@ -57,10 +57,9 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
 export async function runTypecheckProjects(plan, projects = plan.projects, onResult) {
   const megabyte = 1024 * 1024, reserve = 1024 * megabyte, free = () => process.availableMemory?.() ?? freemem();
   const isNative = project => project.name.startsWith("postgres-");
-  // Unit and browser acceptance import the same complete application contracts.
-  // Keep every root and use the application's heap allowance; the live-memory
-  // scheduler still prevents compiler overlap beyond available physical memory.
-  const heap = project => isNative(project) ? 6144 : 3072;
+  // The application program retains the whole production graph. Its heap is
+  // budgeted separately from the smaller test programs by the live scheduler.
+  const heap = project => isNative(project) ? 6144 : project.name === "application" ? 4096 : 3072;
   const run = project => new Promise(resolve => {
     const started = Date.now(); let settled = false;
     const finished = exitCode => { if(settled)return;settled=true;onResult?.({name:project.name,exitCode,roots:project.roots.length,elapsedMs:Date.now()-started});resolve(exitCode); };

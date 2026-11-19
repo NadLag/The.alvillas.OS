@@ -4270,7 +4270,10 @@ describe("PostgreSQL baseline", () => {
       permissionKey("identity", "override"),
       permissionKey("role", "assign"),
       permissionKey("task", "view"),
-      permissionKey("task", "edit")
+      permissionKey("task", "edit"),
+      permissionKey("asset", "view"),
+      permissionKey("asset", "create"),
+      permissionKey("asset", "edit")
     ]);
     const ctx = {
       organizationId: orgA.id,

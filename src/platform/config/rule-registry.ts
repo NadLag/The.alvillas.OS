@@ -1,3 +1,4 @@
+import { assetWarrantyPolicyKey, assetWarrantyPolicySchema } from "@/modules/assets/domain/warranty-alerts";
 import { maintenanceSlaPolicyKey, maintenanceSlaPolicySchema } from "./maintenance-sla-policy";
 import {taskTypeSchema} from "./task-type";
 import {laundryPricingPolicyKey,legacyLaundryPricingSchema,laundrySupplierPricePolicySchema,laundryPricingSupplierId} from "./laundry-pricing-policy";
@@ -313,6 +314,7 @@ export const configRuleSchemas = {
   "notification.routing.staff_document_expiring": notificationRoutingSchema,
   "notification.routing.task_assigned": notificationRoutingSchema,
   "notification.routing.task_completed": notificationRoutingSchema,
+  "notification.routing.asset_warranty_expiring": explicitNotificationRoutingSchema,
   "notification.routing.task_overdue": notificationRoutingSchema,
   "notification.routing.reservation_created": notificationRoutingSchema,
   "notification.routing.security_session_revoked": notificationRoutingSchema,
@@ -377,6 +379,7 @@ export const configRuleSchemas = {
   "inventory.minimums": inventoryMinimumsSchema,
   "ops.workflows": workflowCatalogSchema,
   "ops.task_policy": operationPolicySchema,
+  [assetWarrantyPolicyKey]: assetWarrantyPolicySchema,
   "ops.recurring_tasks": recurringTasksSchema,
   "ops.checklists": checklistCatalogSchema,
   "services.pricing": servicePricingSchema,
