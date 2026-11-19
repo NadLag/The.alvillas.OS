@@ -23,12 +23,13 @@ export default async function LoginPage({
   const appLocale = safeLocale(locale);
   setRequestLocale(appLocale);
   const requested = (await searchParams).surface;
-  const surface = requested === "field" || requested === "owner" ? requested : undefined;
+  const surface = requested === "field" || requested === "owner" || requested === "personal" ? requested : undefined;
 
   const session = await auth();
 
   if (session?.user?.id) {
     if (session.user.securitySetupRequired) redirect(`/${safeLocale(session.user.preferredLocale)}/app/security`);
+    if (surface === "personal") redirect(`/${safeLocale(session.user.preferredLocale)}/personal`);
     redirect(`/${safeLocale(session.user.preferredLocale)}/app${surface === "field" ? "/field" : surface === "owner" ? "/owner-portal" : ""}`);
   }
 

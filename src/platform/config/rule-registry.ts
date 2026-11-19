@@ -9,6 +9,7 @@ import { paymentMethodPolicyKey, paymentMethodPolicySchema } from "@/modules/fin
 import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@/modules/finance/domain/financial-attachment-policy";
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
+import { businessPersonalTransferPolicyKey, businessPersonalTransferPolicySchema } from "@/platform/ledger/business-personal-transfer-policy";
 import { websiteAnalyticsPolicyKey, websiteAnalyticsPolicySchema } from "@/platform/website/website-policy";
 import {commissionConfigKey,agreementNoticeConfigKey,agreementResponsibilitiesConfigKey,agreementSpecialConditionsConfigKey} from "./management-agreement-keys";
 export {commissionConfigKey,agreementNoticeConfigKey,agreementResponsibilitiesConfigKey,agreementSpecialConditionsConfigKey} from "./management-agreement-keys";
@@ -303,6 +304,7 @@ export const featureFlagConfigSchema = z
 
 export const configRuleSchemas = {
   [websiteAnalyticsPolicyKey]: websiteAnalyticsPolicySchema,
+  [businessPersonalTransferPolicyKey]: businessPersonalTransferPolicySchema,
   [ledgerIntegrityPolicyKey]: ledgerIntegrityPolicySchema,
   [ledgerIntegrityRoutingKey]: ledgerIntegrityRoutingSchema,
   [fieldUploadLifecycleKey]: fieldUploadLifecycleSchema,

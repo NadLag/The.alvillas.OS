@@ -402,6 +402,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  personalHouseholds PersonalHousehold[]
   publicWebsiteDailyMetrics PublicWebsiteDailyMetric[]
   reportRuns ReportRun[]
   reportCalendarSourceRevision ReportCalendarSourceRevision?
@@ -867,6 +868,7 @@ model Person {
 }
 
 model UserAccount {
+  personalMemberships PersonalMember[]
   reportRuns ReportRun[]
   assetLifecycleEvents AssetLifecycleEvent[]
   workOrderAssetRevisions MaintenanceWorkOrderAsset[]
@@ -2023,6 +2025,7 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  personalTransferResolution PersonalTransferResolution?
   documents Document[] @relation("DocumentTransaction")
   guestPaymentReceipt GuestPaymentReceipt?
 
@@ -7168,4 +7171,156 @@ model PublicWebsiteDailyMetric {
 
   @@id([organizationId, day, locale, pagePath])
   @@map("public_website_daily_metric")
+}
+
+model PersonalHousehold {
+  organizationId String @map("organization_id") @db.Uuid
+  id String @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  name String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  members PersonalMember[]
+
+  @@id([organizationId, id])
+  @@map("personal_household")
+}
+
+model PersonalMember {
+  organizationId String @map("organization_id") @db.Uuid
+  householdId String @map("household_id") @db.Uuid
+  accountId String @map("account_id") @db.Uuid
+  displayName String @map("display_name")
+  isChild Boolean @map("is_child")
+  isSteward Boolean @default(false) @map("is_steward")
+  grants String[]
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  household PersonalHousehold @relation(fields: [organizationId, householdId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "personal_member_household_fk")
+  account UserAccount @relation(fields: [organizationId, accountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "personal_member_account_fk")
+  auditEvents PersonalAuditEvent[]
+  financialEntries PersonalFinanceEntry[]
+  documents PersonalDocument[]
+  transferRequests BusinessPersonalTransfer[]
+  transferResolutions PersonalTransferResolution[]
+
+  @@id([organizationId, householdId, accountId])
+  @@index([organizationId, accountId, householdId], map: "personal_member_account_idx")
+  @@map("personal_member")
+}
+
+model PersonalAuditEvent {
+  organizationId String @map("organization_id") @db.Uuid
+  householdId String @map("household_id") @db.Uuid
+  id String @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  action String
+  resourceType String @map("resource_type")
+  resourceId String? @map("resource_id") @db.Uuid
+  ipAddress String? @map("ip_address")
+  deviceId String? @map("device_id")
+  before Json?
+  after Json?
+  reason String?
+  requestId String @map("request_id")
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  actor PersonalMember @relation(fields: [organizationId, householdId, actorId], references: [organizationId, householdId, accountId], onDelete: Restrict, onUpdate: NoAction, map: "personal_audit_event_actor_fk")
+
+  @@id([organizationId, householdId, id])
+  @@index([organizationId, householdId, occurredAt, id], map: "personal_audit_event_timeline_idx")
+  @@map("personal_audit_event")
+}
+
+model PersonalFinanceEntry {
+  organizationId String @map("organization_id") @db.Uuid
+  householdId String @map("household_id") @db.Uuid
+  id String @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  commandId String @map("command_id") @db.Uuid
+  kind String
+  seriesId String @map("series_id") @db.Uuid
+  label String
+  category String
+  amount Decimal @db.Decimal(18, 2)
+  currency String @db.Char(3)
+  effectiveOn DateTime @map("effective_on") @db.Date
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  reversesId String? @map("reverses_id") @db.Uuid
+  goalId String? @map("goal_id") @db.Uuid
+  withdrawal Boolean @default(false)
+  closed Boolean @default(false)
+  creator PersonalMember @relation(fields: [organizationId, householdId, createdBy], references: [organizationId, householdId, accountId], onDelete: Restrict, onUpdate: NoAction, map: "personal_finance_entry_actor_fk")
+  reverses PersonalFinanceEntry? @relation("PersonalReversal", fields: [organizationId, householdId, reversesId], references: [organizationId, householdId, id], onDelete: Restrict, onUpdate: NoAction, map: "personal_finance_entry_reverses_fk")
+  reversedBy PersonalFinanceEntry? @relation("PersonalReversal")
+  goal PersonalFinanceEntry? @relation("PersonalGoal", fields: [organizationId, householdId, goalId], references: [organizationId, householdId, id], onDelete: Restrict, onUpdate: NoAction, map: "personal_finance_entry_goal_fk")
+  contributions PersonalFinanceEntry[] @relation("PersonalGoal")
+
+  @@id([organizationId, householdId, id])
+  @@unique([organizationId, householdId, commandId], map: "personal_finance_entry_command_unique")
+  @@unique([organizationId, householdId, reversesId], map: "personal_finance_entry_reversal_unique")
+  @@index([organizationId, householdId, kind, effectiveOn(sort: Desc), id(sort: Desc)], map: "personal_finance_entry_kind_date_idx")
+  @@index([organizationId, householdId, kind, seriesId, effectiveOn(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "personal_finance_entry_kind_series_idx")
+  @@index([organizationId, householdId, goalId], map: "personal_finance_entry_goal_idx")
+  @@map("personal_finance_entry")
+}
+
+model PersonalDocument {
+  organizationId String @map("organization_id") @db.Uuid
+  householdId String @map("household_id") @db.Uuid
+  id String @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  commandId String @map("command_id") @db.Uuid
+  displayName String @map("display_name")
+  contentType String @map("content_type")
+  contentHash String @map("content_hash") @db.Char(64)
+  ciphertext Bytes
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  creator PersonalMember @relation(fields: [organizationId, householdId, createdBy], references: [organizationId, householdId, accountId], onDelete: Restrict, onUpdate: NoAction, map: "personal_document_creator_fk")
+
+  @@id([organizationId, householdId, id])
+  @@unique([organizationId, householdId, commandId], map: "personal_document_command_unique")
+  @@index([organizationId, householdId, id(sort: Desc)], map: "personal_document_timeline_idx")
+  @@map("personal_document")
+}
+
+model BusinessPersonalTransfer {
+  organizationId String @map("organization_id") @db.Uuid
+  householdId String @map("household_id") @db.Uuid
+  id String @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  commandId String @map("command_id") @db.Uuid
+  category String
+  direction String
+  amount Decimal @db.Decimal(18, 2)
+  currency String @db.Char(3)
+  effectiveOn DateTime @map("effective_on") @db.Date
+  requestedBy String @map("requested_by") @db.Uuid
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  requester PersonalMember @relation(fields: [organizationId, householdId, requestedBy], references: [organizationId, householdId, accountId], onDelete: Restrict, onUpdate: NoAction, map: "business_personal_transfer_requester_fk")
+  resolution PersonalTransferResolution?
+
+  @@id([organizationId, householdId, id])
+  @@unique([organizationId, householdId, commandId], map: "business_personal_transfer_command_unique")
+  @@map("business_personal_transfer")
+}
+
+model PersonalTransferResolution {
+  organizationId String @map("organization_id") @db.Uuid
+  householdId String @map("household_id") @db.Uuid
+  transferId String @map("transfer_id") @db.Uuid
+  kind String
+  businessTransactionId String? @map("business_transaction_id") @db.Uuid
+  policyRuleId String? @map("policy_rule_id") @db.Uuid
+  reversesTransferId String? @map("reverses_transfer_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  transfer BusinessPersonalTransfer @relation(fields: [organizationId, householdId, transferId], references: [organizationId, householdId, id], onDelete: Restrict, onUpdate: NoAction, map: "personal_transfer_resolution_transfer_fk")
+  actor PersonalMember @relation(fields: [organizationId, householdId, actorId], references: [organizationId, householdId, accountId], onDelete: Restrict, onUpdate: NoAction, map: "personal_transfer_resolution_actor_fk")
+  businessTransaction FinancialTransaction? @relation(fields: [organizationId, businessTransactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "personal_transfer_resolution_transaction_fk")
+
+  reversesTransfer PersonalTransferResolution? @relation("PersonalTransferReversal", fields: [organizationId, householdId, reversesTransferId], references: [organizationId, householdId, transferId], onDelete: Restrict, onUpdate: NoAction, map: "personal_transfer_resolution_reversed_fk")
+  reversedByTransfer PersonalTransferResolution? @relation("PersonalTransferReversal")
+
+  @@id([organizationId, householdId, transferId])
+  @@unique([organizationId, businessTransactionId], map: "personal_transfer_resolution_business_unique")
+  @@unique([organizationId, householdId, reversesTransferId], map: "personal_transfer_resolution_reversed_unique")
+  @@map("personal_transfer_resolution")
 }

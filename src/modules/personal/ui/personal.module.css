@@ -1,0 +1,52 @@
+.workspace {
+  min-inline-size: 0;
+}
+
+.workspace :global(.detail-panel) {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace :global(.detail-panel) label:has(input:not([type="checkbox"])),
+.workspace :global(.detail-panel) label:has(select) {
+  display: grid;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.workspace :global(.detail-panel) :is(input:not([type="checkbox"]):not([type="hidden"]), select) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-block-size: 44px;
+}
+
+.workspace :global(.detail-panel) summary {
+  cursor: pointer;
+  align-content: center;
+  min-block-size: 44px;
+}
+
+.workspace :global(.detail-panel) fieldset {
+  min-inline-size: 0;
+}
+
+.workspace :global(.detail-panel) :is(ul, dl) {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace :global(.detail-panel) li {
+  padding-block: var(--space-2);
+  border-block-end: 1px solid var(--border-subtle);
+}
+
+.workspace :global(.detail-panel) dd {
+  margin: 0;
+}
+
+.workspace bdi {
+  font-variant-numeric: tabular-nums;
+}

@@ -47,7 +47,7 @@ export default async function LocaleLayout({
   return (
     <html lang={appLocale} dir={localeDirection(appLocale)}>
       <body>
-        <NextIntlClientProvider locale={appLocale} messages={messages}>
+        <NextIntlClientProvider locale={appLocale} messages={messages} timeZone="Africa/Casablanca">
           <main className="shell">{children}</main>
         </NextIntlClientProvider>
       </body>

@@ -44,10 +44,40 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
     const setup = await ensureReservationRevenuePostingSetup({ ownerEmail, propertyName, password: process.env.ADMIN_PASSWORD ?? "correct horse battery staple" });
     await withTenant(f.db, f.organizationId, tx => new ConfigRuleRepository(tx, f.organizationId).createVersion({ key: "ops.reservation_task_templates", scopeType: "property", scopeId: setup.propertyId,
       effectiveFrom: new Date("2020-01-01"), reason: "Explicit local financial guard workflow", value: { tasks: [{ key: "arrival", type: "ARRIVAL_PREPARATION", title: { en: "Arrival", fr: "Arrivée", ar: "الوصول" }, due: "CHECK_IN", priority: "NORMAL", checklist: [] }] } }));
-    await admin.goto(`/${locale}/app/reservations`); await admin.getByTestId("reservation-property").selectOption(setup.propertyId); await admin.getByTestId("reservation-guest-name").fill(guestName);
-    await admin.getByTestId("reservation-guest-email").fill(`guard-guest-${suffix}@example.test`); await admin.getByTestId("reservation-check-in").fill("2028-06-10"); await admin.getByTestId("reservation-check-out").fill("2028-06-14");
-    await admin.getByTestId("reservation-adults").fill("2"); await admin.getByTestId("reservation-children").fill("0"); await admin.getByTestId("reservation-submit").click(); await expect(admin).toHaveURL(/\/app\/operations/u);
-    await admin.goto(`/${locale}/app/reservations`); const row = admin.getByTestId("reservation-row").filter({ hasText: guestName });
+    const reservationsPath = `/${locale}/app/reservations`;
+    const operationsPath = `/${locale}/app/operations?propertyId=${setup.propertyId}`;
+    const operationsUrl = new URL(operationsPath, origin).href;
+    await admin.goto(reservationsPath);
+    const booking = admin.getByTestId("reservation-create-form");
+    await booking.getByTestId("reservation-property").selectOption(setup.propertyId);
+    await booking.getByTestId("reservation-guest-name").fill(guestName);
+    await booking.getByTestId("reservation-guest-email").fill(`guard-guest-${suffix}@example.test`);
+    await booking.getByTestId("reservation-check-in").fill("2028-06-10");
+    await booking.getByTestId("reservation-check-out").fill("2028-06-14");
+    await booking.getByTestId("reservation-adults").fill("2");
+    await booking.getByTestId("reservation-children").fill("0");
+    const bookingNonce = await booking.locator('input[name="idempotencyKey"]').inputValue();
+    expect(bookingNonce).toMatch(/^[a-f0-9-]{36}$/u);
+    // Subscribe to the scoped redirect and the route commit before submitting.
+    const [acknowledgement] = await Promise.all([
+      admin.waitForResponse(response => {
+        const request = response.request();
+        const destination = response.headers()["x-action-redirect"]?.split(";")[0];
+        return request.method() === "POST" && request.url() === new URL(reservationsPath, origin).href
+          && Boolean(request.headers()["next-action"]) && destination === operationsPath;
+      }),
+      admin.waitForURL(operationsUrl, { waitUntil: "commit" }),
+      booking.getByTestId("reservation-submit").click()
+    ]);
+    expect(acknowledgement.status()).toBe(200);
+    await expect(admin).toHaveURL(operationsUrl);
+    const savedBooking = await withTenant(f.db, f.organizationId, tx => tx.reservation.findMany({
+      where: { organizationId: f.organizationId, propertyId: setup.propertyId, idempotencyKey: bookingNonce },
+      select: { status: true, operationTasks: { select: { type: true } } }
+    }));
+    expect(savedBooking).toEqual([{ status: "CONFIRMED", operationTasks: [{ type: "ARRIVAL_PREPARATION" }] }]);
+
+    await admin.goto(reservationsPath); const row = admin.getByTestId("reservation-row").filter({ hasText: guestName });
     await row.getByTestId("reservation-revenue-amount").fill("100.00"); await selectPaymentAccount(row,"reservation-revenue-account",{ label: setup.bankName });
     const bankId = await row.getByTestId("reservation-revenue-account").inputValue();
     const revenue = await captureAction(admin, row.getByTestId("reservation-revenue-submit")); await expect(row.getByTestId("reservation-revenue-posted")).toBeVisible();
@@ -58,8 +88,24 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
     await admin.getByTestId("invite-role").selectOption("field_staff"); await admin.getByTestId("invite-scope-type").selectOption("job"); await admin.getByTestId("invite-scope-id").fill(f.taskId);
     await admin.getByTestId("invite-preferred-locale").selectOption(locale); await admin.getByTestId("invite-submit").click();
     const code = (await admin.getByTestId("invitation-code").innerText()).split(":").at(-1)?.trim(); expect(Boolean(code)).toBe(true);
-    await employee.goto(`/${locale}/activate/${code}`); await employee.getByTestId("activation-phone").fill(phone); await employee.getByTestId("activation-pin").fill(pin); await employee.getByTestId("activation-submit").click();
-    await expect(employee).toHaveURL(new RegExp(`/${locale}/login$`, "u")); await employee.goto(`/${locale}/login?surface=field`);
+    const activationUrl = new URL(`/${locale}/activate/${code}`, origin).href;
+    const loginPath = `/${locale}/login`;
+    const loginUrl = new URL(loginPath, origin).href;
+    await employee.goto(activationUrl);
+    await employee.getByTestId("activation-phone").fill(phone);
+    await employee.getByTestId("activation-pin").fill(pin);
+    const [activation] = await Promise.all([
+      employee.waitForResponse(response => {
+        const request = response.request();
+        return request.method() === "POST" && request.url() === activationUrl && Boolean(request.headers()["next-action"]);
+      }),
+      employee.waitForURL(loginUrl, { waitUntil: "commit" }),
+      employee.getByTestId("activation-submit").click()
+    ]);
+    expect(activation.status()).toBe(200);
+    expect((await activation.headerValue("x-action-redirect"))?.split(";")[0]).toBe(loginPath);
+    await expect(employee).toHaveURL(loginUrl);
+    await employee.goto(`${loginPath}?surface=field`);
     await employee.getByTestId("login-phone").fill(phone); await employee.getByTestId("login-pin").fill(pin); await employee.getByTestId("login-submit").click(); await expect(employee).toHaveURL(new RegExp(`/${locale}/app/field$`, "u"));
     const accountSchema = z.object({ user: z.object({ id: z.uuid(), personId: z.uuid(), organizationId: z.uuid() }) });
     const user = accountSchema.parse(await (await employee.request.get("/api/auth/session")).json()).user; expect(user.organizationId).toBe(f.organizationId);

@@ -66,6 +66,7 @@ function authErrorCode(error: AuthError): string | undefined {
 }
 
 function workspacePath(surface: unknown) {
+  if (surface === "personal") return "/personal";
   if (surface === "owner") return "/app/owner-portal";
   return surface === "field" ? "/app/field" : "/app";
 }
@@ -210,7 +211,7 @@ export async function beginPasskeyLoginAction(email: string) {
 }
 
 export async function finishPasskeyLoginAction(
-  locale: string, email: string, challengeId: string, response: AuthenticationResponseJSON, surface?: "field" | "owner"
+  locale: string, email: string, challengeId: string, response: AuthenticationResponseJSON, surface?: "field" | "owner" | "personal"
 ): Promise<LoginFormState> {
   const parsed = z.object({ email: z.string().trim().email(), challengeId: z.string().uuid() }).safeParse({ email, challengeId });
   if (!parsed.success) return { status: "error", messageKey: "invalid" };
