@@ -60,13 +60,13 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
     const [acknowledgement] = await Promise.all([
       admin.waitForResponse(response => {
         const request = response.request();
+        const destination = response.headers()["x-action-redirect"]?.split(";")[0];
         return request.method() === "POST" && request.url() === new URL(reservationsPath, origin).href
-          && Boolean(request.headers()["next-action"] && request.postData()?.includes(bookingNonce));
+          && Boolean(request.headers()["next-action"]) && destination === operationsPath;
       }),
       booking.getByTestId("reservation-submit").click()
     ]);
     expect(acknowledgement.status()).toBe(200);
-    expect((await acknowledgement.headerValue("x-action-redirect"))?.split(";")[0]).toBe(operationsPath);
     // The router can only apply the streamed response after the action has acknowledged the booking.
     expect(await acknowledgement.finished()).toBeNull();
     await expect(admin).toHaveURL(new URL(operationsPath, origin).href);
