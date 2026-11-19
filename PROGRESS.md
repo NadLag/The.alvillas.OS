@@ -337,13 +337,13 @@ F-PER-08 | IN-PROGRESS | Dated assets, liabilities and currency-separated net wo
 F-PER-09 | IN-PROGRESS | Household document upload, private download, archive and recovery. Activation requires PERSONAL_ENCRYPTION_KEYS. CI and staging acceptance pending.
 F-PER-10 | IN-PROGRESS | Household reports filter every source by current grants. CI and staging acceptance pending.
 F-PER-11 | IN-PROGRESS | Locally verified approved original and opposite settlements, same-household provenance, exact totals and unchanged company journals. Approved production mapping, exact-head CI and staging acceptance pending.
-F-SEC-01 | TODO |
-F-SEC-02 | TODO |
-F-SEC-03 | TODO |
-F-SEC-04 | TODO |
-F-SEC-05 | TODO |
-F-SEC-06 | TODO |
-F-SEC-07 | TODO |
+F-SEC-01 | IN-PROGRESS | Threat model covers tenant boundaries, browser and field access, company and personal records, integrations and release. Hosted acceptance pending.
+F-SEC-02 | IN-PROGRESS | Blocked pending owner authorization of an independent penetration tester, test scope, and an accessible staging target.
+F-SEC-03 | IN-PROGRESS | Existing dependency audit plus a checksum-pinned, redacted Gitleaks scan of introduced commits. Local clean and rejection cases passed. Exact-head CI pending.
+F-SEC-04 | IN-PROGRESS | Enforced CSP, per-request private script nonces and security headers. Local production browser checks passed. Hosted acceptance pending.
+F-SEC-05 | IN-PROGRESS | Readiness hides database connection details. Retention and export or erasure scope require lawyer-approved data policy and CNDP obligations.
+F-SEC-06 | IN-PROGRESS | Versioned key rotation procedure with historical ciphertext, signature, and rollback checks. Owner-approved keys and hosted rehearsal pending.
+F-SEC-07 | IN-PROGRESS | Sensitive roles retain MFA controls. Rate-limit threshold signals for sign-in, invitations, and recovery omit credential identifiers. Hosted monitoring acceptance pending.
 F-PRF-01 | TODO |
 F-PRF-02 | TODO |
 F-PRF-03 | TODO |

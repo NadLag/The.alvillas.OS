@@ -1123,7 +1123,8 @@ export async function activateInvitation(
   const rateLimit = await withTenant(db(deps), organizationId, (tx) => consumeRateLimit(tx, organizationId, {
       key: `invitation:${hashCode(parsed.code)}`,
       limit: 6,
-      windowSeconds: 15 * 60
+      windowSeconds: 15 * 60,
+      securityOperation: "invitation_redemption"
   }));
   if (!rateLimit.allowed) throw new IdentityConflictError("Too many invitation attempts");
 
@@ -1627,7 +1628,8 @@ export async function recoverPassword(input: RecoveryInput, deps: IdentityServic
   const parsed = recoveryInputSchema.parse(input);
   const meta = auditMeta(deps);
   const limit = await withTenant(db(deps), bootstrapOrganizationId, (tx) => consumeRateLimit(tx, bootstrapOrganizationId, {
-    key: `recovery:${parsed.email}:${deps.ipAddress ?? "local"}`, limit: 5, windowSeconds: 60
+    key: `recovery:${parsed.email}:${deps.ipAddress ?? "local"}`, limit: 5, windowSeconds: 60,
+    securityOperation: "account_recovery"
   }));
   if (!limit.allowed) throw new IdentityConflictError("Too many recovery attempts");
 

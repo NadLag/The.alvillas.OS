@@ -46,6 +46,18 @@ describe("readiness", () => {
     );
   });
 
+  it("keeps connection errors out of the public readiness payload", async () => {
+    const result = await checkReadiness({
+      env: { DATABASE_URL: "postgresql://localhost/fixture", NODE_ENV: "test" },
+      migrationSummary: async () => { throw new Error("fixture detail with a private connection descriptor"); }
+    });
+    expect(result.status).toBe("not_ready");
+    expect(result.checks).toContainEqual({
+      name: "database", status: "error", detail: "Database readiness check failed"
+    });
+    expect(JSON.stringify(result)).not.toContain("private connection descriptor");
+  });
+
   it("passes readiness when database migrations are visible", async () => {
     const readiness = await checkReadiness({
       env: { DATABASE_URL: "postgresql://localhost/alvillas_os" },
@@ -71,7 +83,7 @@ describe("readiness", () => {
     expect(readiness.status).toBe("not_ready");
     expect(readiness.checks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: "database", status: "error", detail: "connection refused" })
+        expect.objectContaining({ name: "database", status: "error", detail: "Database readiness check failed" })
       ])
     );
   });

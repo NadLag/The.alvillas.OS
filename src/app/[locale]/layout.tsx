@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
+import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import "../globals.css";
 import { localeDirection, routing, type AppLocale } from "@/i18n/routing";
@@ -42,6 +43,8 @@ export default async function LocaleLayout({
 
   const appLocale = locale as AppLocale;
   setRequestLocale(appLocale);
+  // Next renders the private document with the nonce from the current request.
+  await connection();
   const messages = await getMessages({locale:appLocale});
 
   return (

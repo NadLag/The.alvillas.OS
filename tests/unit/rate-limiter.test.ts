@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { logger } from "@/platform/observability/logger";
 import {
   consumeRateLimit,
   hashRateLimitKey,
@@ -59,5 +60,27 @@ describe("Postgres rate limiter", () => {
       allowed: false,
       remaining: 0
     });
+  });
+
+  it("emits one operator signal at a classified threshold without logging the bucket key", async () => {
+    const organizationId = "018f0a0b-0000-7000-9000-000000000001";
+    const windowStart = new Date("2026-10-11T10:05:00.000Z");
+    const client = {
+      $queryRaw: vi.fn()
+        .mockResolvedValueOnce([{ count: 3, window_start: windowStart }])
+        .mockResolvedValueOnce([{ count: 4, window_start: windowStart }])
+        .mockResolvedValueOnce([{ count: 5, window_start: windowStart }])
+    } satisfies RateLimitClient;
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const input = { key: "login:192.0.2.9:private@example.test", limit: 3, windowSeconds: 60,
+        now: windowStart, securityOperation: "sign_in" as const };
+      for (let attempt = 0; attempt < 3; attempt++) await consumeRateLimit(client, organizationId, input);
+      expect(warn).toHaveBeenCalledExactlyOnceWith("identity.rate_limit.threshold_exceeded", { organizationId }, {
+        operation: "sign_in", windowSeconds: 60, resetAt: "2026-10-11T10:06:00.000Z"
+      });
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

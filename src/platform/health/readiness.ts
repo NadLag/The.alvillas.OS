@@ -73,11 +73,11 @@ export async function checkReadiness(options: ReadinessOptions = {}): Promise<Re
             ? `${summary.migrationCount} migrations applied`
             : "No Prisma migrations found"
       });
-    } catch (error) {
+    } catch {
       checks.push({
         name: "database",
         status: "error",
-        detail: error instanceof Error ? error.message : "Database readiness check failed"
+        detail: "Database readiness check failed"
       });
     }
   }

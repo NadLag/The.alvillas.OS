@@ -38,7 +38,8 @@ export async function consumeLoginRateLimit(
       consumeRateLimit(tx as unknown as RateLimitClient, bootstrapOrganizationId, {
         key: `login:${ip}:${email}`,
         limit: 5,
-        windowSeconds: 60
+        windowSeconds: 60,
+        securityOperation: "sign_in"
       })
   );
 }

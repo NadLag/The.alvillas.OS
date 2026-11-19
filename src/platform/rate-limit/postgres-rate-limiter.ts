@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import { logger } from "@/platform/observability/logger";
 import type { RateLimiter } from "@/platform/providers";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
@@ -17,6 +18,7 @@ export type RateLimitInput = {
   limit: number;
   windowSeconds: number;
   now?: Date;
+  securityOperation?: "sign_in" | "invitation_redemption" | "account_recovery";
 };
 
 export type RateLimitDecision = {
@@ -83,11 +85,17 @@ export async function consumeRateLimit(
   }
 
   const remaining = Math.max(input.limit - row.count, 0);
+  const resetAt = new Date(row.window_start.getTime() + input.windowSeconds * 1000);
+  if (input.securityOperation && row.count === input.limit + 1) {
+    logger.warn("identity.rate_limit.threshold_exceeded", { organizationId }, {
+      operation: input.securityOperation, windowSeconds: input.windowSeconds, resetAt: resetAt.toISOString()
+    });
+  }
 
   return {
     allowed: row.count <= input.limit,
     remaining,
-    resetAt: new Date(row.window_start.getTime() + input.windowSeconds * 1000)
+    resetAt
   };
 }
 
