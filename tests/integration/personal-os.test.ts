@@ -192,15 +192,14 @@ describe("Personal OS on isolated PostgreSQL", () => {
       new PersonalTransferRepository(scope).confirm(confirm))).rejects.toBeInstanceOf(PersonalAccessDenied);
     await expect(households.scoped(financeActor, household, (scope) =>
       new PersonalTransferRepository(scope).confirm(confirm))).rejects.toBeInstanceOf(PersonalConflict);
-    await withTenant(db, organizationId, async (tx) => {
-      await new ConfigRuleRepository(tx, organizationId).createVersion({
+    const policy = await withTenant(db, organizationId, (tx) =>
+      new ConfigRuleRepository(tx, organizationId).createVersion({
         key: businessPersonalTransferPolicyKey, scopeType: "organization", createdBy: financeActor.accountId,
         effectiveFrom: new Date("2020-01-01"), reason: "Approved fixture categories",
         value: { approval_reference: "CONFIRMED-FIXTURE", categories: [
           { category: "Approved settlement", cash_account_code: "BANK", company_account_code: "CAPITAL" }
         ] }
-      });
-    });
+      }));
     await households.scoped(financeActor, household, async (scope) => {
       const transfers = new PersonalTransferRepository(scope);
       await transfers.confirm(confirm);
@@ -261,7 +260,7 @@ describe("Personal OS on isolated PostgreSQL", () => {
       expect((await scope.tx.personalAuditEvent.findMany({
         where: { ...scope.key, resourceId: oppositeId, action: "personal.transfer_confirmed" },
         select: { after: true }
-      }))).toEqual([{ after: { policyRuleId: expect.any(String), reversesTransferId: id } }]);
+      }))).toEqual([{ after: { policyRuleId: policy.id, reversesTransferId: id } }]);
     });
     expect(await getJournal()).toEqual(posted);
   });
