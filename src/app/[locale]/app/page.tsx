@@ -21,6 +21,7 @@ import { resolveFeatureFlag } from "@/platform/config/feature-flags";
 import { authorize,authorizeCollection } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import {canViewServiceAllocation} from "@/platform/authz/service-allocation-resource";
+import { personalHouseholdIds } from "@/modules/personal/application/personal-session";
 import { canViewAccountantExport } from "@/platform/authz/accountant-export-resource";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,7 @@ export default async function AppPage({
   }
   if (session.user.securitySetupRequired) redirect(`/${appLocale}/app/security`);
 
-  const [t, dsnT, ownerPortalFlag, crmT] = await Promise.all([
+  const [t, dsnT, ownerPortalFlag, crmT, personalIds, personalT] = await Promise.all([
     getTranslations("AppShell"),
     getTranslations("DesignSystem"),
     resolveFeatureFlag({
@@ -53,7 +54,9 @@ export default async function AppPage({
       key: "owner_portal",
       defaultEnabled: true
     }),
-    getTranslations("LeadWorkspace")
+    getTranslations("LeadWorkspace"),
+    personalHouseholdIds(session),
+    getTranslations({ locale: appLocale, namespace: "Personal" })
   ]);
 
   const reservationContext = await reservationActorContextFromSession(session);
@@ -62,6 +65,7 @@ export default async function AppPage({
       <ShellHeader
         actions={
           <nav className="app-actions" aria-label={t("actions")}>
+            {personalIds.length ? <Link className="secondary-button" prefetch={false} href={`/${appLocale}/personal`}>{personalT("title")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/organization`}>
             {t("organization")}
           </Link>

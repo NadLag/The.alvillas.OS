@@ -60,6 +60,7 @@ describe("config rule registry", () => {
       "finance.accounting_periods",
       "finance.approval_thresholds",
       "finance.bank_statements",
+      "finance.business_personal_transfers",
       "finance.commission",
       "finance.company_expenses",
       "finance.expense_allocation",

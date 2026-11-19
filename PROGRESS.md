@@ -325,18 +325,18 @@ F-WEB-05 | IN-PROGRESS | Localized canonicals, alternate languages, sitemap, Ope
 F-WEB-06 | IN-PROGRESS | Opt-in first-party daily route counters with privacy signals, tenant-scoped storage and organization report authorization. Hosted acceptance and analytics processing approval pending.
 F-WEB-07 | IN-PROGRESS | Server-rendered public layout avoids shipping the private message catalog. Sized brand assets, static social artwork and mobile Lighthouse budget check in place. Hosted Lighthouse and interaction measurements pending.
 F-WEB-08 | IN-PROGRESS | Public navigation, marketing and assessment copy is available in EN, FR and AR with localized routes and RTL. CI and hosted acceptance pending.
-F-WEB-09 | TODO | Awaiting lawyer-approved publishable legal text and approval references.
-F-PER-01 | TODO |
-F-PER-02 | TODO |
-F-PER-03 | TODO |
-F-PER-04 | TODO |
-F-PER-05 | TODO |
-F-PER-06 | TODO |
-F-PER-07 | TODO |
-F-PER-08 | TODO |
-F-PER-09 | TODO |
-F-PER-10 | TODO |
-F-PER-11 | TODO |
+F-WEB-09 | IN-PROGRESS | Blocked pending lawyer-approved publishable legal copy and approval references.
+F-PER-01 | IN-PROGRESS | Isolated household scope, forced PostgreSQL row policies, private audit and operator provisioning. CI and staging acceptance pending.
+F-PER-02 | IN-PROGRESS | Household membership, child-specific grants and audited access revocation. CI and staging acceptance pending.
+F-PER-03 | IN-PROGRESS | Household income with exact amounts, replay-safe commands and append-only reversals. CI and staging acceptance pending.
+F-PER-04 | IN-PROGRESS | Household expenses with exact amounts and auditable reversals. CI and staging acceptance pending.
+F-PER-05 | IN-PROGRESS | Monthly budget versions and authorized remaining-amount calculations. CI and staging acceptance pending.
+F-PER-06 | IN-PROGRESS | Savings goals and movement-derived savings progress by currency. CI and staging acceptance pending.
+F-PER-07 | IN-PROGRESS | Investment valuation history with separate view and edit grants. CI and staging acceptance pending.
+F-PER-08 | IN-PROGRESS | Dated assets, liabilities and currency-separated net worth from visible sources. CI and staging acceptance pending.
+F-PER-09 | IN-PROGRESS | Household document upload, private download, archive and recovery. Activation requires PERSONAL_ENCRYPTION_KEYS. CI and staging acceptance pending.
+F-PER-10 | IN-PROGRESS | Household reports filter every source by current grants. CI and staging acceptance pending.
+F-PER-11 | IN-PROGRESS | Categorized transfer requests reconcile against already posted company entries with separate approval. Activation requires approved account mappings. CI and staging acceptance pending.
 F-SEC-01 | TODO |
 F-SEC-02 | TODO |
 F-SEC-03 | TODO |
