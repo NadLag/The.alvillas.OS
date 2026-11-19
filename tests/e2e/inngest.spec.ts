@@ -22,7 +22,7 @@ test("Inngest authenticates discovery and denies unsigned execution", async ({ r
     }
   });
   expect(registration.status()).toBe(200);
-  const { functions } = await registration.json();
+  const { functions } = await registration.json() as { functions: unknown[] };
   expect(functions).toHaveLength(21);
   expect(functions).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: "alvillas-os-reporting-calendar-refresh", triggers: [{ cron: "*/5 * * * *" }] }),
