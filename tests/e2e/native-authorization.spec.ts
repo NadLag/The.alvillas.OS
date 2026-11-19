@@ -46,6 +46,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
       effectiveFrom: new Date("2020-01-01"), reason: "Explicit local financial guard workflow", value: { tasks: [{ key: "arrival", type: "ARRIVAL_PREPARATION", title: { en: "Arrival", fr: "Arrivée", ar: "الوصول" }, due: "CHECK_IN", priority: "NORMAL", checklist: [] }] } }));
     const reservationsPath = `/${locale}/app/reservations`;
     const operationsPath = `/${locale}/app/operations?propertyId=${setup.propertyId}`;
+    const operationsUrl = new URL(operationsPath, origin).href;
     await admin.goto(reservationsPath);
     const booking = admin.getByTestId("reservation-create-form");
     await booking.getByTestId("reservation-property").selectOption(setup.propertyId);
@@ -57,6 +58,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
     await booking.getByTestId("reservation-children").fill("0");
     const bookingNonce = await booking.locator('input[name="idempotencyKey"]').inputValue();
     expect(bookingNonce).toMatch(/^[a-f0-9-]{36}$/u);
+    // Subscribe to the scoped redirect and the route commit before submitting.
     const [acknowledgement] = await Promise.all([
       admin.waitForResponse(response => {
         const request = response.request();
@@ -64,12 +66,11 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
         return request.method() === "POST" && request.url() === new URL(reservationsPath, origin).href
           && Boolean(request.headers()["next-action"]) && destination === operationsPath;
       }),
+      admin.waitForURL(operationsUrl, { waitUntil: "commit" }),
       booking.getByTestId("reservation-submit").click()
     ]);
     expect(acknowledgement.status()).toBe(200);
-    // The router can only apply the streamed response after the action has acknowledged the booking.
-    expect(await acknowledgement.finished()).toBeNull();
-    await expect(admin).toHaveURL(new URL(operationsPath, origin).href);
+    await expect(admin).toHaveURL(operationsUrl);
     const savedBooking = await withTenant(f.db, f.organizationId, tx => tx.reservation.findMany({
       where: { organizationId: f.organizationId, propertyId: setup.propertyId, idempotencyKey: bookingNonce },
       select: { status: true, operationTasks: { select: { type: true } } }
