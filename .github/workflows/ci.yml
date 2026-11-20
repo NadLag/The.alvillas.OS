@@ -34,7 +34,7 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run lint
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=8192
       - run: npm run typecheck
       - run: npm run check:i18n
       - run: npm run check:rtl-css
