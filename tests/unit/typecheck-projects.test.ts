@@ -13,8 +13,9 @@ describe("complete compiler partition coverage", () => {
     writeFileSync(join(root, "ambient.ts"), 'interface UnitContext { amount: string }\n');
     mkdirSync(join(root, "tests/unit"), { recursive: true });
     for (let index = 0; index < 193; index++) writeFileSync(join(root, "tests/unit", String(index).padStart(3, "0") + ".ts"), 'export const value: UnitContext = { amount: "9007199254740993.07" };\n');
-    const moduleUrl = pathToFileURL(join(process.cwd(), "scripts/typecheck-projects.mjs")).href;
-    const plan = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `import {prepareTypecheckProjects} from ${JSON.stringify(moduleUrl)};console.log(JSON.stringify(prepareTypecheckProjects(${JSON.stringify(root)})));`], { encoding: "utf8", windowsHide: true })) as { unitRootCount: number; originalRoots: string[]; shared: string[]; projects: { name: string; path: string; roots: string[] }[] };
+    const planner = join(process.cwd(), "scripts/prepare-build-typecheck.mjs");
+    const planFile = execFileSync(process.execPath, [planner], { cwd: root, encoding: "utf8", windowsHide: true }).trimEnd();
+    const plan = JSON.parse(readFileSync(planFile, "utf8")) as { unitRootCount: number; originalRoots: string[]; shared: string[]; projects: { name: string; path: string; roots: string[] }[] };
     const units = plan.projects.filter(project => project.name === "unit" || project.name.startsWith("unit-")), primary = units.flatMap(project => project.roots.filter(file => !plan.shared.includes(file)));
     expect(plan.unitRootCount).toBe(193); expect(units.map(project => project.name)).toEqual(["unit", "unit-2", "unit-3"]);
     expect(primary).toHaveLength(193); expect(new Set(primary).size).toBe(193);
