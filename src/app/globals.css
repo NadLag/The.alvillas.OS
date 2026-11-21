@@ -2936,3 +2936,8 @@ textarea:disabled {
 .preserve-lines { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .service-catalog-list { overflow-wrap: anywhere; }
+
+.inventory-location-page { overflow-wrap: anywhere; }
+.inventory-location-page :is(fieldset, .resource-form, .field, .form-grid, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
+.inventory-location-page .resource-form { grid-template-columns: minmax(0, 1fr); }
+.inventory-location-page :is(button, input, select) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }

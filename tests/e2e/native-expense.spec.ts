@@ -1,7 +1,7 @@
 import { selectPaymentAccount } from "./support/payment-account-picker";
 import { randomInt, randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, request as apiRequest, test } from "@playwright/test";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
@@ -274,7 +274,24 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await admin.waitForURL(url=>url.pathname.endsWith("/expenses/"+url.pathname.split("/").at(-1))&&!url.pathname.endsWith("/"+customId));
     await expect(admin.getByTestId("expense-correction-source")).toBeVisible();const correctedId=new URL(admin.url()).pathname.split("/").at(-1)!;
     const prepareHeaders={"content-type":prepareRequest.headers()["content-type"],"next-action":prepareRequest.headers()["next-action"],accept:"text/x-component",origin};
-    for(const response of await Promise.all(Array.from({length:4},()=>admin.request.post(prepareRequest.url(),{data:prepareRequest.postDataBuffer()!,headers:prepareHeaders}))))expect(await response.text()).toContain('"idempotent":true');
+    const replaySession = await admin.context().storageState();
+    const replayBody = prepareRequest.postDataBuffer()!;
+    const replayResults = await Promise.all(Array.from({ length: 4 }, async () => {
+      // Each caller uses a fresh transport so the four replays exercise server idempotency.
+      const client = await apiRequest.newContext({ storageState: replaySession });
+      try {
+        const response = await client.post(prepareRequest.url(), {
+          data: replayBody, headers: { ...prepareHeaders, connection: "close" }, maxRetries: 0
+        });
+        return { ok: response.ok(), body: await response.text() };
+      } finally {
+        await client.dispose();
+      }
+    }));
+    for (const response of replayResults) {
+      expect(response.ok).toBe(true);
+      expect(response.body).toContain('"idempotent":true');
+    }
     for(const restricted of[fieldPage,ownerPage])expect(await(await restricted.request.post(prepareRequest.url(),{data:prepareRequest.postDataBuffer()!,headers:prepareHeaders})).text()).toContain('"code":"forbidden"');
     await admin.getByTestId("expense-edit").click();await expect(admin.getByTestId("expense-currency")).toBeDisabled();await expect(admin.getByTestId("expense-funding-account")).toBeDisabled();
     await expect(admin.getByTestId("expense-occurred-on")).toHaveAttribute("readonly","");await expect(admin.getByTestId("expense-category")).toHaveAttribute("readonly","");

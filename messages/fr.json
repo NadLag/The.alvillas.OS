@@ -7241,5 +7241,69 @@
       "stock_held": "Du stock reste dans au moins un emplacement. Rapprochez les mouvements réels avant de retirer l’article.",
       "uncertain": "Le résultat est incertain. Retrouvez la demande d’origine avant toute nouvelle modification."
     }
+  },
+  "InventoryLocations": {
+    "back": "Retour à l’espace de travail",
+    "searchAction": "Rechercher",
+    "retired": "Afficher les articles retirés",
+    "refresh": "Actualiser",
+    "retry": "Réessayer",
+    "firstPage": "Première page",
+    "nextPage": "Page suivante",
+    "review": "Vérifier la modification",
+    "publish": "Enregistrer la modification",
+    "saving": "Enregistrement…",
+    "changeReview": "Modifier cette demande",
+    "close": "Fermer",
+    "saved": "La modification d’origine a été enregistrée.",
+    "unconfirmed": "Le résultat est incertain. Actualisez pour retrouver la demande d’origine avant toute autre modification.",
+    "notRecorded": "La demande d’origine n’a pas été enregistrée. Elle est clôturée ; vous pouvez vérifier une nouvelle modification.",
+    "eyebrow": "Inventaire",
+    "title": "Emplacements d’inventaire",
+    "subtitle": "Conservez le stock des propriétés, magasins, blanchisseries et transports dans leurs emplacements physiques d’origine.",
+    "kind": "Type d’emplacement",
+    "allKinds": "Tous les types",
+    "kinds": {
+      "PROPERTY": "Propriété",
+      "STORE": "Magasin",
+      "LAUNDRY": "Blanchisserie",
+      "IN_TRANSIT": "En transit"
+    },
+    "fields": {
+      "label": "Nom de l’emplacement",
+      "property": "Propriété d’origine",
+      "reason": "Motif"
+    },
+    "operations": {
+      "CREATE": "Ajouter un emplacement",
+      "RENAME": "Renommer l’emplacement",
+      "ARCHIVE": "Retirer l’emplacement",
+      "RESTORE": "Restaurer l’emplacement"
+    },
+    "search": "Rechercher des emplacements",
+    "empty": "Aucun emplacement ne correspond à ces filtres.",
+    "identityHelp": "Le type et la propriété d’origine restent fixes. Renommer un emplacement ne déplace pas son stock et ne modifie pas son historique.",
+    "retireHelp": "Retirez cet emplacement lorsqu’aucun article n’y reste en stock. Les mouvements et l’historique d’origine sont conservés.",
+    "restoreHelp": "Restaurez cet emplacement physique et son historique de stock d’origine.",
+    "reviewTitle": "Vérifier la modification de l’emplacement",
+    "reviewHelp": "Confirmez l’emplacement physique, la propriété d’origine et le motif avant l’enregistrement.",
+    "privateHidden": "Les informations privées sont masquées lorsque cette page est inactive.",
+    "chooseProperty": "Choisir une propriété autorisée",
+    "propertySearch": "Rechercher les propriétés autorisées",
+    "propertyRequired": "Choisissez la propriété réelle",
+    "noProperties": "Aucune propriété active n’est disponible avec vos accès indépendants actuels.",
+    "openProperty": "Ouvrir la propriété",
+    "propertyArchived": "La propriété d’origine est archivée. Restaurez-la avant de modifier cet emplacement.",
+    "states": {
+      "ready": "Prêt",
+      "loading": "Chargement des emplacements…",
+      "offline": "Reconnectez-vous pour consulter ou modifier les emplacements privés.",
+      "forbidden": "Vos accès actuels à l’emplacement ou à la propriété ne permettent pas cette action.",
+      "unavailable": "Les emplacements sont indisponibles. Réessayez.",
+      "validation": "Vérifiez le nom, le type, la propriété d’origine et le motif.",
+      "conflict": "L’emplacement ou les accès à sa propriété ont changé. Actualisez et vérifiez à nouveau l’emplacement d’origine.",
+      "stock_held": "Du stock reste ici pour au moins un article. Rapprochez les mouvements réels avant de retirer l’emplacement.",
+      "uncertain": "Le résultat est incertain. Retrouvez la demande d’origine avant toute nouvelle modification."
+    }
   }
 }
