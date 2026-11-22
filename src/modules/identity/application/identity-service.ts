@@ -579,11 +579,7 @@ export async function ensureStandardIdentitySetup(
       });
     }
 
-    const repository = new IdentityRepository(tx, organizationId);
-
-    for (const fieldPolicy of fieldPolicyCatalog) {
-      await repository.ensureFieldPolicy(fieldPolicy);
-    }
+    await new IdentityRepository(tx, organizationId).ensureFieldPolicies(fieldPolicyCatalog);
   }, { timeout: 30000 });
 }
 
