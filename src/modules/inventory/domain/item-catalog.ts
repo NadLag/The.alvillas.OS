@@ -3,6 +3,8 @@ import {localizedTextSchema} from "@/i18n/content";
 import {configSlugSchema} from "@/platform/config/identifiers";
 import {inventoryCategorySchema} from "@/platform/config/inventory-policy";
 import {stockQuantitySchema} from "./stocktake";
+import {InventoryCatalogDefinitionError as InventoryItemDefinitionError,InventoryCatalogStockHeldError as InventoryItemStockHeldError} from "./catalog-errors";
+export {InventoryCatalogAccessError as InventoryItemAccessError,InventoryCatalogConflictError as InventoryItemConflictError,InventoryCatalogDefinitionError as InventoryItemDefinitionError,InventoryCatalogStockHeldError as InventoryItemStockHeldError} from "./catalog-errors";
 
 /** EQUIPMENT is the existing canonical category for long-life physical assets.
  * Item identity and units remain independent of property minimum/usage rules. */
@@ -16,10 +18,6 @@ export const inventoryItemSelectionSchema=z.object({
  archived:z.boolean().default(false),after:configSlugSchema.optional()
 }).strict();
 export type InventoryItemDefinition=z.infer<typeof inventoryItemDraftSchema>;
-export class InventoryItemAccessError extends Error{}
-export class InventoryItemConflictError extends Error{}
-export class InventoryItemDefinitionError extends Error{}
-export class InventoryItemStockHeldError extends Error{}
 
 /** The original SKU, category and unit define an immutable quantity stream.
  * Renaming a label never converts or reclassifies its original movements. */
