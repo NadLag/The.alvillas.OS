@@ -498,13 +498,6 @@ export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
     mask: "placeholder"
   },
   {
-    resource: "wallet",
-    field: "movements",
-    dataClass: "financial",
-    requiredPermission: permissionKey("wallet", "view"),
-    mask: "placeholder"
-  },
-  {
     resource: "property",
     field: "ownerProfitability",
     dataClass: "financial",
