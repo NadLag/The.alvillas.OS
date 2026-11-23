@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll,beforeAll,describe,expect,it,vi } from "vitest";
 import { withTenant } from "@/platform/db/tenant";
 import { authContextForAccount,authContextsForAccountsInTransaction } from "@/platform/authz/account-context";
+import { fieldPolicyCatalog } from "@/platform/authz/catalog";
 import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
-import { listIdentityDashboard } from "@/modules/identity/application/identity-service";
+import { ensureStandardIdentitySetup, listIdentityDashboard } from "@/modules/identity/application/identity-service";
 import { employeeCompensationFixtures } from "./support/employee-compensation";
 import { provisionIntegrationRole } from "./support/database-role";
 
@@ -18,6 +20,30 @@ function normalized(ctx:Awaited<ReturnType<typeof authContextForAccount>>){retur
 describe.skipIf(!url)("fresh batched Identity permission simulations",()=>{
  beforeAll(async()=>{execFileSync(process.execPath,["node_modules/prisma/build/index.js","migrate","deploy"],{env:{...process.env,DATABASE_URL:url},stdio:"pipe"});admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url!);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";const tracked=new PrismaClient({datasourceUrl:scoped.toString(),log:[{level:"query",emit:"event"}]});tracked.$on("query",()=>queries++);db=tracked;});
  afterAll(async()=>{vi.restoreAllMocks();await db?.$disconnect();await admin?.$disconnect();});
+ it("refreshes legacy field policies in a bounded number of queries and leaves unrelated policies intact",async()=>{
+  const organizationId=randomUUID(), foreignId=randomUUID();
+  await admin.organization.createMany({data:[{id:organizationId,name:"Legacy identity catalog"},{id:foreignId,name:"Other identity catalog"}]});
+  const policy=fieldPolicyCatalog.find(entry=>entry.resource==="wallet" && entry.field==="movements")!;
+  const legacy={...policy,dataClass:"operational",requiredPermission:"legacy_wallet:view"};
+  const [original,custom]=await withTenant(db,organizationId,async tx=>[
+   await tx.fieldPolicy.create({data:{organizationId,...legacy}}),
+   await tx.fieldPolicy.create({data:{organizationId,...legacy,field:"customField"}})
+  ]);
+  const foreign=await withTenant(db,foreignId,tx=>tx.fieldPolicy.create({data:{organizationId:foreignId,...legacy}}));
+
+  queries=0;
+  await ensureStandardIdentitySetup(organizationId,{db});
+  expect(queries).toBeLessThanOrEqual(25);
+  const policies=await withTenant(db,organizationId,tx=>tx.fieldPolicy.findMany({where:{organizationId}}));
+  expect(policies).toHaveLength(fieldPolicyCatalog.length+1);
+  expect(policies.find(row=>row.id===original.id)).toMatchObject(policy);
+  expect(policies.find(row=>row.id===custom.id)).toEqual(custom);
+  expect(await withTenant(db,foreignId,tx=>tx.fieldPolicy.findUnique({where:{id:foreign.id}}))).toEqual(foreign);
+
+  queries=0;
+  await ensureStandardIdentitySetup(organizationId,{db});
+  expect(queries).toBeLessThanOrEqual(9);
+ });
  it("retains individual scoped grants and loads twelve accounts with the same query count as one",async()=>{const f=await fixture(),ids=f.rows.map(row=>row.account.id);queries=0;await withTenant(db,f.org,tx=>authContextsForAccountsInTransaction(tx,f.org,[ids[0]]));const single=queries;queries=0;const batch=await withTenant(db,f.org,tx=>authContextsForAccountsInTransaction(tx,f.org,ids));expect(queries).toBe(single);expect(queries).toBeLessThanOrEqual(16);for(const row of f.rows)expect(normalized(batch.get(row.account.id)!)).toEqual(normalized(await authContextForAccount(f.org,row.account.id,{db})));});
  it("denies suspended accounts, incomplete MFA, expired grants and foreign tenants independently",async()=>{const f=await fixture(),foreign=await fixtures.fixture();await withTenant(db,f.org,async tx=>{await tx.userAccount.update({where:{id:f.rows[0].account.id},data:{status:"SUSPENDED"}});await tx.userAccount.update({where:{id:f.rows[1].account.id},data:{mfaRequired:true}});await tx.roleAssignment.update({where:{id:f.rows[2].grant.id},data:{validTo:new Date("2020-01-02")}});});const ids=[...f.rows.map(row=>row.account.id),foreign.account.id],batch=await withTenant(db,f.org,tx=>authContextsForAccountsInTransaction(tx,f.org,ids));for(const id of [ids[0],ids[1],ids[2],foreign.account.id])expect(batch.get(id)!.permissions.size).toBe(0);expect(batch.get(ids[3])!.permissions.has("task:view")).toBe(true);});
  it("rereads revoked grants on the next batch without caching authority",async()=>{const f=await fixture(),row=f.rows[0],first=await withTenant(db,f.org,tx=>authContextsForAccountsInTransaction(tx,f.org,[row.account.id]));expect(first.get(row.account.id)!.permissions.has("task:view")).toBe(true);await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:row.grant.id},data:{validTo:new Date("2020-01-02")}}));const next=await withTenant(db,f.org,tx=>authContextsForAccountsInTransaction(tx,f.org,[row.account.id]));expect(next.get(row.account.id)!.permissions.size).toBe(0);});
