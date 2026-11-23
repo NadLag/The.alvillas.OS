@@ -6,7 +6,7 @@ import type {APIResponse,Page} from "@playwright/test";
 export async function nativeServiceReplies(page:Page,family:"catalog"|"orders"){
  return nativePrivateReplies(page,family==="catalog"?"/api/services/catalog/":"/api/services/orders/");
 }
-export async function nativePrivateReplies(page:Page,path:"/api/services/catalog/"|"/api/services/orders/"|"/api/inventory/items/"|"/api/inventory/locations/"){
+export async function nativePrivateReplies(page:Page,path:"/api/services/catalog/"|"/api/services/orders/"|"/api/inventory/items/"|"/api/inventory/locations/"|"/api/inventory/movements/"){
  const pending=new Map<string,{resolve:(response:APIResponse)=>void;reject:(error:unknown)=>void}>();
  await page.route("**"+path+"*",async route=>{
   const request=route.request(),url=new URL(request.url()),operation=url.pathname.slice(path.length),consumer=pending.get(operation);

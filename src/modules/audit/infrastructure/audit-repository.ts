@@ -12,8 +12,9 @@ import { Money } from "@/platform/money/money";
 import { externalPaymentFinancialSources, type ExternalPaymentFinancialSources } from "@/platform/authz/external-payment-resource";
 import { expenseResource } from "@/platform/authz/expense-resource";
 import {nativeInventoryLocationResources} from "@/platform/inventory/location-resource";
+import {nativeInventoryMovementResources} from "@/platform/inventory/movement-resource";
 
-export type FinancialAuditResource = NativeFinancialResource & { attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
+export type FinancialAuditResource = NativeFinancialResource & { inventorySources?:readonly Resource[]; attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -75,6 +76,7 @@ function whereFor(organizationId: string, filters: AuditHistoryFilters): Prisma.
 }
 
 export class AuditRepository {
+  inventoryMovementResources(ids:string[]){return nativeInventoryMovementResources(this.tx,this.organizationId,ids);}
   inventoryLocationResources(ids:string[]){return nativeInventoryLocationResources(this.tx,this.organizationId,ids);}
   constructor(
     private readonly tx: TenantTransaction,

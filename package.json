@@ -16,7 +16,7 @@
     "dev": "next dev",
     "build": "prisma generate && node scripts/build-next.mjs",
     "start": "next start",
-    "lint": "eslint . --max-warnings=0",
+    "lint": "node scripts/lint.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",

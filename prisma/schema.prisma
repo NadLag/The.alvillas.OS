@@ -1586,6 +1586,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  inventoryMovements InventoryMovement[] @relation("InventoryMovementReservation")
   serviceOrders ServiceOrder[]
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkReservation")
   documents Document[] @relation("DocumentReservation")
@@ -3248,16 +3249,33 @@ model InventoryMovement {
   kind           String
   revision       BigInt
   quantityDelta  Decimal             @map("quantity_delta") @db.Decimal(65, 0)
+  reservedQuantityDelta Decimal      @default(0) @map("reserved_quantity_delta") @db.Decimal(65, 0)
+  damagedQuantityDelta Decimal       @default(0) @map("damaged_quantity_delta") @db.Decimal(65, 0)
+  movementGroupId String?            @map("movement_group_id") @db.Uuid
+  leg             Int?              @db.SmallInt
+  reservationId   String?            @map("reservation_id") @db.Uuid
+  reversesMovementId String?         @map("reverses_movement_id") @db.Uuid
+  sourceSnapshot  Json?             @map("source_snapshot")
   createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   location       InventoryLocation   @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   item           InventoryItem       @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   stocktake      InventoryStocktake? @relation(fields: [organizationId, stocktakeId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   actor          UserAccount         @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reservation    Reservation?        @relation("InventoryMovementReservation", fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reversesMovement InventoryMovement? @relation("InventoryMovementReversal", fields: [organizationId, reversesMovementId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reversedBy     InventoryMovement[]  @relation("InventoryMovementReversal")
 
+  @@unique([organizationId, id], map: "inventory_movement_org_id_key")
+  @@unique([organizationId, movementGroupId, leg], map: "inventory_movement_group_leg_key")
+  @@unique([organizationId, movementGroupId, locationId, itemId], map: "inventory_movement_group_stream_key")
+  @@unique([organizationId, reversesMovementId], map: "inventory_movement_original_reversal_key")
   @@unique([organizationId, stocktakeId])
   @@unique([organizationId, locationId, itemId, revision], map: "inventory_movement_stream_revision_key")
   @@index([organizationId, locationId, itemId, createdAt, id])
+  @@index([organizationId, movementGroupId, createdAt, id], map: "inventory_movement_group_history_idx")
+  @@index([organizationId, createdAt, movementGroupId], map: "inventory_movement_recorded_history_idx")
+  @@index([organizationId, reservationId, locationId, itemId], map: "inventory_movement_reservation_stock_idx")
   @@map("inventory_movement")
 }
 
