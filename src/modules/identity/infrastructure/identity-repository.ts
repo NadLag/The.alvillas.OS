@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import type { FieldPolicyCatalogEntry } from "@/platform/authz/catalog";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { AppLocale } from "@/i18n/routing";
 
@@ -667,35 +668,26 @@ export class IdentityRepository {
       : null;
   }
 
-  async ensureFieldPolicy(input: {
-    resource: string;
-    field: string;
-    dataClass: string;
-    requiredPermission: string;
-    mask: string;
-  }): Promise<void> {
-    await this.tx.fieldPolicy.upsert({
-      where: {
-        organizationId_resource_field: {
-          organizationId: this.organizationId,
-          resource: input.resource,
-          field: input.field
-        }
-      },
-      update: {
-        dataClass: input.dataClass,
-        requiredPermission: input.requiredPermission,
-        mask: input.mask
-      },
-      create: {
-        organizationId: this.organizationId,
-        resource: input.resource,
-        field: input.field,
-        dataClass: input.dataClass,
-        requiredPermission: input.requiredPermission,
-        mask: input.mask
-      }
-    });
+  async ensureFieldPolicies(policies: readonly FieldPolicyCatalogEntry[]): Promise<void> {
+    if (policies.length === 0) return;
+
+    const values = policies.map(policy => Prisma.sql`(
+      ${this.organizationId}::uuid, ${policy.resource}, ${policy.field},
+      ${policy.dataClass}, ${policy.requiredPermission}, ${policy.mask}
+    )`);
+
+    await this.tx.$executeRaw(Prisma.sql`
+      INSERT INTO public.field_policy AS existing
+        (organization_id, resource, field, data_class, required_permission, mask)
+      VALUES ${Prisma.join(values)}
+      ON CONFLICT (organization_id, resource, field) DO UPDATE
+      SET data_class = EXCLUDED.data_class,
+          required_permission = EXCLUDED.required_permission,
+          mask = EXCLUDED.mask,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE (existing.data_class, existing.required_permission, existing.mask)
+        IS DISTINCT FROM (EXCLUDED.data_class, EXCLUDED.required_permission, EXCLUDED.mask)
+    `);
   }
 
   findRoleByKey(key: string): Promise<{ id: string; key: string } | null> {
