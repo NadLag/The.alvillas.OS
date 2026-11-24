@@ -8,6 +8,7 @@ import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {inventoryReorderConfigChecks} from "./reorder-config-authority";
 import {z} from "zod";
+import {nativeInventoryCountEventSource} from "./stocktake-event-source";
 type InventoryAuditResource=Resource&{sourceRecordId:string;inventorySources:Resource[]};
 async function originalSignal(tx:TenantTransaction,organizationId:string,raw:unknown){
  const parsed=inventoryReorderSignalSchema.safeParse(raw);if(!parsed.success)return null;const signal=parsed.data,repository=new InventoryReorderRepository(tx,organizationId),inventory=new InventoryRepository(tx,organizationId);
@@ -31,7 +32,12 @@ export async function nativeInventoryAutomationAuditResources(tx:TenantTransacti
  for(const row of await repository.automationAuditSources(ids)){
   const parsed=z.object({inventorySource:z.object({eventId:z.uuid(),configRuleId:z.uuid()}).strict()}).passthrough().safeParse(row.after);if(!parsed.success)continue;
   const [event,rule]=await Promise.all([new OutboxRepository(tx,organizationId).event(parsed.data.inventorySource.eventId),new ConfigRuleRepository(tx,organizationId).findById(parsed.data.inventorySource.configRuleId)]);
-  if(!event||event.type!=="InventoryBelowMinimum"||!rule||!rule.key.startsWith("automation.rule."))continue;
+  if(!event||!rule||!rule.key.startsWith("automation.rule."))continue;
+  if(event.type==="StocktakeVariance"){
+   const original=await nativeInventoryCountEventSource(tx,organizationId,event);if(!original||row.propertyScopeId!==original.propertyId)continue;const source=original.resources.find(resource=>resource.type==="property"),property=original.propertyId?{id:original.propertyId,cityId:source&&"city"in source?source.city??null:null,regionId:source&&"region"in source?source.region??null:null}:null,checks=inventoryReorderConfigChecks(organizationId,property,{},rule.value);
+   result.set(row.id,{type:"automation",id:row.id,organizationId,dataClass:"operational",inventorySources:[...original.resources,{type:"config_rule",organizationId,id:rule.id,propertyId:original.propertyId,dataClass:"operational"},...checks.map(check=>check.resource)],sourceRecordId:jsonbFingerprint({row,original,event:{id:event.id,type:event.type,organizationId:event.organizationId,payload:event.payload,idempotencyKey:event.idempotencyKey,occurredAt:event.occurredAt},rule})});continue;
+  }
+  if(event.type!=="InventoryBelowMinimum")continue;
   const original=await originalSignal(tx,organizationId,(event.payload as Record<string,unknown>).inventorySource);if(!original||row.propertyScopeId!==original.signal.location.propertyId)continue;
   const checks=inventoryReorderConfigChecks(organizationId,original.property,{},rule.value);
   result.set(row.id,{type:"automation",id:row.id,organizationId,dataClass:"operational",inventorySources:[...original.inventorySources,{...original.source,type:"config_rule",id:rule.id},...checks.map(check=>check.resource)],sourceRecordId:jsonbFingerprint({row,original,event:{id:event.id,type:event.type,organizationId:event.organizationId,payload:event.payload,idempotencyKey:event.idempotencyKey,occurredAt:event.occurredAt},rule})});

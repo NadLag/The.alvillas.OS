@@ -224,3 +224,4 @@ prisma/migrations/20261117041500_inventory_reorder_immutable_effects/migration.s
 prisma/migrations/20261117043000_inventory_reorder_configuration_sources/migration.sql text eol=lf
 
 prisma/migrations/20261117044500_inventory_reorder_configuration_json_operators/migration.sql text eol=lf
+prisma/migrations/20261117180000_native_inventory_workspace_stocktakes/migration.sql text eol=lf
