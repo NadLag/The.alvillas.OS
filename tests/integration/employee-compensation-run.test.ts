@@ -270,13 +270,13 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
   });
 
   it("employee settlement records a partial actual payment once and preserves the original earned costs",async()=>{
-    const f=await settlementFixture(),before=await facts(f.org),original=await withTenant(db,f.org,tx=>tx.employeeCompensationRecognitionLine.findMany({where:{recognitionId:f.recognition.recognitionId},include:{transaction:{include:{postings:true}}}}));
+    const f=await settlementFixture(),before=await facts(f.org),original=await withTenant(db,f.org,tx=>tx.employeeCompensationRecognitionLine.findMany({where:{recognitionId:f.recognition.recognitionId},orderBy:{id:"asc"},include:{transaction:{include:{postings:{orderBy:{id:"asc"}}}}}}));
     expect(await recoverEmployeeCompensationSettlement(f.actor,{id:f.source.id,claimId:f.command.claimId,key:f.payment.idempotencyKey},{db})).toEqual({payment:null});
     const paid=await postEmployeeCompensationSettlement(f.actor,f.payment,{db});expect(paid.idempotent).toBe(false);expect(await postEmployeeCompensationSettlement(f.actor,f.payment,{db})).toEqual({...paid,idempotent:true});
     expect(await recoverEmployeeCompensationSettlement(f.actor,{id:f.source.id,claimId:f.command.claimId,key:f.payment.idempotencyKey},{db})).toEqual({payment:{...paid,idempotent:true}});
     const journal=await withTenant(db,f.org,tx=>tx.financialTransaction.findUniqueOrThrow({where:{id:paid.paymentId},include:{postings:{include:{ledgerAccount:true}}}}));expect(journal.postings.map(row=>[row.side,row.amount.toFixed(2),row.ledgerAccount.code]).sort()).toEqual([["CREDIT","200.00","EMPLOYEE_TEST_BANK"],["DEBIT","200.00","EMPLOYEE_PAYABLE"]]);
     expect((await withTenant(db,f.org,tx=>new EmployeePayableRepository(tx,f.org).outstanding({claimId:f.command.claimId,personId:f.performer.id,currency:"MAD"}))).toJSON().amount).toBe("300.25");
-    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationRecognitionLine.findMany({where:{recognitionId:f.recognition.recognitionId},include:{transaction:{include:{postings:true}}}}))).toEqual(original);expect(await facts(f.org)).toMatchObject({journals:before.journals+1,postings:before.postings+2});
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationRecognitionLine.findMany({where:{recognitionId:f.recognition.recognitionId},orderBy:{id:"asc"},include:{transaction:{include:{postings:{orderBy:{id:"asc"}}}}}}))).toEqual(original);expect(await facts(f.org)).toMatchObject({journals:before.journals+1,postings:before.postings+2});
     await expect(postEmployeeCompensationSettlement(f.actor,{...f.payment,reason:"Changed original partial staff payment reason"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
   });
 
