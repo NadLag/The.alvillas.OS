@@ -37,18 +37,27 @@ describe("original staging history verification", () => {
       { source: "_prisma_migrations", id: "migration", digest: "same" },
       { source: "audit_log", id: "audit", digest: "same" },
       { source: "financial_transaction", id: "journal", digest: "same" },
-      { source: "posting", id: "posting", digest: "same" }
+      { source: "posting", id: "posting", digest: "same" },
+      { source: "inventory_movement", id: "movement", digest: "same" },
+      { source: "automation_suggestion", id: "suggestion", digest: "same" }
     ];
     const current: StagingHistoryRow[] = [
       ...original.slice(0, 2),
       { source: "financial_transaction", id: "journal", digest: "changed" },
-      { source: "posting", id: "new-posting", digest: "new" }
+      { source: "posting", id: "new-posting", digest: "new" },
+      { source: "inventory_movement", id: "movement", digest: "same" },
+      { source: "automation_suggestion", id: "suggestion", digest: "changed" }
     ];
     expect(compareStagingHistory(original, current)).toEqual([
       { table: "_prisma_migrations", original: 1, changed: 0 },
       { table: "audit_log", original: 1, changed: 0 },
       { table: "financial_transaction", original: 1, changed: 1 },
-      { table: "posting", original: 1, changed: 1 }
+      { table: "posting", original: 1, changed: 1 },
+      { table: "inventory_item", original: 0, changed: 0 },
+      { table: "inventory_location", original: 0, changed: 0 },
+      { table: "inventory_movement", original: 1, changed: 0 },
+      { table: "inventory_stocktake", original: 0, changed: 0 },
+      { table: "automation_suggestion", original: 1, changed: 1 }
     ]);
   });
 });

@@ -7472,5 +7472,27 @@
       "stock_held": "Les réservations de stock d’origine doivent être conservées.",
       "uncertain": "Le résultat reste incertain. Actualisez le stock actuel."
     }
+  },
+  "InventoryReorder": {
+    "eyebrow": "Inventaire",
+    "title": "Minimums et réapprovisionnement",
+    "subtitle": "Consultez les minimums effectifs et les suggestions pour chaque article et chaque lieu.",
+    "back": "Retour à l’espace de travail",
+    "help": "Les quantités conservent l’unité de comptage de chaque article. Examinez les suggestions, puis enregistrez les quantités réellement reçues dans les mouvements de stock.",
+    "minimumRules": "Règles des minimums",
+    "automationRules": "Règles et historique des automatisations",
+    "current": "Quantité actuelle selon la règle",
+    "minimum": "Minimum",
+    "target": "Stock cible",
+    "suggestedQuantity": "Quantité à envisager",
+    "basis": {
+      "PHYSICAL": "Comparer le stock physique",
+      "AVAILABLE": "Comparer le stock après réservations et dommages"
+    },
+    "belowMinimum": "Sous le minimum effectif",
+    "sufficient": "Minimum atteint",
+    "noMinimum": "Aucun minimum effectif ne s’applique à cet article et à ce lieu.",
+    "latestRecorded": "Dernière suggestion enregistrée disponible",
+    "awaitingAutomation": "Aucune suggestion enregistrée n’est disponible pour cette révision du stock. Consultez l’automatisation configurée et son historique."
   }
 }

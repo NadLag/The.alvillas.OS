@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {inventoryMinimumsSchema,inventoryMaximumItems,inventoryCategorySchema,inventoryMinimumsKey} from "@/platform/config/inventory-policy";
+import {inventoryMinimumsSchema,inventoryMaximumItems,inventoryCategorySchema,inventoryMinimumsKey,refineInventoryMinimumTarget} from "@/platform/config/inventory-policy";
 import {localizedTextSchema} from "@/i18n/content";
 
 export {inventoryMaximumItems as onboardingInventoryMaximumItems,inventoryMinimumsKey as onboardingInventoryRuleKey} from "@/platform/config/inventory-policy";
@@ -7,7 +7,7 @@ export const onboardingInventoryCanonicalValueSchema=inventoryMinimumsSchema;
 export const onboardingInventoryTemplateValuesSchema=z.object({rules:z.object({[inventoryMinimumsKey]:inventoryMinimumsSchema}).strict()}).strict();
 const inventoryEntry=inventoryMinimumsSchema.shape.minimums.element;
 /** Every custom item supplies its actual labels, category, unit and optional per-stay choice. */
-export const onboardingInventoryItemInputSchema=inventoryEntry.extend({quantity:inventoryEntry.shape.quantity.max(Number.MAX_SAFE_INTEGER),name:localizedTextSchema.strict(),unit:inventoryEntry.shape.unit.unwrap(),category:inventoryCategorySchema,expected_per_stay:inventoryEntry.shape.expected_per_stay.unwrap().max(Number.MAX_SAFE_INTEGER).nullable()}).strict();
+export const onboardingInventoryItemInputSchema=z.object({...inventoryEntry.shape,quantity:inventoryEntry.shape.quantity.max(Number.MAX_SAFE_INTEGER),name:localizedTextSchema.strict(),unit:inventoryEntry.shape.unit.unwrap(),category:inventoryCategorySchema,expected_per_stay:inventoryEntry.shape.expected_per_stay.unwrap().max(Number.MAX_SAFE_INTEGER).nullable()}).strict().superRefine(refineInventoryMinimumTarget);
 export const onboardingInventorySettingsSchema=z.object({minimums:z.array(onboardingInventoryItemInputSchema).max(inventoryMaximumItems).refine(rows=>new Set(rows.map(row=>row.item)).size===rows.length)}).strict();
 /** Preserve the canonical optional semantics: null never invents a per-stay quantity. */
 export function canonicalOnboardingInventorySettings(raw:unknown){const value=onboardingInventorySettingsSchema.parse(raw);return inventoryMinimumsSchema.parse({minimums:value.minimums.map(({expected_per_stay,...item})=>({...item,...expected_per_stay===null?{}:{expected_per_stay}}))});}

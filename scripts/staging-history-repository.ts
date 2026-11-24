@@ -1,6 +1,9 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-const historyTables = ["_prisma_migrations", "audit_log", "financial_transaction", "posting"] as const;
+const historyTables = [
+  "_prisma_migrations", "audit_log", "financial_transaction", "posting",
+  "inventory_item", "inventory_location", "inventory_movement", "inventory_stocktake", "automation_suggestion"
+] as const;
 type HistoryTable = (typeof historyTables)[number];
 type HistoryColumn = { source: HistoryTable; name: string };
 export type StagingHistoryRow = { source: HistoryTable; id: string; digest: string };
@@ -25,6 +28,11 @@ export async function captureStagingHistory(client: PrismaClient, originalColumn
         UNION ALL SELECT 'audit_log', id::text, to_jsonb(t) FROM public.audit_log t
         UNION ALL SELECT 'financial_transaction', id::text, to_jsonb(t) FROM public.financial_transaction t
         UNION ALL SELECT 'posting', id::text, to_jsonb(t) FROM public.posting t
+        UNION ALL SELECT 'inventory_item', id::text, to_jsonb(t) FROM public.inventory_item t
+        UNION ALL SELECT 'inventory_location', id::text, to_jsonb(t) FROM public.inventory_location t
+        UNION ALL SELECT 'inventory_movement', id::text, to_jsonb(t) FROM public.inventory_movement t
+        UNION ALL SELECT 'inventory_stocktake', id::text, to_jsonb(t) FROM public.inventory_stocktake t
+        UNION ALL SELECT 'automation_suggestion', id::text, to_jsonb(t) FROM public.automation_suggestion t
       )
       SELECT r.source, r.id, encode(sha256(convert_to((
         SELECT jsonb_object_agg(f.name, r.record -> f.name) FROM fields f WHERE f.source=r.source

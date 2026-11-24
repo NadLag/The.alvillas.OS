@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { parseConfigRuleValue } from "@/platform/config/rule-registry";
+import {appendInventoryReorderConfigurationReferences} from "./inventory-reorder-reference";
 
 export type ConfigScopeType =
   | "organization"
@@ -490,10 +491,9 @@ export class ConfigRuleRepository {
       }
     });
 
-    return {
-      ...created,
-      lifecycle: normalizeLifecycle(created.lifecycle)
-    };
+    const result={...created,lifecycle:normalizeLifecycle(created.lifecycle)};
+    await appendInventoryReorderConfigurationReferences(this.tx,this.organizationId,result);
+    return result;
   }
 
   async activateVersion(input: {

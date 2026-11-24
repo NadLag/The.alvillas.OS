@@ -1,4 +1,6 @@
 import {tickLeadWorkReminders} from "@/modules/crm/application/lead-work-reminders";
+import {inventoryReorderConfigurationRequested} from "@/platform/config/inventory-reorder-reference";
+import {consumeInventoryReorderConfiguration} from "@/platform/inventory/reorder-configuration";
 import {executeOnboardingActivationJob,recoverOnboardingActivationJobs} from "@/modules/onboarding/application/onboarding-activation-jobs";
 import {onboardingActivationRequested} from "@/modules/onboarding/domain/onboarding-activation-payload";
 import {onboardingActivationContinuationRequested} from "@/modules/onboarding/domain/onboarding-activation-job";
@@ -178,4 +180,7 @@ export const recoverSignatureIdentities=inngest.createFunction({id:"native-signa
 export const archiveSignedDocuments=inngest.createFunction({id:"native-signed-document-archive",name:"ALVILLAS OS original signed document archive",triggers:[{event:signedArchiveRequested}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("retain-original-signed-pdf-and-certificate",()=>executeSignedArchiveReference(event.data)));
 export const advanceNativeOnboarding=inngest.createFunction({id:"native-onboarding-activation",name:"ALVILLAS OS native onboarding activation",triggers:[{event:onboardingActivationRequested},{event:onboardingActivationContinuationRequested}],concurrency:{limit:1},retries:3},async({event,step})=>step.run("advance-original-native-activation",()=>executeOnboardingActivationJob(event.data,{db:prisma})));
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,admitGuestAgreementSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding];
+export const reconcileInventoryMinimums=inngest.createFunction({id:"native-inventory-minimum-reconciliation",name:"ALVILLAS OS original inventory minimum reconciliation",triggers:[{event:inventoryReorderConfigurationRequested}],concurrency:{limit:1},retries:3},async({event,step})=>{
+ const source=outboxDispatchInput.safeParse(event.data);if(!source.success)throw new NonRetriableError("inventory_reorder_reference_invalid");return step.run("reconcile-original-configured-inventory",()=>consumeInventoryReorderConfiguration(source.data.organizationId,source.data.outboxEventId));
+});
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,admitGuestAgreementSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding,reconcileInventoryMinimums];
