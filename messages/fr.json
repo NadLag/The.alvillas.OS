@@ -7655,5 +7655,59 @@
       "stock_held": "Les réservations de stock d’origine doivent être conservées.",
       "uncertain": "Le résultat reste incertain. Actualisez le stock actuel."
     }
+  },
+  "InventoryProcurement": {
+    "eyebrow": "Stock",
+    "title": "Liste d’approvisionnement",
+    "subtitle": "Vérifiez les manques actuels d’un emplacement avant d’acheter.",
+    "back": "Retour à l’espace de travail",
+    "chooseLocation": "Choisir un emplacement",
+    "refresh": "Actualiser",
+    "search": "Rechercher un article",
+    "apply": "Appliquer",
+    "location": "Emplacement",
+    "item": "Article",
+    "key": "Référence de l’article",
+    "unit": "Unité",
+    "current": "Quantité actuelle selon la base",
+    "minimum": "Minimum",
+    "target": "Cible",
+    "quantity": "Quantité à acheter",
+    "condition": "Vérification",
+    "unspecifiedUnit": "Unité non précisée",
+    "reviewRequired": "Vérification requise",
+    "help": "Cette liste utilise le minimum, la cible et la base de stock physique ou disponible effectifs de chaque article d’origine. Les articles à vérifier au catalogue restent distincts. Des unités différentes ne sont jamais additionnées.",
+    "receivingHelp": "Une prévision d’achat ne crée ni stock ni dépense. Enregistrez la dépense approuvée ou la facture fournisseur d’origine, puis réceptionnez les biens avec leur justificatif original.",
+    "noPolicy": "Aucune règle de minimum de stock n’est actuellement configurée pour cet emplacement.",
+    "empty": "Aucun manque actuel ni article à vérifier ne correspond à la recherche.",
+    "download": "Télécharger la liste actuelle",
+    "filename": "approvisionnement.csv",
+    "receiving": "Réception des biens",
+    "catalog": "Catalogue des articles",
+    "settings": "Configuration du stock",
+    "applyHelp": "Appliquez la recherche pour charger la liste actuelle.",
+    "chooseHelp": "Choisissez le logement, dépôt, blanchisserie ou emplacement en transit concerné par l’achat.",
+    "privateHidden": "Les informations privées d’approvisionnement sont masquées. Rouvrez cette vue pour vérifier vos droits actuels.",
+    "conditions": {
+      "READY": "Prêt pour la vérification d’achat",
+      "MISSING": "Ajouter l’article d’origine au catalogue",
+      "RETIRED": "Article retiré",
+      "INCOMPATIBLE": "Vérifier la catégorie ou l’unité configurée"
+    },
+    "bases": {
+      "PHYSICAL": "Base du stock physique",
+      "AVAILABLE": "Base du stock disponible"
+    },
+    "states": {
+      "ready": "Prêt",
+      "loading": "Chargement…",
+      "offline": "Reconnectez-vous pour consulter les niveaux de stock actuels.",
+      "forbidden": "Votre accès actuel ne permet plus de consulter ces stocks.",
+      "unavailable": "Les niveaux de stock sont indisponibles. Réessayez.",
+      "validation": "Vérifiez l’article ou l’emplacement d’origine et les filtres.",
+      "conflict": "Le stock ou l’accès a changé. Actualisez les quantités actuelles.",
+      "stock_held": "Les réservations de stock d’origine doivent être conservées.",
+      "uncertain": "Le résultat reste incertain. Actualisez le stock actuel."
+    }
   }
 }
