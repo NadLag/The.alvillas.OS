@@ -1,4 +1,3 @@
-import type {Prisma} from "@prisma/client";
 import type {TenantTransaction} from "@/platform/db/tenant";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {InventoryReorderRepository} from "@/modules/inventory/infrastructure/reorder-repository";
@@ -14,5 +13,5 @@ export async function appendInventoryReorderSignal(tx:TenantTransaction,actor:{o
  const recommendation=inventoryReorderRecommendation(minimum,snapshot.position);if(!recommendation.belowMinimum)return null;
  const original=await repository.originalSource({...input.source,locationId:input.locationId,itemId:input.itemId,revision:input.revision});if(!original||original.actorId!==actor.actorId||snapshot.position.revision!==input.revision)throw Error("inventory_reorder_original_source_required");
  const signal=inventoryReorderSignalSchema.parse({schemaVersion:1,organizationId:actor.organizationId,actorId:actor.actorId,item:{id:snapshot.item.id,key:snapshot.item.key,category:snapshot.item.category,unit:snapshot.item.unit},location:{id:snapshot.location.id,kind:snapshot.location.kind,propertyId:snapshot.location.propertyId},source:input.source,position:snapshot.position,minimumRule:{id:snapshot.rule.id,version:snapshot.rule.version},basis:recommendation.basis,minimum:recommendation.minimum,target:recommendation.target,current:recommendation.current,suggestedQuantity:recommendation.suggestedQuantity,timezone:snapshot.timezone});
- const payload={...signal.location.propertyId?{propertyId:signal.location.propertyId}:{},inventory:{item:signal.item.key,quantity:signal.current},inventorySource:signal};return new OutboxRepository(tx,actor.organizationId).append("InventoryBelowMinimum",payload as Prisma.InputJsonObject,inventoryReorderSignalKey(signal),at);
+ const payload={...signal.location.propertyId?{propertyId:signal.location.propertyId}:{},inventory:{item:signal.item.key,quantity:signal.current},inventorySource:signal};return new OutboxRepository(tx,actor.organizationId).append("InventoryBelowMinimum",payload,inventoryReorderSignalKey(signal),at);
 }
