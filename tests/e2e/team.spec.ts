@@ -41,7 +41,11 @@ test.describe("Team Management", () => {
     const staffContext = await browser.newContext(info.project.use);
     try {
       const property = await withTenant(db, bootstrapOrganizationId, tx => tx.property.create({ data: { organizationId: bootstrapOrganizationId, name: `${name} villa`, addressLine1: "Test address", city: "Marrakech", propertyType: "VILLA", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } }));
-      await page.getByRole("link", { name: "Invite a login", exact: true }).click();
+      const invitation = new URL(`/en/app/identity?personId=${personId}`, page.url());
+      await Promise.all([
+        page.waitForURL(invitation.href, { waitUntil: "commit" }),
+        page.getByRole("link", { name: "Invite a login", exact: true }).click()
+      ]);
       await expect(page.getByTestId("invite-person")).toHaveValue(personId);
       for (const [testId, value] of [["invite-display-name", name], ["invite-email", staffEmail], ["invite-phone", phone]]) {
         await expect(page.getByTestId(testId)).toHaveValue(value);
