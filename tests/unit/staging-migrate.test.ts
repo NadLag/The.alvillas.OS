@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assertStagingMigrationTarget, stagingDatabaseIdentity } from "../../scripts/staging-migrate";
+import { compareStagingHistory, type StagingHistoryRow } from "../../scripts/staging-history-repository";
 
 const databaseUrl = "postgresql://migration:private@preview-db.example.test/alvillas?schema=public";
 const approved: NodeJS.ProcessEnv = {
@@ -27,5 +28,36 @@ describe("staging migration target guard", () => {
     const invalid = "private-password-is-not-a-url";
     expect(() => stagingDatabaseIdentity(invalid)).toThrow("Invalid staging database URL");
     try { stagingDatabaseIdentity(invalid); } catch (error) { expect(String(error)).not.toContain(invalid); }
+  });
+});
+
+describe("original staging history verification", () => {
+  it("allows new records and detects changed or missing original records", () => {
+    const original: StagingHistoryRow[] = [
+      { source: "_prisma_migrations", id: "migration", digest: "same" },
+      { source: "audit_log", id: "audit", digest: "same" },
+      { source: "financial_transaction", id: "journal", digest: "same" },
+      { source: "posting", id: "posting", digest: "same" },
+      { source: "inventory_movement", id: "movement", digest: "same" },
+      { source: "automation_suggestion", id: "suggestion", digest: "same" }
+    ];
+    const current: StagingHistoryRow[] = [
+      ...original.slice(0, 2),
+      { source: "financial_transaction", id: "journal", digest: "changed" },
+      { source: "posting", id: "new-posting", digest: "new" },
+      { source: "inventory_movement", id: "movement", digest: "same" },
+      { source: "automation_suggestion", id: "suggestion", digest: "changed" }
+    ];
+    expect(compareStagingHistory(original, current)).toEqual([
+      { table: "_prisma_migrations", original: 1, changed: 0 },
+      { table: "audit_log", original: 1, changed: 0 },
+      { table: "financial_transaction", original: 1, changed: 1 },
+      { table: "posting", original: 1, changed: 1 },
+      { table: "inventory_item", original: 0, changed: 0 },
+      { table: "inventory_location", original: 0, changed: 0 },
+      { table: "inventory_movement", original: 1, changed: 0 },
+      { table: "inventory_stocktake", original: 0, changed: 0 },
+      { table: "automation_suggestion", original: 1, changed: 1 }
+    ]);
   });
 });

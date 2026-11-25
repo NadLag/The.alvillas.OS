@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { setPropertyCity } from "./support/property-form";
 import { preferOperationPerformer } from "./support/operation-policy";
+import { submitReservationToOperations } from "./support/reservation-navigation";
 
 test.describe("event notification routing", () => {
   test.skip(!process.env.DATABASE_URL, "DATABASE_URL is required for routing E2E");
@@ -61,7 +62,7 @@ test.describe("event notification routing", () => {
       await page.getByTestId("reservation-guest-name").fill(`Routing guest ${suffix}`);
       await page.getByTestId("reservation-check-in").fill("2027-11-10"); await page.getByTestId("reservation-check-out").fill("2027-11-14");
       await page.getByTestId("reservation-adults").fill("2"); await page.getByTestId("reservation-children").fill("0");
-      await page.getByTestId("reservation-submit").click(); await expect(page).toHaveURL(/\/en\/app\/operations/u);
+      await submitReservationToOperations(page, "en", property.id, `Routing guest ${suffix}`);
       expect(await page.evaluate((width) => document.documentElement.scrollWidth <= width, page.viewportSize()!.width)).toBe(true);
       await page.getByTestId("notification-bell").click();
       const notice = page.getByTestId("notification-item").filter({ hasText: "A reservation was created." });
