@@ -1,0 +1,30 @@
+import {randomUUID} from "node:crypto";
+import {execFile} from "node:child_process";
+import {promisify} from "node:util";
+import {resolve} from "node:path";
+import {readFile} from "node:fs/promises";
+import {PrismaClient} from "@prisma/client";
+import {z} from "zod";
+import {test,expect} from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import {nativePrivateReplies} from "./support/native-service-replies";
+import {withTenant} from "@/platform/db/tenant";
+import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
+import {inventoryStayPageSchema} from "@/modules/inventory/domain/stay-consumption";
+import {e2eEmail,ensureE2EAccount,waitForE2EAdminLoginWindow,completeE2EAdminMfa} from "./support/auth";
+import en from "../../messages/en.json" with {type:"json"};
+import fr from "../../messages/fr.json" with {type:"json"};
+import ar from "../../messages/ar.json" with {type:"json"};
+test.describe.configure({retries:0});
+const messages={en,fr,ar},fixtureSchema=z.object({reservationId:z.uuid(),itemKey:z.string(),financialCount:z.number()}).passthrough();
+for(const locale of["en","fr","ar"]as const)test("Actual configured stay requirement and original consumption in "+locale,async({page},info)=>{
+ test.setTimeout(600000);const target=new URL(process.env.DATABASE_URL??"invalid:");if(process.env.VERCEL||process.env.VERCEL_ENV||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname==="/alvillas_automation_inventory_movements_20261117"||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated stay consumption browser database required");
+ const reply=await nativePrivateReplies(page,"/api/inventory/stays/"),db=new PrismaClient(),email=e2eEmail("native-stay-"+locale+"-"+randomUUID(),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple",m=messages[locale].InventoryStayConsumption,errors:string[]=[];page.on("pageerror",error=>errors.push(error.name));page.setDefaultTimeout(30000);if(info.project.name==="field-mobile")await page.setViewportSize({width:360,height:800});
+ try{
+  await ensureE2EAccount(email,password,{permissionKeys:["inventory_movement:view","inventory_movement:create","inventory_item:view","inventory_location:view","property:view","config_rule:view","config_rule:configure"],page});const account=await withTenant(db,bootstrapOrganizationId,tx=>tx.userAccount.findUniqueOrThrow({where:{organizationId_email:{organizationId:bootstrapOrganizationId,email}}})),output=info.outputPath("native-stay-consumption-fixture.private.json");await promisify(execFile)(process.execPath,[resolve("node_modules/tsx/dist/cli.mjs"),resolve("tests/e2e/support/inventory-movement-fixture-worker.ts"),JSON.stringify({organizationId:bootstrapOrganizationId,accountId:account.id,personId:account.personId,guestLocale:locale,stay:true,output})],{env:process.env,windowsHide:true,timeout:120000,maxBuffer:2*1024*1024});const f=fixtureSchema.parse(JSON.parse(await readFile(output,"utf8")));
+  await page.goto("/en/login");await waitForE2EAdminLoginWindow(page,email);await page.getByTestId("login-email").fill(email);await page.getByTestId("login-password").fill(password);await page.getByTestId("login-submit").click();await Promise.all([page.waitForURL(/\/en\/app/u),completeE2EAdminMfa(page,email)]);
+  let response=reply("page");await page.goto("/"+locale+"/app/inventory/stays?reservation="+f.reservationId);const actual=await response;expect(actual.status()).toBe(200);expect(actual.headers()["cache-control"]).toContain("no-store");const model=inventoryStayPageSchema.parse(await actual.json());expect(model.stay.id).toBe(f.reservationId);expect(model.items.find(row=>row.key===f.itemKey)).toMatchObject({expected:"2",actual:"3",variance:"1",movementCount:"1"});const panel=page.getByTestId("inventory-stay-manager");await expect(panel.getByTestId("inventory-stay-row")).toHaveCount(1);await expect(panel).toContainText(m.planningHelp);expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:info.outputPath("native-stay-consumption-"+locale+".png"),fullPage:true});
+  response=reply("page");await panel.getByLabel(m.search,{exact:true}).fill("%");await panel.getByRole("button",{name:m.apply,exact:true}).click();expect(inventoryStayPageSchema.parse(await(await response).json()).items).toEqual([]);await expect(panel).toContainText(m.empty);await page.context().setOffline(true);await expect(panel).toContainText(m.states.offline);await expect(panel).not.toContainText(f.itemKey);response=reply("page");await page.context().setOffline(false);expect((await response).status()).toBe(200);await expect(panel.getByTestId("inventory-stay-row")).toHaveCount(1);
+  expect(await withTenant(db,bootstrapOrganizationId,tx=>tx.financialTransaction.count({where:{organizationId:bootstrapOrganizationId}}))).toBe(f.financialCount);const scope=bootstrapOrganizationId+"."+account.id;expect((await page.request.post("/api/inventory/stays/page",{data:{reservationId:f.reservationId},headers:{"x-alvillas-inventory-scope":scope,Origin:"https://foreign.invalid"}})).status()).toBe(403);await withTenant(db,bootstrapOrganizationId,tx=>tx.roleAssignment.updateMany({where:{organizationId:bootstrapOrganizationId,userAccountId:account.id},data:{archivedAt:new Date()}}));response=reply("page");await panel.getByRole("button",{name:m.refresh,exact:true}).click();expect((await response).status()).toBe(403);await expect(panel).toContainText(m.states.forbidden);await expect(panel).not.toContainText(f.itemKey);expect(await page.evaluate(()=>JSON.stringify({local:{...localStorage},session:{...sessionStorage}}))).not.toContain(f.itemKey);expect(errors).toEqual([]);
+ }finally{await page.context().setOffline(false);await db.$disconnect();}
+});
