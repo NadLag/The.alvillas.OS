@@ -11,9 +11,12 @@ export class InventoryRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
   lockMovementCommand(key:string){return this.lock("movement-command:"+key,false);}
   async lockMovementStreams(item:InventoryItemHead,locations:readonly InventoryLocationHead[]){
-    await this.lock("catalog:"+item.key,true);
-    for(const key of [...new Set(locations.map(row=>row.propertyId??row.id))].sort())await this.lock("location:"+key,true);
-    for(const key of [...new Set(locations.map(row=>"stock:"+(row.propertyId??row.id)+":"+item.key))].sort())await this.lock(key,false);
+    await this.lockMovementStreamBatch([{item,locations}]);
+  }
+  async lockMovementStreamBatch(streams:readonly {item:InventoryItemHead;locations:readonly InventoryLocationHead[]}[]){
+    for(const key of [...new Set(streams.map(row=>row.item.key))].sort())await this.lock("catalog:"+key,true);
+    for(const key of [...new Set(streams.flatMap(row=>row.locations.map(location=>location.propertyId??location.id)))].sort())await this.lock("location:"+key,true);
+    for(const key of [...new Set(streams.flatMap(row=>row.locations.map(location=>"stock:"+(location.propertyId??location.id)+":"+row.item.key)))].sort())await this.lock(key,false);
   }
   lockLocationCommand(key:string){return this.lock("location-command:"+key,false);}
   lockLocationMetadata(value:{id?:string;propertyId:string|null}){const key=value.propertyId??value.id;return key?this.lock("location:"+key,false):Promise.resolve();}

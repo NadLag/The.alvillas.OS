@@ -225,3 +225,7 @@ prisma/migrations/20261117043000_inventory_reorder_configuration_sources/migrati
 
 prisma/migrations/20261117044500_inventory_reorder_configuration_json_operators/migration.sql text eol=lf
 prisma/migrations/20261117180000_native_inventory_workspace_stocktakes/migration.sql text eol=lf
+prisma/migrations/20261117193000_native_inventory_purchase_receipts/migration.sql text eol=lf
+prisma/migrations/20261117194500_inventory_purchase_receipt_movement_alias/migration.sql text eol=lf
+prisma/migrations/20261117195500_inventory_purchase_receipt_leg_json/migration.sql text eol=lf
+prisma/migrations/20261117202500_inventory_purchase_original_attachment_id/migration.sql text eol=lf

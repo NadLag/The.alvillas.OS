@@ -1,3 +1,4 @@
+import {authorizeOrganizationSource} from "@/platform/authz/organization-authority";
 import Link from "next/link";
 import {z} from "zod";
 import {GroceryExpenseBinding} from "@/modules/services/ui/grocery-expense-binding";
@@ -23,6 +24,7 @@ export default async function ExpensePage({ params,searchParams }: { params: Pro
   catch (error) { if (error instanceof ExpenseAccessError || error instanceof Error && error.name === "ZodError") notFound(); throw error; }
   return <AdminShell className="resource-page expense-page" testId="expense-detail-page"><ShellHeader eyebrow={expense.propertyName} title={expense.purpose} subtitle={t("description")}
     actions={<div className="form-actions">{expense.canEditDraft?<Link className="secondary-button" data-testid="expense-edit" href={`/${locale}/app/expenses/${expense.id}/edit`}>{t("editDraft")}</Link>:null}
+      {expense.state==="POSTED"&&["inventory_movement","inventory_item","inventory_location"].every(type=>authorizeOrganizationSource(actor.authContext,"view",{type,organizationId:actor.organizationId,dataClass:"operational"},new Date()))?<Link className="secondary-button" data-testid="expense-receive-stock" href={`/${locale}/app/inventory/purchases?source=EXPENSE&id=${expense.id}`} prefetch={false}>{(await getTranslations("InventoryPurchases"))("receiveLink")}</Link>:null}
       <Link className="secondary-button" href={`/${locale}/app/properties/${expense.propertyId}`}>{t("back")}</Link></div>} />
     <section className="notification-settings"><p data-testid="expense-state" role="status">{t(`states.${expense.state}`)}</p>
       {expense.emergencyException?<p role="status" data-testid="expense-emergency-notice">{t("emergencyException")}</p>:null}
