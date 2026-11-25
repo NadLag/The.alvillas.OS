@@ -8,6 +8,7 @@ import {onboardingInventoryTargetSchema} from "@/modules/onboarding/domain/onboa
 import {canonicalOnboardingInventorySettings,onboardingInventoryRuleKey} from "./contracts";
 import {TemplateAccessError} from "@/modules/core/application/core-access";
 import {TeamRepository} from "@/modules/identity/infrastructure/team-repository";
+import {inventoryPolicyAppliesToProperty} from "@/platform/config/inventory-policy";
 import {flattenSettings,inheritedChanges,writeSetting,validateTemplateValues,validateProjectedRules,type TemplateValues} from "@/modules/core/domain/property-template";
 
 export {TemplateAccessError as NativeOnboardingInventoryAuthorizationError,TemplateConflictError as NativeOnboardingInventoryConflictError,TemplateNotFoundError as NativeOnboardingInventoryNotFoundError} from "@/modules/core/application/core-access";
@@ -16,6 +17,7 @@ export const nativeOnboardingInventoryTemplateRows=async(tx:TenantTransaction,or
 export const nativeOnboardingInventoryBindingHead=(tx:TenantTransaction,organizationId:string,propertyId:string)=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryBindingHead(propertyId);
 export const nativeOnboardingInventoryTemplatePage=(tx:TenantTransaction,organizationId:string,propertyId:string,query:string,after:string|undefined,asOf:Date)=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplatePage(propertyId,query,after,asOf);
 export const nativeOnboardingInventoryTemplateChoiceRows=async(tx:TenantTransaction,organizationId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplateChoiceRows(ids);
+export async function nativeOnboardingInventoryTemplateMatchesProperty(tx:TenantTransaction,organizationId:string,propertyId:string,values:unknown){const type=await new PropertyTemplateRepository(tx,organizationId).inventoryTemplatePropertyType(propertyId);return type!==null&&inventoryPolicyAppliesToProperty(validateTemplateValues("INVENTORY",values as TemplateValues).rules?.[onboardingInventoryRuleKey],type);}
 
 /** Preview the canonical inheritance algorithm, including existing property overrides, without writing a second template model. */
 export function previewNativeOnboardingInventoryTemplate(current:unknown,selected:unknown,previousTemplate:unknown){

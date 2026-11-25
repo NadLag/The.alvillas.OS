@@ -1846,7 +1846,9 @@
     "automationRules": "Advanced automation rules",
     "automationDefinition": "Workflow definition (JSON)",
     "automationHelp": "Include reusable event, condition and action definitions. These settings use the same workflow configuration as the rest of the application.",
-    "automationInvalid": "Check the workflow references, event, conditions and actions in this definition."
+    "automationInvalid": "Check the workflow references, event, conditions and actions in this definition.",
+    "inventoryPropertyTypes": "Applicable property types",
+    "inventoryPropertyTypesHelp": "Enter each exact property type on a separate line. Leave blank for every property type. Existing property overrides remain in place when applying a new version."
   },
   "Team": {
     "inviteAccount": "Invite a login",

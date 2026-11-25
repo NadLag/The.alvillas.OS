@@ -56,6 +56,7 @@ function Bilingual({
 }
 export function TemplateValueEditor({ kind, values, onChange }: Props) {
   const t = useTranslations("Templates");
+  const [inventoryTypesText,setInventoryTypesText]=useState(()=>{const types=record(values.rules?.["inventory.minimums"]).property_types;return Array.isArray(types)?types.join("\n"):"";});
   const [automationText, setAutomationText] = useState(() =>
     values.rules?.["ops.workflows"] ? JSON.stringify(values.rules["ops.workflows"], null, 2) : ""
   );
@@ -288,6 +289,7 @@ export function TemplateValueEditor({ kind, values, onChange }: Props) {
     setRule(ruleKey, { ...record(values.rules?.[ruleKey]), [collectionKey]: next });
   return (
     <div className="template-repeatable">
+      {kind === "INVENTORY" ? <label className="field"><span>{t("inventoryPropertyTypes")}</span><textarea data-testid="template-property-types" rows={3} maxLength={4050} value={inventoryTypesText} onChange={event=>{setInventoryTypesText(event.target.value);const rule={...record(values.rules?.[ruleKey])},types=event.target.value.split("\n").map(value=>value.trim()).filter(Boolean);if(types.length)rule.property_types=types;else delete rule.property_types;setRule(ruleKey,rule);}}/><span>{t("inventoryPropertyTypesHelp")}</span></label> : null}
       {kind === "WORKFLOW" ? (
         <details>
           <summary>{t("automationRules")}</summary>
