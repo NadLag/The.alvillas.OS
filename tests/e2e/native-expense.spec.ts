@@ -1,7 +1,7 @@
 import { selectPaymentAccount } from "./support/payment-account-picker";
 import { randomInt, randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
@@ -11,12 +11,19 @@ import { formatCurrencyAmount } from "@/i18n/format";
 import { ownerLedgerPath } from "@/modules/finance/domain/owner-ledger";
 import { openFieldFixture } from "./support/field-fixture";
 import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
+import { postBrowserActionOnce } from "./support/forward-browser-post";
 
 test.use({ timezoneId: "America/Denver", serviceWorkers: "allow", actionTimeout: 30000, navigationTimeout: 60000 });
 for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval, posting, reversal and transaction groups in ${locale}`, async ({ page: admin, browser }, info) => {
   test.skip(!process.env.DATABASE_URL, "Real local PostgreSQL is required"); test.setTimeout(420000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Native expense acceptance requires local PostgreSQL");
   const f = await openFieldFixture(admin, info, "en"), origin = new URL(admin.url()).origin, suffix = randomUUID().slice(0,8);
+  const replayAction = (page: Page, action: Request) => postBrowserActionOnce(page.context(), action, {
+    "content-type": action.headers()["content-type"],
+    "next-action": action.headers()["next-action"],
+    accept: "text/x-component",
+    origin
+  });
   const ownerContext = await browser.newContext({ baseURL: origin, storageState: { cookies: [], origins: [] }, viewport: { width: info.project.name === "field-mobile" ? 360 : 1440, height: 900 } });
   const fieldContext = await browser.newContext({ baseURL: origin, storageState: { cookies: [], origins: [] }, viewport: { width: 360, height: 900 } });
   const ownerPage = await ownerContext.newPage(), fieldPage = await fieldContext.newPage(), errors: string[] = [];
@@ -77,7 +84,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`) && Boolean(request.postData()?.includes(expenseId)));
     await admin.getByTestId("expense-submit").click(); const request = await capture;
     await expect(admin.getByTestId("expense-approval-link")).toBeVisible();
-    const deniedAction = await fieldPage.request.post(request.url(), { data: request.postDataBuffer()!, headers: { "content-type": request.headers()["content-type"], "next-action": request.headers()["next-action"], accept: "text/x-component", origin } });
+    const deniedAction = await replayAction(fieldPage, request);
     const rejected = await deniedAction.text(); expect(rejected).toContain('"ok":false'); expect(rejected).toContain('"code":"forbidden"');
     const approvalId = await withTenant(f.db, f.organizationId, async tx => {
       const expense = await tx.expense.findUniqueOrThrow({ where: { id: expenseId }, include: { approval: true } });
@@ -129,10 +136,9 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`)&&Boolean(request.postData()?.includes(expenseId)));
     await admin.getByTestId("expense-post").click();const payment=await postingRequest;
     await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
-    const paymentHeaders={"content-type":payment.headers()["content-type"],"next-action":payment.headers()["next-action"],accept:"text/x-component",origin};
-    const ownerDenied=await ownerPage.request.post(payment.url(),{data:payment.postDataBuffer()!,headers:paymentHeaders});
+    const ownerDenied=await replayAction(ownerPage,payment);
     expect(await ownerDenied.text()).toContain('"code":"forbidden"');
-    const repeatedPayment=await admin.request.post(payment.url(),{data:payment.postDataBuffer()!,headers:paymentHeaders});
+    const repeatedPayment=await replayAction(admin,payment);
     expect(await repeatedPayment.text()).toContain('"idempotent":true');
     await withTenant(f.db,f.organizationId,async tx=>{
       const expense=await tx.expense.findUniqueOrThrow({where:{id:expenseId}});expect(expense.state).toBe("POSTED");expect(expense.transactionId).not.toBeNull();
@@ -185,9 +191,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`)&&Boolean(request.postData()?.includes(expenseId)));
     await admin.getByTestId("expense-void").click();const reversal=await voidRequest;
     await expect(admin.getByTestId("expense-void-form")).toHaveCount(0);await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);
-    const voidHeaders={"content-type":reversal.headers()["content-type"],"next-action":reversal.headers()["next-action"],accept:"text/x-component",origin};
-    const deniedVoid=await ownerPage.request.post(reversal.url(),{data:reversal.postDataBuffer()!,headers:voidHeaders});expect(await deniedVoid.text()).toContain('"code":"forbidden"');
-    const repeatedVoid=await admin.request.post(reversal.url(),{data:reversal.postDataBuffer()!,headers:voidHeaders});expect(await repeatedVoid.text()).toContain('"idempotent":true');
+    const deniedVoid=await replayAction(ownerPage,reversal);expect(await deniedVoid.text()).toContain('"code":"forbidden"');
+    const repeatedVoid=await replayAction(admin,reversal);expect(await repeatedVoid.text()).toContain('"idempotent":true');
     await ownerPage.reload();await expect(ownerPage.getByTestId("owner-ledger-closing")).toHaveText(formatCurrencyAmount(locale,"0.00","MAD"));await expect(ownerPage.getByTestId("owner-ledger-line")).toHaveCount(2);
     await withTenant(f.db,f.organizationId,async tx=>{
       const expense=await tx.expense.findUniqueOrThrow({where:{id:expenseId}});expect(expense.state).toBe("VOIDED");
@@ -247,7 +252,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await admin.getByTestId("expense-create").click();const edited=await editedRequest;
     await expect(admin.getByTestId("expense-detail-page")).toBeVisible();await expect(admin.getByTestId("expense-total")).toHaveText(formatCurrencyAmount(locale,"100.01","MAD"));
     expect((await fieldPage.request.get(`/${locale}/app/expenses/${customId}/edit`)).status()).toBe(404);
-    const deniedEdit=await fieldPage.request.post(edited.url(),{data:edited.postDataBuffer()!,headers:{"content-type":edited.headers()["content-type"],"next-action":edited.headers()["next-action"],accept:"text/x-component",origin}});
+    const deniedEdit=await replayAction(fieldPage,edited);
     expect(await deniedEdit.text()).toContain('"code":"forbidden"');
     await admin.getByTestId("expense-submit-reason").fill("Dedicated custom allocation owner review");await admin.getByTestId("expense-submit").click();
     await expect(admin.getByTestId("expense-approval-link")).toBeVisible();await ownerPage.goto((await admin.getByTestId("expense-approval-link").getAttribute("href"))!);
@@ -273,9 +278,12 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await admin.getByTestId("expense-correction-create").click();const prepareRequest=await prepareCapture;
     await admin.waitForURL(url=>url.pathname.endsWith("/expenses/"+url.pathname.split("/").at(-1))&&!url.pathname.endsWith("/"+customId));
     await expect(admin.getByTestId("expense-correction-source")).toBeVisible();const correctedId=new URL(admin.url()).pathname.split("/").at(-1)!;
-    const prepareHeaders={"content-type":prepareRequest.headers()["content-type"],"next-action":prepareRequest.headers()["next-action"],accept:"text/x-component",origin};
-    for(const response of await Promise.all(Array.from({length:4},()=>admin.request.post(prepareRequest.url(),{data:prepareRequest.postDataBuffer()!,headers:prepareHeaders}))))expect(await response.text()).toContain('"idempotent":true');
-    for(const restricted of[fieldPage,ownerPage])expect(await(await restricted.request.post(prepareRequest.url(),{data:prepareRequest.postDataBuffer()!,headers:prepareHeaders})).text()).toContain('"code":"forbidden"');
+    const replayResults = await Promise.all(Array.from({ length: 4 }, () => replayAction(admin, prepareRequest)));
+    for (const response of replayResults) {
+      expect(response.status()).toBe(200);
+      expect(await response.text()).toContain('"idempotent":true');
+    }
+    for(const restricted of[fieldPage,ownerPage])expect(await(await replayAction(restricted,prepareRequest)).text()).toContain('"code":"forbidden"');
     await admin.getByTestId("expense-edit").click();await expect(admin.getByTestId("expense-currency")).toBeDisabled();await expect(admin.getByTestId("expense-funding-account")).toBeDisabled();
     await expect(admin.getByTestId("expense-occurred-on")).toHaveAttribute("readonly","");await expect(admin.getByTestId("expense-category")).toHaveAttribute("readonly","");
     await admin.getByTestId("expense-amount").fill("200,00");await admin.getByTestId("expense-reason").fill("Dedicated corrected total before independent approval");
@@ -300,9 +308,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await admin.getByTestId("expense-post-reason").fill("Dedicated approved atomic invoice correction");
     const correctionCapture=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&Boolean(request.postData()?.includes(correctedId)));
     await admin.getByTestId("expense-post").click();const correctionRequest=await correctionCapture;await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);
-    const correctionHeaders={"content-type":correctionRequest.headers()["content-type"],"next-action":correctionRequest.headers()["next-action"],accept:"text/x-component",origin};
-    for(const response of await Promise.all(Array.from({length:4},()=>admin.request.post(correctionRequest.url(),{data:correctionRequest.postDataBuffer()!,headers:correctionHeaders}))))expect(await response.text()).toContain('"idempotent":true');
-    for(const restricted of[fieldPage,ownerPage])expect(await(await restricted.request.post(correctionRequest.url(),{data:correctionRequest.postDataBuffer()!,headers:correctionHeaders})).text()).toContain('"code":"forbidden"');
+    for(const response of await Promise.all(Array.from({length:4},()=>replayAction(admin,correctionRequest))))expect(await response.text()).toContain('"idempotent":true');
+    for(const restricted of[fieldPage,ownerPage])expect(await(await replayAction(restricted,correctionRequest)).text()).toContain('"code":"forbidden"');
     expect((await fieldPage.request.get(`/${locale}/app/expenses/${correctedId}`)).status()).toBe(404);
     await withTenant(f.db,f.organizationId,async tx=>{
       const original=await tx.expense.findUniqueOrThrow({where:{id:customId}}),corrected=await tx.expense.findUniqueOrThrow({where:{id:correctedId}});
@@ -344,13 +351,11 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await admin.getByTestId("transaction-group-create").click(); const groupCreated = await groupRequest;
     await expect(admin.getByTestId("transaction-group-detail")).toBeVisible();
     const groupId = new URL(admin.url()).pathname.split("/").at(-1)!;
-    const actionRequest = (value: typeof groupCreated) => ({ data: value.postDataBuffer()!, headers: {
-      "content-type": value.headers()["content-type"], "next-action": value.headers()["next-action"], accept: "text/x-component", origin } });
-    for (const response of await Promise.all(Array.from({ length: 4 }, () => admin.request.post(groupCreated.url(), actionRequest(groupCreated))))) expect(await response.text()).toContain('"ok":true');
+    for (const response of await Promise.all(Array.from({ length: 4 }, () => replayAction(admin, groupCreated)))) expect(await response.text()).toContain('"ok":true');
     for (const restricted of [fieldPage, ownerPage]) {
       const response = await restricted.request.get(`/${locale}/app/finance/groups/${groupId}`);
       expect(response.status()).toBe(404); expect(await response.text()).not.toContain(groupName);
-      expect(await (await restricted.request.post(groupCreated.url(), actionRequest(groupCreated))).text()).toContain('"code":"forbidden"');
+      expect(await (await replayAction(restricted, groupCreated)).text()).toContain('"code":"forbidden"');
     }
     const attach = async (source: typeof groupSource.headers[number]) => {
       await admin.getByTestId("transaction-group-candidate-search").fill(source.reference);
@@ -364,8 +369,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       return mutation;
     };
     const firstGroupAttachment = await attach(groupSource.headers[0]); await attach(groupSource.headers[1]);
-    for (const response of await Promise.all(Array.from({ length: 4 }, () => admin.request.post(firstGroupAttachment.url(), actionRequest(firstGroupAttachment))))) expect(await response.text()).toContain('"ok":true');
-    expect(await (await fieldPage.request.post(firstGroupAttachment.url(), actionRequest(firstGroupAttachment))).text()).toContain('"code":"forbidden"');
+    for (const response of await Promise.all(Array.from({ length: 4 }, () => replayAction(admin, firstGroupAttachment)))) expect(await response.text()).toContain('"ok":true');
+    expect(await (await replayAction(fieldPage, firstGroupAttachment)).text()).toContain('"code":"forbidden"');
     await expect(admin.getByTestId("transaction-group-member")).toHaveCount(2);
     await expect(admin.getByTestId("transaction-group-history")).toHaveCount(2);
     await expect(admin.getByTestId("transaction-group-movement")).toHaveCount(2);
@@ -375,7 +380,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await member.getByTestId("transaction-group-membership-reason").fill("Dedicated grouping correction preserves journal facts");
     await member.getByTestId("transaction-group-detach").click(); await expect(admin.getByTestId("transaction-group-member")).toHaveCount(1);
     await expect(admin.getByTestId("transaction-group-history")).toHaveCount(3);
-    expect(await (await admin.request.post(firstGroupAttachment.url(), actionRequest(firstGroupAttachment))).text()).toContain('"ok":true');
+    expect(await (await replayAction(admin, firstGroupAttachment)).text()).toContain('"ok":true');
     await admin.reload(); await expect(admin.getByTestId("transaction-group-member")).toHaveCount(1);
     await attach(groupSource.headers[0]); await expect(admin.getByTestId("transaction-group-history")).toHaveCount(4);
     await withTenant(f.db, f.organizationId, async tx => {
