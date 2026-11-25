@@ -172,7 +172,17 @@ test.describe("property template administration", () => {
       await saveAndOpen(page, `${kind.toLowerCase()}-${suffix}`, `${kind} ${suffix}`);
       await apply(page);
       await expect(page.getByTestId("template-diff-row").first()).toBeVisible();
-      if(kind==="INVENTORY"){const query=new URL(page.url()).search;for(const locale of["en","fr","ar"]){await page.goto(`/${locale}/app/templates${query}`);await expect(page.getByTestId("template-property-types")).toHaveValue(property.propertyType+"\nCustom original property type");await expect(page.locator("html")).toHaveAttribute("dir",locale==="ar"?"rtl":"ltr");expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);}}
+      if (kind === "INVENTORY") {
+        const query = new URL(page.url()).search;
+        for (const locale of ["en", "fr", "ar"]) {
+          await page.goto(`/${locale}/app/templates${query}`);
+          await expect(page.getByTestId("templates-page").getByRole("heading", { level: 1 })).toBeVisible();
+          await expect(page.getByTestId("template-property-types")).toHaveValue(property.propertyType + "\nCustom original property type");
+          await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+          expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+          expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+        }
+      }
     }
   });
 });
