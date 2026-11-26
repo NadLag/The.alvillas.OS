@@ -15,11 +15,14 @@ export const inventoryMinimumEntrySchema=z.object({
   reorder:z.object({basis:z.enum(["PHYSICAL","AVAILABLE"]),target:z.number().int().min(0).optional()}).strict().optional()
 }).passthrough().superRefine(refineInventoryMinimumTarget);
 const minimums=z.array(inventoryMinimumEntrySchema).max(inventoryMaximumItems).refine(value=>new Set(value.map(item=>item.item)).size===value.length,"Inventory item keys must be unique");
+export const inventoryLinenSetSchema=z.object({key:configSlugSchema,name:localizedTextSchema,description:localizedTextSchema.optional(),components:z.array(z.object({item:configSlugSchema,quantity:z.number().int().positive()}).strict()).min(1).max(inventoryMaximumItems).refine(rows=>new Set(rows.map(row=>row.item)).size===rows.length,"Linen set components must be unique")}).strict();
+export const inventoryLinenSetsSchema=z.array(inventoryLinenSetSchema).max(inventoryMaximumItems).refine(rows=>new Set(rows.map(row=>row.key)).size===rows.length,"Linen set keys must be unique").refine(rows=>new Set(rows.flatMap(row=>row.components.map(component=>component.item))).size<=inventoryMaximumItems,"Linen sets share the existing bounded original catalog");
 
 export const inventoryMinimumsSchema = z
   .object({
     minimums,
     property_types:inventoryPropertyTypesSchema.optional(),
+    linen_sets:inventoryLinenSetsSchema.optional(),
     location_overrides:z.array(z.object({location_id:z.uuid(),minimums}).passthrough()).max(1000).refine(value=>new Set(value.map(location=>location.location_id)).size===value.length,"Inventory location overrides must be unique").optional()
   })
   .passthrough();

@@ -164,6 +164,8 @@ test.describe("property template administration", () => {
         await page.getByTestId("template-property-types").fill(property.propertyType+"\nCustom original property type");
         await entry.getByRole("spinbutton", { name: "Minimum quantity", exact: true }).fill("8");
         await entry.getByRole("textbox", { name: "Unit", exact: true }).fill("piece");
+        await entry.getByRole("combobox",{name:"Category",exact:true}).selectOption("LINEN");
+        await page.getByRole("button",{name:"Add a linen set",exact:true}).click();const set=page.getByTestId("linen-set-definition");await set.getByRole("textbox",{name:"Reference",exact:true}).fill("bed.original");await set.locator('input[lang="en"]').fill("Actual browser linen set");await set.locator('input[lang="fr"]').fill("Parure réelle du navigateur");await set.getByRole("button",{name:"Add a linen component",exact:true}).click();const component=set.getByTestId("linen-set-component");await component.getByRole("textbox",{name:"Original linen item reference",exact:true}).fill(await entry.getByRole("textbox",{name:"Reference",exact:true}).inputValue());await component.getByRole("spinbutton",{name:"Units in one set",exact:true}).fill("2");
       }
       if (kind === "SERVICE_CATALOG") {
         await entry.getByRole("textbox", { name: "Amount", exact: true }).fill("800.00");
