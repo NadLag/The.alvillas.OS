@@ -7730,6 +7730,8 @@
     "needsReview": "Review original components",
     "componentCount": "{number} original component types",
     "noSets": "No linen set composition is configured for this location.",
-    "editSets": "Review linen set templates"
+    "editSets": "Review linen set templates",
+    "stayTitle": "Expected linen per stay",
+    "staySubtitle": "Review the original configured linen requirement for the selected stay."
   }
 }
