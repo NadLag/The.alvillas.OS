@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Prisma } from "@prisma/client";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
 import { fieldPolicyCatalog, permissionCatalog, standardRoles } from "@/platform/authz/catalog";
 import type { TenantTransaction, TenantTransactionRunner } from "@/platform/db/tenant";
@@ -15,7 +16,7 @@ type RolePermissionCreateManyArgs = {
 };
 
 describe("standard identity setup", () => {
-  it("repairs a stale standard catalog with set-based role permission inserts", async () => {
+  it("repairs a stale standard catalog with batched role permissions and field policies", async () => {
     const roleFindMany = vi
       .fn()
       .mockResolvedValueOnce([])
@@ -41,7 +42,10 @@ describe("standard identity setup", () => {
       }
     );
     const tx = {
-      $executeRaw: vi.fn(() => Promise.resolve(1)),
+      $executeRaw: vi.fn((statement: Prisma.Sql) => {
+        void statement;
+        return Promise.resolve(1);
+      }),
       permission: {
         count: vi.fn(() => Promise.resolve(0)),
         createMany: vi.fn(() => Promise.resolve({ count: permissionCatalog.length })),
@@ -49,8 +53,7 @@ describe("standard identity setup", () => {
         findMany: permissionFindMany
       },
       fieldPolicy: {
-        count: vi.fn(() => Promise.resolve(0)),
-        upsert: vi.fn(() => Promise.resolve({}))
+        count: vi.fn(() => Promise.resolve(0))
       },
       role: {
         findMany: roleFindMany,
@@ -80,6 +83,11 @@ describe("standard identity setup", () => {
       permissionId: "permission-organization:view"
     });
     expect(firstCreateManyCall?.data).toHaveLength(expectedRolePermissionCount);
-    expect(tx.fieldPolicy.upsert).toHaveBeenCalledTimes(fieldPolicyCatalog.length);
+    const policyWrites = tx.$executeRaw.mock.calls.map(([statement]) => statement)
+      .filter(statement => statement.sql.includes("INSERT INTO public.field_policy"));
+    expect(policyWrites).toHaveLength(1);
+    expect(policyWrites[0]?.values).toEqual(fieldPolicyCatalog.flatMap(policy => [
+      organizationId, policy.resource, policy.field, policy.dataClass, policy.requiredPermission, policy.mask
+    ]));
   });
 });

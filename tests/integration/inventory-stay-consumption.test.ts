@@ -38,8 +38,49 @@ it("paginates missing catalog definitions, keeps unspecified requirements and re
  await expect(inventoryStayConsumptionPage(other.ctx,{reservationId:f.reservation.id},other.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants["config_rule:view"]},data:{archivedAt:new Date()}}));await expect(inventoryStayConsumptionPage(f.ctx,{reservationId:f.reservation.id},f.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);
 });
 it("rejects a stay revision or current reservation permission withdrawal during the actual source read",async()=>{
- const f=await fixture(),original=InventoryStayConsumptionRepository.prototype.rows;let changed=false;const spy=vi.spyOn(InventoryStayConsumptionRepository.prototype,"rows").mockImplementation(async function(this:InventoryStayConsumptionRepository,...args){const rows=await original.apply(this,args);if(!changed){changed=true;await withTenant(db,f.organizationId,tx=>tx.reservation.update({where:{id:f.reservation.id},data:{reference:"Revised original stay reference"}}));}return rows;});try{await expect(inventoryStayConsumptionPage(f.ctx,{reservationId:f.reservation.id},f.deps)).rejects.toBeInstanceOf(InventoryCatalogConflictError);}finally{spy.mockRestore();}expect(changed).toBe(true);
- const second=await fixture();changed=false;const withdrawal=vi.spyOn(InventoryStayConsumptionRepository.prototype,"rows").mockImplementation(async function(this:InventoryStayConsumptionRepository,...args){const rows=await original.apply(this,args);if(!changed){changed=true;await withTenant(db,second.organizationId,tx=>tx.roleAssignment.update({where:{id:second.grants["reservation:view"]},data:{archivedAt:new Date()}}));}return rows;});try{await expect(inventoryStayConsumptionPage(second.ctx,{reservationId:second.reservation.id},second.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);}finally{withdrawal.mockRestore();}expect(changed).toBe(true);
+ type ReadRows = InventoryStayConsumptionRepository["rows"];
+ // The service awaits rows. The spy adds an asynchronous step after the real Prisma query.
+ const prototype: {
+  rows: (this: InventoryStayConsumptionRepository, ...args: Parameters<ReadRows>) => Promise<Awaited<ReturnType<ReadRows>>>;
+ } = InventoryStayConsumptionRepository.prototype;
+ const original = prototype.rows;
+ const f = await fixture();
+ let changed = false;
+ const spy = vi.spyOn(prototype, "rows").mockImplementation(async function(this: InventoryStayConsumptionRepository, ...args) {
+  const rows = await original.apply(this, args);
+  if (!changed) {
+   changed = true;
+   await withTenant(db, f.organizationId, tx => tx.reservation.update({
+    where: { id: f.reservation.id }, data: { reference: "Revised original stay reference" }
+   }));
+  }
+  return rows;
+ });
+ try {
+  await expect(inventoryStayConsumptionPage(f.ctx, { reservationId: f.reservation.id }, f.deps)).rejects.toBeInstanceOf(InventoryCatalogConflictError);
+ } finally {
+  spy.mockRestore();
+ }
+ expect(changed).toBe(true);
+
+ const second = await fixture();
+ changed = false;
+ const withdrawal = vi.spyOn(prototype, "rows").mockImplementation(async function(this: InventoryStayConsumptionRepository, ...args) {
+  const rows = await original.apply(this, args);
+  if (!changed) {
+   changed = true;
+   await withTenant(db, second.organizationId, tx => tx.roleAssignment.update({
+    where: { id: second.grants["reservation:view"] }, data: { archivedAt: new Date() }
+   }));
+  }
+  return rows;
+ });
+ try {
+  await expect(inventoryStayConsumptionPage(second.ctx, { reservationId: second.reservation.id }, second.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);
+ } finally {
+  withdrawal.mockRestore();
+ }
+ expect(changed).toBe(true);
 });
 it("runs the actual browser producer through configured requirements and original reserved consumption",async()=>{
  const f=await fixture(),output=resolve(".tmp/stay-consumption-browser-"+randomUUID()+"/fixture.private.json");await promisify(execFile)(process.execPath,[resolve("node_modules/tsx/dist/cli.mjs"),resolve("tests/e2e/support/inventory-movement-fixture-worker.ts"),JSON.stringify({organizationId:f.organizationId,accountId:f.account.id,personId:f.person.id,guestLocale:"ar",stay:true,output})],{env:process.env,windowsHide:true,timeout:120000,maxBuffer:2*1024*1024});const actual=z.object({reservationId:z.uuid(),itemKey:z.string(),financialCount:z.number().int()}).passthrough().parse(JSON.parse(await readFile(output,"utf8"))),ctx={...f.ctx,authContext:{...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id}},page=await inventoryStayConsumptionPage(ctx,{reservationId:actual.reservationId},f.deps);expect(page.items).toHaveLength(1);expect(page.items[0]).toMatchObject({key:actual.itemKey,expected:"2",actual:"3",variance:"1",movementCount:"1"});expect(await withTenant(db,f.organizationId,tx=>tx.financialTransaction.count({where:{organizationId:f.organizationId}}))).toBe(actual.financialCount);
