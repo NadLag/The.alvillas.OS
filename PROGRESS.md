@@ -241,7 +241,7 @@ F-GST-09 | TODO |
 F-GST-10 | TODO |
 F-GST-11 | TODO |
 F-GST-12 | TODO |
-F-GST-13 | TODO |
+F-GST-13 | IN-PROGRESS | Effective-dated villa information uses the existing configuration version workflow and published property authority. Guest instructions and contacts are localized and held inside the original signed-stay view. Wi-Fi is available from local arrival day through departure day. Private configuration and audit values are encrypted and bound to the organization and original property. Focused TypeScript, typed lint, catalog parity and all nine Guest Hub PostgreSQL tests passed. Exact-head CI and authenticated hosted acceptance remain required.
 F-GST-14 | TODO |
 F-GST-15 | TODO |
 F-GST-16 | TODO |

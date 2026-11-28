@@ -32,6 +32,27 @@ export function GuestHubStay({view,locale,onRefresh}:{view:View;locale:AppLocale
   {home.identityDocumentsAvailable&&<GuestHubIdentityDocumentsEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.houseRulesAvailable&&<GuestHubHouseRulesEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.agreementAvailable&&<GuestHubAgreementEntry key={view.id} locale={locale} linkId={view.id}/>}
+  {home.propertyInformation && <section aria-labelledby="guest-property-information-title" data-testid="guest-property-information">
+    <h3 id="guest-property-information-title">{t("propertyInformation.title")}</h3>
+    {home.propertyInformation.instructions && <p dir="auto">{home.propertyInformation.instructions[locale]}</p>}
+    <dl className="guest-property-information">
+      {home.propertyInformation.wifi && <div>
+        <dt>{t("propertyInformation.wifi")}</dt>
+        <dd><bdi>{home.propertyInformation.wifi.network}</bdi></dd>
+      </div>}
+      {home.propertyInformation.wifi?.password && <div>
+        <dt>{t("propertyInformation.wifiPassword")}</dt>
+        <dd><bdi>{home.propertyInformation.wifi.password}</bdi></dd>
+      </div>}
+      {(["supportPhone", "emergencyPhone"] as const).map(kind => {
+        const phone = home.propertyInformation?.[kind];
+        return phone && <div key={kind}>
+          <dt>{t("propertyInformation." + kind)}</dt>
+          <dd><a href={`tel:${phone}`} dir="ltr">{phone}</a></dd>
+        </div>;
+      })}
+    </dl>
+  </section>}
   <div className="guest-stay-tools"><nav aria-label={access("language")}>{(["en","fr","ar"]as const).map(language=><a key={language} className="secondary-button" href={"/"+language+"/guest/"+view.id} hrefLang={language} lang={language} aria-current={locale===language?"page":undefined}>{access("languages."+language)}</a>)}</nav><button type="button" className="primary-button" onClick={onRefresh} data-testid="guest-access-refresh">{access("refresh")}</button></div>
  </section>;
 }

@@ -6374,6 +6374,17 @@
     }
   },
   "GuestStay": {
+    "propertyInformation": {
+      "title": "Villa information",
+      "wifi": "Wi-Fi network",
+      "wifiPassword": "Wi-Fi password",
+      "supportPhone": "Guest support",
+      "emergencyPhone": "Emergency contact",
+      "instructionsEn": "Guest instructions in English",
+      "instructionsFr": "Guest instructions in French",
+      "instructionsAr": "Guest instructions in Arabic",
+      "authoringHelp": "Publish the details guests need for this villa. Enter instructions in all three languages if you provide them. Wi-Fi appears from arrival day through departure day."
+    },
     "photo": "Photo of {property}",
     "photoUnavailable": "Photo unavailable for {property}",
     "dates": "Your stay dates",
