@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
-import { guestServiceOrderPublicReviewSchema, guestServiceOrderReceiptSchema } from "@/platform/services/guest-service-order-contracts";
+import { formatCurrencyAmount } from "@/i18n/format";
 import ar from "../../messages/ar.json" with { type: "json" };
 
 test("an Arabic Guest Hub capability orders an approved native service", async ({ page, context, request }) => {
@@ -30,10 +30,12 @@ test("an Arabic Guest Hub capability orders an approved native service", async (
   const quantity = orders.getByLabel(ar.GuestServiceOrders.quantity, { exact: true });
   await quantity.fill("2");
   const review = orders.getByTestId("guest-service-order-review");
+  const total = formatCurrencyAmount("ar", "240.00", "MAD");
   const requestReview = async () => {
     const reviewed = page.waitForResponse(response => response.request().method() === "POST" && response.url().endsWith("/service-orders/review"));
     await orders.getByRole("button", { name: ar.GuestServiceOrders.review }).click();
-    expect(guestServiceOrderPublicReviewSchema.parse(await (await reviewed).json()).totalAmount).toBe("240.00");
+    expect((await reviewed).status()).toBe(200);
+    await expect(review.getByText(total, { exact: true })).toBeVisible();
   };
   await requestReview();
   await review.getByRole("button", { name: ar.GuestServiceOrders.edit }).click();
@@ -42,8 +44,11 @@ test("an Arabic Guest Hub capability orders an approved native service", async (
   await review.getByRole("checkbox", { name: ar.GuestServiceOrders.acknowledge }).check();
   const admitted = page.waitForResponse(response => response.request().method() === "POST" && response.url().endsWith("/service-orders/admit"));
   await review.getByRole("button", { name: ar.GuestServiceOrders.submit }).click();
-  expect(guestServiceOrderReceiptSchema.parse(await (await admitted).json())).toMatchObject({ state: "REQUESTED", totalAmount: "240.00" });
-  await expect(orders.getByTestId("guest-service-order-receipt")).toContainText(ar.GuestServiceOrders.received);
+  expect((await admitted).status()).toBe(200);
+  const receipt = orders.getByTestId("guest-service-order-receipt");
+  await expect(receipt.getByText(ar.GuestServiceOrders.received, { exact: true })).toBeVisible();
+  await expect(receipt.getByText(ar.GuestServiceOrders.orderState.REQUESTED, { exact: true })).toBeVisible();
+  await expect(receipt.getByText(total, { exact: true })).toBeVisible();
   await context.setOffline(true);
   await expect(orders).toHaveCount(0);
 });
