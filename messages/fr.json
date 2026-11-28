@@ -6374,6 +6374,7 @@
     }
   },
   "GuestServiceOrders": {
+    "category": { "CLEANING": "Ménage", "EXPERIENCE": "Expériences" },
     "pickupDate": "Date de prise en charge",
     "chefMenu": {
       "title": "Menu du chef",

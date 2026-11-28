@@ -12,6 +12,7 @@ import { emptyTransferForm, TransferDetails, TransferRequestFields } from "@/pla
 import { guestServiceOfferPageSchema, guestServiceOrderDraftSchema, guestServiceOrderPublicReviewSchema,
   guestServiceOrderReceiptSchema, guestServiceOrderRecoveryResponseSchema, type GuestChefMenu } from "@/platform/services/guest-service-order-contracts";
 import { GuestHubBrowserError, guestHubRequest } from "./guest-hub-browser";
+import { guestHubServiceCategories } from "../domain/guest-hub-service-order-policy";
 
 type Offers = z.infer<typeof guestServiceOfferPageSchema>;
 type Review = z.infer<typeof guestServiceOrderPublicReviewSchema>;
@@ -152,7 +153,13 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut, t
         <label htmlFor="guest-service-order-selection">{t("service")}</label>
         <select id="guest-service-order-selection" name="serviceKey" value={selectedOffer?.key ?? ""}
           onChange={event => { setSelectedServiceKey(event.target.value); setGroceryItems([]); setTransfer(emptyTransferForm()); }} required disabled={busy}>
-          {offers.items.map(offer => <option key={offer.key} value={offer.key}>{localizedText(offer.name, locale)}</option>)}
+          {offers.items.filter(offer => !offer.category).map(offer => <option key={offer.key} value={offer.key}>{localizedText(offer.name, locale)}</option>)}
+          {guestHubServiceCategories.map(category => {
+            const matching = offers.items.filter(offer => offer.category === category);
+            return matching.length > 0 && <optgroup key={category} label={t(`category.${category}`)}>
+              {matching.map(offer => <option key={offer.key} value={offer.key}>{localizedText(offer.name, locale)}</option>)}
+            </optgroup>;
+          })}
         </select>
       </div>
       {selectedOffer?.description && <p dir="auto">{localizedText(selectedOffer.description, locale)}</p>}
@@ -176,6 +183,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut, t
     </form>}
     {review && <form className="resource-form" onSubmit={send} data-testid="guest-service-order-review">
       <h4>{localizedText(review.quote.title, locale)}</h4>
+      {review.quote.category && <p>{t(`category.${review.quote.category}`)}</p>}
       <p>{review.quote.totalAmount === null ? t("quoteRequired") : formatCurrencyAmount(locale, review.quote.totalAmount, review.quote.currency)}</p>
       {review.quote.chefMenu && <GuestChefMenuDetails menu={review.quote.chefMenu} locale={locale} />}
       {review.quote.selection.groceryItems && <GroceryItems locale={locale} items={review.quote.selection.groceryItems} />}

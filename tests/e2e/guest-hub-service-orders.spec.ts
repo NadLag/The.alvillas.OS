@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { z } from "zod";
 import { formatCurrencyAmount, formatRecipeQuantity } from "@/i18n/format";
 import { ownedChefMenu } from "../support/chef-menu-definition";
 import ar from "../../messages/ar.json" with { type: "json" };
 
-async function openGuestOrders(page: Page, kind: "service" | "chef" | "grocery" | "transfer") {
+async function openGuestOrders(page: Page, kind: "service" | "chef" | "grocery" | "transfer" | "categories") {
   const fixture = z.object({ token: z.string().min(1), serviceKey: z.string().min(1) }).strict().parse(JSON.parse(execFileSync(process.execPath,
     ["node_modules/tsx/dist/cli.mjs", "tests/e2e/support/guest-service-order-fixture-worker.cts", kind],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 })));
@@ -18,6 +18,12 @@ async function openGuestOrders(page: Page, kind: "service" | "chef" | "grocery" 
   return { orders, serviceKey: fixture.serviceKey };
 }
 
+async function browseGuestServices(page: Page, orders: Locator) {
+  const listed = page.waitForResponse(response => response.request().method() === "POST" && response.url().endsWith("/service-orders/view"));
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
+  expect((await listed).status()).toBe(200);
+}
+
 test("an Arabic Guest Hub capability orders an approved native service", async ({ page, context, request }) => {
   test.setTimeout(150000);
   const { orders, serviceKey } = await openGuestOrders(page, "service");
@@ -27,9 +33,7 @@ test("an Arabic Guest Hub capability orders an approved native service", async (
   const denied = await request.post(`/api/guest-hub/links/${linkId}/service-orders/view`, { headers: { Origin: guest.origin }, data: {} });
   expect(denied.status()).toBe(404);
   expect(denied.headers()["cache-control"]).toContain("no-store");
-  const listed = page.waitForResponse(response => response.request().method() === "POST" && response.url().endsWith("/service-orders/view"));
-  await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
-  expect((await listed).status()).toBe(200);
+  await browseGuestServices(page, orders);
   const service = orders.getByRole("combobox", { name: ar.GuestServiceOrders.service, exact: true });
   await service.selectOption(serviceKey);
   await expect(service).toHaveValue(serviceKey);
@@ -62,7 +66,7 @@ test("an Arabic Guest Hub capability orders an approved native service", async (
 test("an Arabic guest can review an approved Chef menu with its listed allergens", async ({ page }) => {
   test.setTimeout(150000);
   const { orders, serviceKey } = await openGuestOrders(page, "chef");
-  await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
+  await browseGuestServices(page, orders);
   await expect(orders.getByRole("combobox", { name: ar.GuestServiceOrders.service, exact: true })).toHaveValue(serviceKey);
   const menu = orders.getByTestId("guest-chef-menu");
   await expect(menu.getByText(ar.GuestServiceOrders.chefMenu.servingsPerUnit, { exact: true })).toBeVisible();
@@ -78,7 +82,7 @@ test("an Arabic guest can review an approved Chef menu with its listed allergens
 test("an Arabic guest can submit exact grocery quantities with purchase instructions", async ({ page }) => {
   test.setTimeout(150000);
   const { orders } = await openGuestOrders(page, "grocery");
-  await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
+  await browseGuestServices(page, orders);
   const editor = orders.getByTestId("grocery-items-editor");
   await editor.getByRole("button", { name: ar.Groceries.add, exact: true }).click();
   const unit = "كيلوغرام";
@@ -100,7 +104,7 @@ test("an Arabic guest can submit exact grocery quantities with purchase instruct
 test("an Arabic guest books one property-local transfer pickup", async ({ page }) => {
   test.setTimeout(150000);
   const { orders } = await openGuestOrders(page, "transfer");
-  await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
+  await browseGuestServices(page, orders);
   const fields = orders.getByTestId("transfer-request-fields");
   await fields.getByLabel(ar.Transfers.pickup, { exact: true }).fill("باب المطار");
   await fields.getByLabel(ar.Transfers.destination, { exact: true }).fill("مدخل الحديقة");
@@ -116,6 +120,29 @@ test("an Arabic guest books one property-local transfer pickup", async ({ page }
   await expect(pickup.getByText("(Africa/Casablanca)", { exact: true })).toBeVisible();
   await expect(review.getByText(formatCurrencyAmount("ar", "120.00", "MAD"), { exact: true })).toBeVisible();
   await expect(pickup.getByText(ar.Transfers.cashHelp, { exact: true })).toHaveCount(0);
+  await review.getByRole("checkbox", { name: ar.GuestServiceOrders.acknowledge }).check();
+  await review.getByRole("button", { name: ar.GuestServiceOrders.submit }).click();
+  await expect(orders.getByTestId("guest-service-order-receipt").getByText(ar.GuestServiceOrders.orderState.REQUESTED, { exact: true })).toBeVisible();
+});
+
+test("an Arabic guest can choose approved cleaning and experiences for one stay", async ({ page }) => {
+  test.setTimeout(150000);
+  const { orders } = await openGuestOrders(page, "categories");
+  await browseGuestServices(page, orders);
+  const service = orders.getByRole("combobox", { name: ar.GuestServiceOrders.service, exact: true });
+  const categories = service.locator("optgroup");
+  await expect(categories).toHaveCount(2);
+  await expect(categories.nth(0)).toHaveAttribute("label", ar.GuestServiceOrders.category.CLEANING);
+  await expect(categories.nth(1)).toHaveAttribute("label", ar.GuestServiceOrders.category.EXPERIENCE);
+  await service.selectOption("owned_cleaning");
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.review }).click();
+  const review = orders.getByTestId("guest-service-order-review");
+  await expect(review.getByText(formatCurrencyAmount("ar", "95.00", "MAD"), { exact: true })).toBeVisible();
+  await review.getByRole("button", { name: ar.GuestServiceOrders.edit }).click();
+  await service.selectOption("owned_experience");
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.review }).click();
+  await expect(review.getByText(ar.GuestServiceOrders.category.EXPERIENCE, { exact: true })).toBeVisible();
+  await expect(review.getByText(formatCurrencyAmount("ar", "180.00", "MAD"), { exact: true })).toBeVisible();
   await review.getByRole("checkbox", { name: ar.GuestServiceOrders.acknowledge }).check();
   await review.getByRole("button", { name: ar.GuestServiceOrders.submit }).click();
   await expect(orders.getByTestId("guest-service-order-receipt").getByText(ar.GuestServiceOrders.orderState.REQUESTED, { exact: true })).toBeVisible();

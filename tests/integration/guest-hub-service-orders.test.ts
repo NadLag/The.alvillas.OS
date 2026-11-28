@@ -11,7 +11,8 @@ import { previewServiceOrderTransition, transitionServiceOrder } from "@/modules
 import { readServiceOrderOriginal } from "@/modules/services/application/service-order-workspace";
 import { ServiceOrderValidationError } from "@/modules/services/domain/service-order";
 import { nativeChefMenuFixture, ownedChefMenu } from "./support/chef-menu-fixture";
-import { nativeGuestSpecialOrderFixture, nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "./support/guest-service-order-fixture";
+import { nativeGuestCategorizedOrdersFixture, nativeGuestSpecialOrderFixture, nativeGuestServiceOrderFixture,
+  prepareGuestServiceOrderCapability } from "./support/guest-service-order-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
 
 const env: NodeJS.ProcessEnv = { NODE_ENV: "test", ENCRYPTION_KEYS: `owned-guest-service:${randomBytes(32).toString("base64")}` };
@@ -31,6 +32,31 @@ beforeAll(async () => {
 });
 
 afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+
+it("requests released cleaning and experiences for the same authorized stay while excluding the unreleased catalog", async () => {
+  const { fixture, deps, capability, decide } = await nativeGuestCategorizedOrdersFixture(admin, db, env);
+  await decide("GRANTED");
+  const allowed = [
+    { key: "owned_cleaning", category: "CLEANING", amount: "95.00" },
+    { key: "owned_experience", category: "EXPERIENCE", amount: "180.00" }
+  ];
+  const offers = await listGuestHubServiceOffers(capability, {}, deps);
+  expect(offers.items).toHaveLength(allowed.length);
+  const start = { serviceDate: fixture.request.serviceDate, lastServiceDate: fixture.request.lastServiceDate, quantity: 1,
+    guests: fixture.request.guests, locale: "fr" };
+  for (const offer of allowed) {
+    expect(offers.items).toContainEqual(expect.objectContaining({ key: offer.key, category: offer.category }));
+    const draft = { ...start, serviceKey: offer.key, idempotencyKey: randomUUID() };
+    const quote = await reviewGuestHubServiceOrder(capability, draft, deps);
+    expect(quote).toMatchObject({ category: offer.category, totalAmount: offer.amount });
+    const receipt = await submitGuestHubServiceOrder(capability, { ...draft, acknowledged: true, reviewFingerprint: quote.reviewFingerprint }, deps);
+    expect(await readServiceOrderOriginal(fixture.ctx, { orderId: receipt.orderId }, fixture.deps)).toMatchObject({
+      request: { serviceKey: offer.key, reservationId: fixture.reservation.id }, totalAmount: offer.amount
+    });
+  }
+  await expect(reviewGuestHubServiceOrder(capability, { ...start, serviceKey: fixture.request.serviceKey, idempotencyKey: randomUUID() }, deps))
+    .rejects.toBeInstanceOf(GuestHubInvalidLinkError);
+});
 
 it("records one guest transfer date and exact pickup details for the native dispatch workflow", async () => {
   const { fixture, deps, capability, decide } = await nativeGuestSpecialOrderFixture(admin, db, env, "transfer");

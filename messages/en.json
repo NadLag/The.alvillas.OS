@@ -6374,6 +6374,7 @@
     }
   },
   "GuestServiceOrders": {
+    "category": { "CLEANING": "Cleaning", "EXPERIENCE": "Experiences" },
     "pickupDate": "Pickup date",
     "chefMenu": {
       "title": "Chef's menu",

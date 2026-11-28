@@ -52,7 +52,7 @@ async function quote(context: Context, input: Draft) {
   const totalAmount = native.price.kind === "PRICED" ? native.price.amount.toJSON().amount : null;
   const notice = renderGuestHubFormNotice(context.form.policy.notice, locale);
   const data = { selection, title: offer.name, totalAmount, currency: offer.currency, quoteRequired: offer.quoteRequired,
-    ...(offer.chefMenu ? { chefMenu: offer.chefMenu } : {}), notice };
+    ...(offer.chefMenu ? { chefMenu: offer.chefMenu } : {}), ...(offer.category ? { category: offer.category } : {}), notice };
   const binding = { ...data, idempotencyKey, locale, form: context.form.fingerprint, native: native.reviewFingerprint };
   return { data, binding, request, native };
 }

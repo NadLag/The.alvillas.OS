@@ -5,10 +5,11 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { issueGuestHubLink, reviewGuestHubIssue } from "@/modules/guest-hub/application/guest-hub-service";
 import { guestHubServiceOrderGrants } from "@/modules/guest-hub/application/guest-hub-service-order-grants";
-import { guestHubServiceOrderPolicyKey } from "@/modules/guest-hub/domain/guest-hub-service-order-policy";
+import { guestHubServiceOrderPolicyKey, type GuestHubServiceCategory } from "@/modules/guest-hub/domain/guest-hub-service-order-policy";
 import { previewServiceCatalogChange, publishServiceCatalogChange } from "@/modules/services/application/service-catalog-service";
 import { groceryOrderTermsSchema } from "@/platform/config/grocery-order-policy";
 import { transferOrderTermsSchema } from "@/platform/config/transfer-order-policy";
+import { serviceAllocationPolicySchema } from "@/platform/config/service-allocation-policy";
 import { nativeServiceOrderFixture } from "./service-order-fixture";
 
 export async function nativeGuestServiceOrderFixture(admin: PrismaClient, db: PrismaClient, env: NodeJS.ProcessEnv) {
@@ -30,10 +31,36 @@ export async function nativeGuestSpecialOrderFixture(admin: PrismaClient, db: Pr
   return prepareGuestServiceOrderCapability(fixture, db, env);
 }
 
+export async function nativeGuestCategorizedOrdersFixture(admin: PrismaClient, db: PrismaClient, env: NodeJS.ProcessEnv) {
+  const fixture = await nativeServiceOrderFixture(admin, db);
+  const entries = [
+    { key: "owned_cleaning", name: { en: "Mid-stay cleaning", fr: "Ménage pendant le séjour", ar: "تنظيف أثناء الإقامة" }, amount: "95.00" },
+    { key: "owned_experience", name: { en: "Guided garden walk", fr: "Promenade guidée au jardin", ar: "جولة في الحديقة" }, amount: "180.00" }
+  ];
+  const original = serviceAllocationPolicySchema.parse(fixture.policies.allocation.value);
+  const recipe = original.services.find(item => item.service_key === fixture.entry.key);
+  if (!recipe) throw new Error("The original native allocation recipe is required");
+  const allocation = await withTenant(db, fixture.organizationId, tx => new ConfigRuleRepository(tx, fixture.organizationId).createVersion({
+    key: "finance.service_allocation", scopeType: "property", scopeId: fixture.property.id, createdBy: fixture.account.id,
+    effectiveFrom: new Date("2020-01-01"), reason: "Approve exact synthetic cleaning and experience allocation recipes",
+    value: { ...original, services: [...original.services, ...entries.map(entry => ({ ...recipe, service_key: entry.key }))] }
+  }));
+  for (const entry of entries) {
+    const draft = { ...fixture.draft, entry: { ...fixture.entry, ...entry, order_terms: { ...fixture.entry.order_terms,
+      allocation_rule_id: allocation.id } } };
+    const reviewed = await previewServiceCatalogChange(fixture.ctx, draft, fixture.deps);
+    await publishServiceCatalogChange(fixture.ctx, { draft, reviewFingerprint: reviewed.reviewFingerprint, idempotencyKey: randomUUID() }, fixture.deps);
+  }
+  return prepareGuestServiceOrderCapability({ ...fixture, entry: { ...fixture.entry, ...entries[0] } }, db, env,
+    { owned_cleaning: "CLEANING", owned_experience: "EXPERIENCE" });
+}
+
 type GuestOrderFixture = Pick<Awaited<ReturnType<typeof nativeServiceOrderFixture>>,
   "organizationId" | "account" | "ctx" | "person" | "property" | "reservation"> & { entry: { key: string } };
 
-export async function prepareGuestServiceOrderCapability<F extends GuestOrderFixture>(fixture: F, db: PrismaClient, env: NodeJS.ProcessEnv) {
+export async function prepareGuestServiceOrderCapability<F extends GuestOrderFixture>(
+  fixture: F, db: PrismaClient, env: NodeJS.ProcessEnv, categories?: Readonly<Record<string, GuestHubServiceCategory>>
+) {
   await withTenant(db, fixture.organizationId, async tx => {
     const role = await tx.role.create({ data: { organizationId: fixture.organizationId, key: `guest_services_${randomUUID()}`, name: "Scoped guest service publisher" } });
     const keys = ["guest:edit", "guest_hub_service_orders:view", "guest_hub_service_orders:create", "guest_hub_service_orders:void"];
@@ -49,7 +76,8 @@ export async function prepareGuestServiceOrderCapability<F extends GuestOrderFix
         history: "APPEND_ONLY_GUEST_NATIVE_ORDER_RECEIPTS", enabled: true, processing_approval_reference: "Owned test policy",
         wording_approval_reference: "Owned test wording", notice: { reference: "Owned order notice", title: text, paragraphs: [text] },
         public_offers: "EXPLICITLY_RELEASED_CANONICAL_CATALOG", request_authority: "HELD_AND_CURRENT_RELEASE_ACTOR",
-        allowed_service_keys: [fixture.entry.key], review_lifetime_seconds: 900, release_lifetime_seconds: 3600,
+        allowed_service_keys: categories ? Object.keys(categories) : [fixture.entry.key], ...(categories ? { service_categories: categories } : {}),
+        review_lifetime_seconds: 900, release_lifetime_seconds: 3600,
         submissions: { requests: 30, window_seconds: 3600 } } });
   });
   const actor = { ...fixture.ctx, authContext: { ...await authContextForAccount(fixture.organizationId, fixture.account.id, { db }), personId: fixture.person.id } };

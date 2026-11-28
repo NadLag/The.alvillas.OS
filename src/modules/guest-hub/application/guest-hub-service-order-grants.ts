@@ -7,7 +7,7 @@ import { serviceCatalogMaximumItems } from "@/platform/config/service-catalog-po
 import { serviceOrderPolicyKey, serviceOrderPolicySchema } from "@/platform/config/service-order-policy";
 import { readNativeServiceCatalog } from "@/platform/services/guest-order-authority";
 import { guestServiceOfferSchema, projectReleasedGuestServiceOffer } from "@/platform/services/guest-service-order-contracts";
-import { effectiveGuestHubServiceOrderPolicy, guestHubServiceOrderPolicyKey, guestHubServiceOrderPolicySchema,
+import { categoryForGuestService, effectiveGuestHubServiceOrderPolicy, guestHubServiceOrderPolicyKey, guestHubServiceOrderPolicySchema,
   GuestHubServiceOrderAccessError, GuestHubServiceOrderConflictError } from "../domain/guest-hub-service-order-policy";
 import { GuestHubServiceOrderRepository } from "../infrastructure/guest-hub-service-order-repository";
 import { createGuestHubFormGrantService } from "./guest-hub-form-grants";
@@ -61,7 +61,7 @@ const orderGrantDefinition = {
         .filter(item => item.available && item.order_terms && policy.allowed_service_keys.includes(item.key))
         .map(item => projectReleasedGuestServiceOffer({ key: item.key, name: item.name ?? null, description: item.description ?? null,
           available: true, pricingModel: item.pricing_model, amount: item.amount ?? null, currency: item.currency ?? null,
-          orderTerms: item.order_terms ?? null }));
+          orderTerms: item.order_terms ?? null }, categoryForGuestService(policy, item.key)));
       const snapshot = guestHubServiceOrderDelegationSnapshot.parse({ catalogRuleId: rule.id, catalogRuleVersion: rule.version,
         catalogFingerprint: catalog.fingerprint, orderingRuleId: ordering.id, orderingRuleVersion: ordering.version,
         orderingSnapshot: serviceOrderPolicySchema.parse(value.value), publicOffers,

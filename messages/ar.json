@@ -6374,6 +6374,7 @@
     }
   },
   "GuestServiceOrders": {
+    "category": { "CLEANING": "التنظيف", "EXPERIENCE": "التجارب" },
     "pickupDate": "تاريخ الاستلام",
     "chefMenu": {
       "title": "قائمة الشيف",
