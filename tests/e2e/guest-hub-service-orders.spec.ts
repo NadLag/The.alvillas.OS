@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 import { z } from "zod";
-import { formatCurrencyAmount } from "@/i18n/format";
+import { formatCurrencyAmount, formatRecipeQuantity } from "@/i18n/format";
 import { ownedChefMenu } from "../support/chef-menu-definition";
 import ar from "../../messages/ar.json" with { type: "json" };
 
-async function openGuestOrders(page: Page, kind: "service" | "chef") {
+async function openGuestOrders(page: Page, kind: "service" | "chef" | "grocery") {
   const fixture = z.object({ token: z.string().min(1), serviceKey: z.string().min(1) }).strict().parse(JSON.parse(execFileSync(process.execPath,
     ["node_modules/tsx/dist/cli.mjs", "tests/e2e/support/guest-service-order-fixture-worker.cts", kind],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 })));
@@ -73,4 +73,26 @@ test("an Arabic guest can review an approved Chef menu with its listed allergens
   const review = orders.getByTestId("guest-service-order-review");
   await expect(review.getByText(formatCurrencyAmount("ar", "120.00", "MAD"), { exact: true })).toBeVisible();
   await expect(review.getByTestId("guest-chef-menu").getByText(ownedChefMenu.allergens[0].name.ar, { exact: true })).toBeVisible();
+});
+
+test("an Arabic guest can submit exact grocery quantities with purchase instructions", async ({ page }) => {
+  test.setTimeout(150000);
+  const { orders } = await openGuestOrders(page, "grocery");
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
+  const editor = orders.getByTestId("grocery-items-editor");
+  await editor.getByRole("button", { name: ar.Groceries.add, exact: true }).click();
+  const unit = "كيلوغرام";
+  const quantity = formatRecipeQuantity("ar", "0.100001");
+  await editor.getByLabel(ar.Groceries.name, { exact: true }).fill("طماطم");
+  await editor.getByLabel(ar.Groceries.quantity, { exact: true }).fill(quantity);
+  await editor.getByLabel(ar.Groceries.unit, { exact: true }).fill(unit);
+  await editor.getByLabel(ar.Groceries.notes, { exact: true }).fill("طماطم كاملة");
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.review }).click();
+  const review = orders.getByTestId("guest-service-order-review");
+  const items = review.getByTestId("grocery-items");
+  await expect(items.getByText(quantity + " " + unit, { exact: true })).toBeVisible();
+  await expect(items.getByText("طماطم كاملة", { exact: true })).toBeVisible();
+  await review.getByRole("checkbox", { name: ar.GuestServiceOrders.acknowledge }).check();
+  await review.getByRole("button", { name: ar.GuestServiceOrders.submit }).click();
+  await expect(orders.getByTestId("guest-service-order-receipt").getByText(ar.GuestServiceOrders.orderState.REQUESTED, { exact: true })).toBeVisible();
 });

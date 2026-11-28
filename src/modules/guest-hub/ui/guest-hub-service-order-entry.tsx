@@ -7,6 +7,7 @@ import { localizedText } from "@/i18n/content";
 import { formatCurrencyAmount, formatNumber } from "@/i18n/format";
 import type { AppLocale } from "@/i18n/routing";
 import { clearCommandNonce, readCommandNonce, writeCommandNonce } from "@/platform/http/command-nonce";
+import { GroceryItems, GroceryItemsEditor, groceryOrderItems, type GroceryItemForm } from "@/platform/services/grocery-items";
 import { guestServiceOfferPageSchema, guestServiceOrderDraftSchema, guestServiceOrderPublicReviewSchema,
   guestServiceOrderReceiptSchema, guestServiceOrderRecoveryResponseSchema, type GuestChefMenu } from "@/platform/services/guest-service-order-contracts";
 import { GuestHubBrowserError, guestHubRequest } from "./guest-hub-browser";
@@ -39,6 +40,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
   const [pending, setPending] = useState<string | null>(() => readCommandNonce(nonceKey));
   const [offers, setOffers] = useState<Offers | null>(null);
   const [selectedServiceKey, setSelectedServiceKey] = useState("");
+  const [groceryItems, setGroceryItems] = useState<GroceryItemForm[]>([]);
   const [editing, setEditing] = useState<Draft | null>(null);
   const [review, setReview] = useState<{ draft: Draft; quote: Review } | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -60,7 +62,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       if (request.signal.aborted) return;
       const state = failure instanceof GuestHubBrowserError ? failure.state : "unavailable";
       setError(state);
-      if (state === "link_unavailable" || state === "forbidden") { setOffers(null); setSelectedServiceKey(""); setEditing(null); setReview(null); setReceipt(null); }
+      if (state === "link_unavailable" || state === "forbidden") { setOffers(null); setSelectedServiceKey(""); setGroceryItems([]); setEditing(null); setReview(null); setReceipt(null); }
     }).finally(() => {
       if (!request.signal.aborted) { controller.current = null; setBusy(false); }
     });
@@ -80,6 +82,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
     run(async signal => {
       const draft = guestServiceOrderDraftSchema.safeParse({ serviceKey: fields.get("serviceKey"), serviceDate: fields.get("serviceDate"),
         lastServiceDate: fields.get("lastServiceDate"), quantity: Number(fields.get("quantity")), guests: Number(fields.get("guests")),
+        ...(selectedOffer?.grocery ? { groceryItems: groceryOrderItems(groceryItems) } : {}),
         locale, idempotencyKey: crypto.randomUUID() });
       if (!draft.success) throw new GuestHubBrowserError("validation");
       const result = guestServiceOrderPublicReviewSchema.parse(await guestHubRequest(`${endpoint}review`, draft.data, signal));
@@ -97,6 +100,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       writeCommandNonce(nonceKey, nonce);
       if (readCommandNonce(nonceKey) !== nonce) throw new GuestHubBrowserError("unavailable");
       setPending(nonce);
+      setGroceryItems([]);
       setEditing(null);
       setReview(null);
       const result = guestServiceOrderReceiptSchema.parse(await guestHubRequest(`${endpoint}admit`, {
@@ -139,12 +143,15 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       <div className="field">
         <label htmlFor="guest-service-order-selection">{t("service")}</label>
         <select id="guest-service-order-selection" name="serviceKey" value={selectedOffer?.key ?? ""}
-          onChange={event => setSelectedServiceKey(event.target.value)} required disabled={busy}>
+          onChange={event => { setSelectedServiceKey(event.target.value); setGroceryItems([]); }} required disabled={busy}>
           {offers.items.map(offer => <option key={offer.key} value={offer.key}>{localizedText(offer.name, locale)}</option>)}
         </select>
       </div>
       {selectedOffer?.description && <p dir="auto">{localizedText(selectedOffer.description, locale)}</p>}
       {selectedOffer?.chefMenu && <GuestChefMenuDetails menu={selectedOffer.chefMenu} locale={locale} />}
+      {selectedOffer?.grocery && <fieldset disabled={busy}>
+        <GroceryItemsEditor value={groceryItems} onChange={setGroceryItems} />
+      </fieldset>}
       <div className="form-grid two">
         <label className="field"><span>{t("serviceDate")}</span><input type="date" name="serviceDate" required min={checkIn} max={checkOut} defaultValue={editing?.serviceDate ?? checkIn} disabled={busy} /></label>
         <label className="field"><span>{t("lastServiceDate")}</span><input type="date" name="lastServiceDate" required min={checkIn} max={checkOut} defaultValue={editing?.lastServiceDate ?? checkIn} disabled={busy} /></label>
@@ -152,7 +159,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
         <label className="field"><span>{t("guests")}</span><input name="guests" type="number" min="1" step="1" defaultValue={editing?.guests ?? 1} required disabled={busy} /></label>
       </div>
       <div className="form-actions">
-        <button type="submit" className="primary-button" disabled={busy}>{t("review")}</button>
+        <button type="submit" className="primary-button" disabled={busy || (selectedOffer?.grocery && groceryItems.length === 0)}>{t("review")}</button>
         {offers.next && <button type="button" className="secondary-button" onClick={() => load(offers.next ?? undefined)} disabled={busy}>{t("more")}</button>}
       </div>
     </form>}
@@ -160,6 +167,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       <h4>{localizedText(review.quote.title, locale)}</h4>
       <p>{review.quote.totalAmount === null ? t("quoteRequired") : formatCurrencyAmount(locale, review.quote.totalAmount, review.quote.currency)}</p>
       {review.quote.chefMenu && <GuestChefMenuDetails menu={review.quote.chefMenu} locale={locale} />}
+      {review.quote.selection.groceryItems && <GroceryItems locale={locale} items={review.quote.selection.groceryItems} />}
       <h5>{review.quote.notice.title}</h5>
       {review.quote.notice.paragraphs.map((paragraph, index) => <p key={index} dir="auto">{paragraph}</p>)}
       <label><input type="checkbox" required disabled={busy} /> {t("acknowledge")}</label>

@@ -4,7 +4,7 @@ import {useTranslations} from "next-intl";
 import type {z} from "zod";
 import type {AppLocale} from "@/i18n/routing";
 import {groceryTaskResponseSchema} from "@/platform/services/grocery-task-contracts";
-import {GroceryItems} from "./grocery-items";
+import {GroceryItems} from "@/platform/services/grocery-items";
 import {privateServiceRequest,ServicePrivateBrowserError,type ServicePrivateBrowserState} from "./service-catalog-browser";
 export function GroceryTask({locale,taskId,scope}:{locale:AppLocale;taskId:string;scope:string}){
  const t=useTranslations("ServiceOrders"),[value,setValue]=useState<(z.infer<typeof groceryTaskResponseSchema>&{scope:string})|null>(null),[state,setState]=useState<ServicePrivateBrowserState>("ready"),controller=useRef<AbortController|null>(null),epoch=useRef(0),[known,setKnown]=useState(false);

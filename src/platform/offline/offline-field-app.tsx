@@ -21,7 +21,7 @@ import { fieldQueue } from "./field-queue";
 import { type FieldQueueScope } from "./field-queue-store";
 import { resolveFieldScope } from "./field-session";
 import { FieldPhotoCapture } from "./field-photo-capture";
-import {GroceryItems} from "@/modules/services/ui/grocery-items";
+import {GroceryItems} from "@/platform/services/grocery-items";
 import {ChefMenuRecipe,ChefOrderRequirements} from "@/modules/services/ui/chef-menu-details";
 import { FieldIssueCapture } from "./field-issue-capture";
 import { FieldWallet } from "./field-wallet";

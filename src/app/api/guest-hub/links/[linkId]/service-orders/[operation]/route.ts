@@ -8,6 +8,8 @@ import { ServiceOrderConflictError, ServiceOrderValidationError } from "@/module
 import { GuestHubServiceOrderConflictError } from "@/modules/guest-hub/domain/guest-hub-service-order-policy";
 
 const operationSchema = z.enum(["view", "review", "admit", "recover"]);
+// One complete shopping list can include 100 localized item descriptions and notes.
+const maximumOrderCommandBytes = 512 * 1024;
 const definition = { feature: "F-GST-08" as const, viewPage: listGuestHubServiceOffers, review: reviewGuestHubServiceOrder,
   async admit(capability: unknown, input: unknown, deps: Parameters<typeof submitGuestHubServiceOrder>[2]) {
     try { return await submitGuestHubServiceOrder(capability, input, deps); }
@@ -21,5 +23,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { linkId, operation } = await params;
   const action = operationSchema.safeParse(operation);
   if (!action.success) return NextResponse.json({ error: "not_found" }, { status: 404, headers: guestHubFormPublicHeaders });
-  return guestHubFormPublicHttp(request, { db: prisma }, linkId, action.data, definition);
+  const acceptsShoppingList = action.data === "review" || action.data === "admit";
+  return guestHubFormPublicHttp(request, { db: prisma }, linkId, action.data,
+    acceptsShoppingList ? { ...definition, maximumRequestBytes: maximumOrderCommandBytes } : definition);
 }

@@ -14,7 +14,7 @@ import {serviceOrderOriginalResponseSchema,serviceOrderHistoryResponseSchema,ser
 import {privateServiceRequest,ServicePrivateBrowserError,type ServicePrivateBrowserState} from "./service-catalog-browser";
 import {TransferDetails} from "./transfer-details";
 import {GroceryPurchaseHistory} from "./grocery-purchase-history";
-import {GroceryItems} from "./grocery-items";
+import {GroceryItems} from "@/platform/services/grocery-items";
 import {ChefCompensation} from "./chef-compensation";
 import {ServiceCatalogTerms} from "./service-catalog-terms";
 

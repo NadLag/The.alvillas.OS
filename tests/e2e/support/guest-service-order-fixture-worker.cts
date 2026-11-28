@@ -3,7 +3,7 @@ import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { withTenant } from "@/platform/db/tenant";
 import { guestHubVerificationPolicyKey } from "@/modules/guest-hub/domain/guest-hub-policy";
-import { nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "../../integration/support/guest-service-order-fixture";
+import { nativeGuestGroceryOrderFixture, nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "../../integration/support/guest-service-order-fixture";
 import { nativeChefMenuFixture } from "../../integration/support/chef-menu-fixture";
 import { provisionIntegrationRole } from "../../integration/support/database-role";
 
@@ -29,9 +29,10 @@ async function prepare() {
     });
     url.username = url.password = "alvillas_ops_tests";
     db = new PrismaClient({ datasourceUrl: url.toString() });
-    const { capability, fixture, decide } = process.argv[2] === "chef"
+    const mode = process.argv[2];
+    const { capability, fixture, decide } = mode === "chef"
       ? await prepareGuestServiceOrderCapability(await nativeChefMenuFixture(admin, db), db, process.env)
-      : await nativeGuestServiceOrderFixture(admin, db, process.env);
+      : mode === "grocery" ? await nativeGuestGroceryOrderFixture(admin, db, process.env) : await nativeGuestServiceOrderFixture(admin, db, process.env);
     await decide("GRANTED");
     process.stdout.write(JSON.stringify({ token: capability.token, serviceKey: fixture.entry.key }));
   } finally {

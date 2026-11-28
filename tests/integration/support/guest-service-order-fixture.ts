@@ -6,10 +6,23 @@ import { authContextForAccount } from "@/platform/authz/account-context";
 import { issueGuestHubLink, reviewGuestHubIssue } from "@/modules/guest-hub/application/guest-hub-service";
 import { guestHubServiceOrderGrants } from "@/modules/guest-hub/application/guest-hub-service-order-grants";
 import { guestHubServiceOrderPolicyKey } from "@/modules/guest-hub/domain/guest-hub-service-order-policy";
+import { previewServiceCatalogChange, publishServiceCatalogChange } from "@/modules/services/application/service-catalog-service";
+import { groceryOrderTermsSchema } from "@/platform/config/grocery-order-policy";
 import { nativeServiceOrderFixture } from "./service-order-fixture";
 
 export async function nativeGuestServiceOrderFixture(admin: PrismaClient, db: PrismaClient, env: NodeJS.ProcessEnv) {
   const fixture = await nativeServiceOrderFixture(admin, db);
+  return prepareGuestServiceOrderCapability(fixture, db, env);
+}
+
+export async function nativeGuestGroceryOrderFixture(admin: PrismaClient, db: PrismaClient, env: NodeJS.ProcessEnv) {
+  const fixture = await nativeServiceOrderFixture(admin, db);
+  const grocery = groceryOrderTermsSchema.parse({ schemaVersion: 1, task_type: "CUSTOM",
+    purchases: "CANONICAL_PROPERTY_EXPENSE", reimbursement: "CONFIGURED_NATIVE_SETTLEMENT" });
+  const draft = { ...fixture.draft, entry: { ...fixture.entry, name: { en: "Approved groceries", fr: "Courses approuvées", ar: "مشتريات معتمدة" },
+    order_terms: { ...fixture.entry.order_terms, grocery_order: grocery } } };
+  const reviewed = await previewServiceCatalogChange(fixture.ctx, draft, fixture.deps);
+  await publishServiceCatalogChange(fixture.ctx, { draft, reviewFingerprint: reviewed.reviewFingerprint, idempotencyKey: randomUUID() }, fixture.deps);
   return prepareGuestServiceOrderCapability(fixture, db, env);
 }
 

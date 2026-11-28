@@ -8,9 +8,10 @@ import { recoverGuestHubServiceOrder, reviewGuestHubServiceOrder, submitGuestHub
 import { GuestHubInvalidLinkError } from "@/modules/guest-hub/domain/guest-hub-policy";
 import { GuestHubServiceOrderConflictError } from "@/modules/guest-hub/domain/guest-hub-service-order-policy";
 import { previewServiceOrderTransition, transitionServiceOrder } from "@/modules/services/application/service-order-transition";
+import { readServiceOrderOriginal } from "@/modules/services/application/service-order-workspace";
 import { ServiceOrderValidationError } from "@/modules/services/domain/service-order";
 import { nativeChefMenuFixture, ownedChefMenu } from "./support/chef-menu-fixture";
-import { nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "./support/guest-service-order-fixture";
+import { nativeGuestGroceryOrderFixture, nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "./support/guest-service-order-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
 
 const env: NodeJS.ProcessEnv = { NODE_ENV: "test", ENCRYPTION_KEYS: `owned-guest-service:${randomBytes(32).toString("base64")}` };
@@ -30,6 +31,29 @@ beforeAll(async () => {
 });
 
 afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+
+it("preserves exact requested grocery quantities in the native order without posting a purchase", async () => {
+  const { fixture, deps, capability, decide } = await nativeGuestGroceryOrderFixture(admin, db, env);
+  await decide("GRANTED");
+  expect((await listGuestHubServiceOffers(capability, {}, deps)).items).toEqual([
+    expect.objectContaining({ key: fixture.entry.key, grocery: true })
+  ]);
+  const groceryItems = [{ name: "Seasonal tomatoes", quantity: "0.100001", unit: "kilogram", notes: "Whole tomatoes" }];
+  const draft = { serviceKey: fixture.entry.key, serviceDate: fixture.request.serviceDate, lastServiceDate: fixture.request.lastServiceDate,
+    guests: fixture.request.guests, quantity: 2, locale: "fr", idempotencyKey: randomUUID() };
+  await expect(reviewGuestHubServiceOrder(capability, draft, deps)).rejects.toBeInstanceOf(ServiceOrderValidationError);
+  const countFinancialTransactions = () => withTenant(db, fixture.organizationId, tx => tx.financialTransaction.count());
+  const before = await countFinancialTransactions();
+  const quote = await reviewGuestHubServiceOrder(capability, { ...draft, groceryItems }, deps);
+  expect(quote).toMatchObject({ selection: { groceryItems }, totalAmount: "240.00" });
+  const command = { ...draft, groceryItems, acknowledged: true, reviewFingerprint: quote.reviewFingerprint };
+  const receipt = await submitGuestHubServiceOrder(capability, command, deps);
+  expect(await submitGuestHubServiceOrder(capability, command, deps)).toMatchObject({ orderId: receipt.orderId, replayed: true });
+  expect(await readServiceOrderOriginal(fixture.ctx, { orderId: receipt.orderId }, fixture.deps)).toMatchObject({
+    request: { groceryItems }, totalAmount: "240.00"
+  });
+  expect(await countFinancialTransactions()).toBe(before);
+});
 
 it("selects an approved chef menu and hands the reviewed guest order to the canonical cooking workflow", async () => {
   const fixture = await nativeChefMenuFixture(admin, db);

@@ -42,8 +42,9 @@ function presentOrder(context: Context, data: Record<string, unknown>) {
 }
 
 async function quote(context: Context, input: Draft) {
-  const { serviceKey, serviceDate, lastServiceDate, quantity, guests, idempotencyKey, locale } = input;
-  const selection = guestServiceOrderSelectionSchema.parse({ serviceKey, serviceDate, lastServiceDate, quantity, guests });
+  const { serviceKey, serviceDate, lastServiceDate, quantity, guests, groceryItems, idempotencyKey, locale } = input;
+  const selection = guestServiceOrderSelectionSchema.parse({ serviceKey, serviceDate, lastServiceDate, quantity, guests,
+    ...(groceryItems ? { groceryItems } : {}) });
   const offer = context.form.offers.find(item => item.key === serviceKey);
   if (!offer) throw new GuestHubServiceOrderAccessError();
   const request = bindGuestServiceOrderSelection(selection, context.actual.source, idempotencyKey);
