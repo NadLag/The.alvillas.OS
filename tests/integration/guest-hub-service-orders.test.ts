@@ -11,7 +11,7 @@ import { previewServiceOrderTransition, transitionServiceOrder } from "@/modules
 import { readServiceOrderOriginal } from "@/modules/services/application/service-order-workspace";
 import { ServiceOrderValidationError } from "@/modules/services/domain/service-order";
 import { nativeChefMenuFixture, ownedChefMenu } from "./support/chef-menu-fixture";
-import { nativeGuestGroceryOrderFixture, nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "./support/guest-service-order-fixture";
+import { nativeGuestSpecialOrderFixture, nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "./support/guest-service-order-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
 
 const env: NodeJS.ProcessEnv = { NODE_ENV: "test", ENCRYPTION_KEYS: `owned-guest-service:${randomBytes(32).toString("base64")}` };
@@ -32,8 +32,34 @@ beforeAll(async () => {
 
 afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
 
+it("records one guest transfer date and exact pickup details for the native dispatch workflow", async () => {
+  const { fixture, deps, capability, decide } = await nativeGuestSpecialOrderFixture(admin, db, env, "transfer");
+  await decide("GRANTED");
+  expect((await listGuestHubServiceOffers(capability, {}, deps)).items).toEqual([
+    expect.objectContaining({ key: fixture.entry.key, transfer: true })
+  ]);
+  const transfer = { pickup: "Airport arrivals", destination: "Garden gate", pickupTime: "14:35",
+    flightReference: "SYN-2031", instructions: "Meet at the arrivals door" };
+  const draft = { serviceKey: fixture.entry.key, serviceDate: fixture.request.serviceDate, lastServiceDate: fixture.request.serviceDate,
+    quantity: 1, guests: fixture.request.guests, locale: "en", idempotencyKey: randomUUID(), transfer };
+  await expect(reviewGuestHubServiceOrder(capability, { ...draft, lastServiceDate: "2031-05-03" }, deps)).rejects.toBeInstanceOf(ServiceOrderValidationError);
+  const quote = await reviewGuestHubServiceOrder(capability, draft, deps);
+  expect(quote).toMatchObject({ selection: { transfer }, totalAmount: "120.00", currency: "MAD" });
+  const receipt = await submitGuestHubServiceOrder(capability, { ...draft, acknowledged: true, reviewFingerprint: quote.reviewFingerprint }, deps);
+  expect(await readServiceOrderOriginal(fixture.ctx, { orderId: receipt.orderId }, fixture.deps)).toMatchObject({
+    request: { transfer, propertyId: fixture.property.id, reservationId: fixture.reservation.id }, totalAmount: "120.00"
+  });
+  const confirmation = { orderId: receipt.orderId, expectedVersion: receipt.version, state: "CONFIRMED",
+    taskPlan: { type: "TRANSFER", priority: "NORMAL", checklistTemplateKey: "owned_service" }, reason: "Confirm the original airport pickup" };
+  const reviewed = await previewServiceOrderTransition(fixture.ctx, confirmation, fixture.deps);
+  const confirmed = await transitionServiceOrder(fixture.ctx, {
+    ...confirmation, idempotencyKey: randomUUID(), reviewFingerprint: reviewed.reviewFingerprint
+  }, fixture.deps);
+  expect(confirmed).toMatchObject({ orderId: receipt.orderId, state: "CONFIRMED" });
+});
+
 it("preserves exact requested grocery quantities in the native order without posting a purchase", async () => {
-  const { fixture, deps, capability, decide } = await nativeGuestGroceryOrderFixture(admin, db, env);
+  const { fixture, deps, capability, decide } = await nativeGuestSpecialOrderFixture(admin, db, env, "grocery");
   await decide("GRANTED");
   expect((await listGuestHubServiceOffers(capability, {}, deps)).items).toEqual([
     expect.objectContaining({ key: fixture.entry.key, grocery: true })

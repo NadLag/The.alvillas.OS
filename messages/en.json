@@ -6374,6 +6374,7 @@
     }
   },
   "GuestServiceOrders": {
+    "pickupDate": "Pickup date",
     "chefMenu": {
       "title": "Chef's menu",
       "servingsPerUnit": "Servings per unit",

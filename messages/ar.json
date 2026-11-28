@@ -6374,6 +6374,7 @@
     }
   },
   "GuestServiceOrders": {
+    "pickupDate": "تاريخ الاستلام",
     "chefMenu": {
       "title": "قائمة الشيف",
       "servingsPerUnit": "عدد الحصص لكل وحدة",

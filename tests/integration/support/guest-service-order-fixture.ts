@@ -8,6 +8,7 @@ import { guestHubServiceOrderGrants } from "@/modules/guest-hub/application/gues
 import { guestHubServiceOrderPolicyKey } from "@/modules/guest-hub/domain/guest-hub-service-order-policy";
 import { previewServiceCatalogChange, publishServiceCatalogChange } from "@/modules/services/application/service-catalog-service";
 import { groceryOrderTermsSchema } from "@/platform/config/grocery-order-policy";
+import { transferOrderTermsSchema } from "@/platform/config/transfer-order-policy";
 import { nativeServiceOrderFixture } from "./service-order-fixture";
 
 export async function nativeGuestServiceOrderFixture(admin: PrismaClient, db: PrismaClient, env: NodeJS.ProcessEnv) {
@@ -15,12 +16,15 @@ export async function nativeGuestServiceOrderFixture(admin: PrismaClient, db: Pr
   return prepareGuestServiceOrderCapability(fixture, db, env);
 }
 
-export async function nativeGuestGroceryOrderFixture(admin: PrismaClient, db: PrismaClient, env: NodeJS.ProcessEnv) {
+export async function nativeGuestSpecialOrderFixture(admin: PrismaClient, db: PrismaClient, env: NodeJS.ProcessEnv, kind: "grocery" | "transfer") {
   const fixture = await nativeServiceOrderFixture(admin, db);
-  const grocery = groceryOrderTermsSchema.parse({ schemaVersion: 1, task_type: "CUSTOM",
-    purchases: "CANONICAL_PROPERTY_EXPENSE", reimbursement: "CONFIGURED_NATIVE_SETTLEMENT" });
-  const draft = { ...fixture.draft, entry: { ...fixture.entry, name: { en: "Approved groceries", fr: "Courses approuvées", ar: "مشتريات معتمدة" },
-    order_terms: { ...fixture.entry.order_terms, grocery_order: grocery } } };
+  const terms = kind === "grocery"
+    ? { grocery_order: groceryOrderTermsSchema.parse({ schemaVersion: 1, task_type: "CUSTOM", purchases: "CANONICAL_PROPERTY_EXPENSE",
+      reimbursement: "CONFIGURED_NATIVE_SETTLEMENT" }) }
+    : { transfer_order: transferOrderTermsSchema.parse({ schemaVersion: 1, task_type: "TRANSFER", cash: "NATIVE_CASH_CUSTODY" }) };
+  const name = kind === "grocery" ? { en: "Approved groceries", fr: "Courses approuvées", ar: "مشتريات معتمدة" }
+    : { en: "Approved airport transfer", fr: "Transfert aéroport approuvé", ar: "نقل معتمد من المطار" };
+  const draft = { ...fixture.draft, entry: { ...fixture.entry, name, order_terms: { ...fixture.entry.order_terms, ...terms } } };
   const reviewed = await previewServiceCatalogChange(fixture.ctx, draft, fixture.deps);
   await publishServiceCatalogChange(fixture.ctx, { draft, reviewFingerprint: reviewed.reviewFingerprint, idempotencyKey: randomUUID() }, fixture.deps);
   return prepareGuestServiceOrderCapability(fixture, db, env);

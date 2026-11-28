@@ -3,7 +3,7 @@ import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { withTenant } from "@/platform/db/tenant";
 import { guestHubVerificationPolicyKey } from "@/modules/guest-hub/domain/guest-hub-policy";
-import { nativeGuestGroceryOrderFixture, nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "../../integration/support/guest-service-order-fixture";
+import { nativeGuestSpecialOrderFixture, nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "../../integration/support/guest-service-order-fixture";
 import { nativeChefMenuFixture } from "../../integration/support/chef-menu-fixture";
 import { provisionIntegrationRole } from "../../integration/support/database-role";
 
@@ -32,7 +32,9 @@ async function prepare() {
     const mode = process.argv[2];
     const { capability, fixture, decide } = mode === "chef"
       ? await prepareGuestServiceOrderCapability(await nativeChefMenuFixture(admin, db), db, process.env)
-      : mode === "grocery" ? await nativeGuestGroceryOrderFixture(admin, db, process.env) : await nativeGuestServiceOrderFixture(admin, db, process.env);
+      : mode === "grocery" || mode === "transfer"
+        ? await nativeGuestSpecialOrderFixture(admin, db, process.env, mode)
+        : await nativeGuestServiceOrderFixture(admin, db, process.env);
     await decide("GRANTED");
     process.stdout.write(JSON.stringify({ token: capability.token, serviceKey: fixture.entry.key }));
   } finally {

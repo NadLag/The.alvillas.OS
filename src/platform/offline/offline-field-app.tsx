@@ -1,5 +1,5 @@
 "use client";
-import {TransferDetails} from "@/modules/services/ui/transfer-details";
+import {TransferDetails} from "@/platform/services/transfer-details";
 
 import { useEffect, useRef, useState } from "react";
 import { liveQuery } from "dexie";

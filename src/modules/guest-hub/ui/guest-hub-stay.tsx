@@ -33,7 +33,7 @@ export function GuestHubStay({view,locale,onRefresh}:{view:View;locale:AppLocale
   {home.identityDocumentsAvailable&&<GuestHubIdentityDocumentsEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.houseRulesAvailable&&<GuestHubHouseRulesEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.agreementAvailable&&<GuestHubAgreementEntry key={view.id} locale={locale} linkId={view.id}/>}
-  {home.serviceOrdersAvailable&&<GuestHubServiceOrderEntry key={view.id} linkId={view.id} locale={locale} checkIn={view.checkIn} checkOut={view.checkOut}/>}
+  {home.serviceOrdersAvailable&&<GuestHubServiceOrderEntry key={view.id} linkId={view.id} locale={locale} checkIn={view.checkIn} checkOut={view.checkOut} timezone={view.timezone}/>}
   <div className="guest-stay-tools"><nav aria-label={access("language")}>{(["en","fr","ar"]as const).map(language=><a key={language} className="secondary-button" href={"/"+language+"/guest/"+view.id} hrefLang={language} lang={language} aria-current={locale===language?"page":undefined}>{access("languages."+language)}</a>)}</nav><button type="button" className="primary-button" onClick={onRefresh} data-testid="guest-access-refresh">{access("refresh")}</button></div>
  </section>;
 }

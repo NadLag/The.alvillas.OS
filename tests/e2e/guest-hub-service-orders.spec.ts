@@ -5,7 +5,7 @@ import { formatCurrencyAmount, formatRecipeQuantity } from "@/i18n/format";
 import { ownedChefMenu } from "../support/chef-menu-definition";
 import ar from "../../messages/ar.json" with { type: "json" };
 
-async function openGuestOrders(page: Page, kind: "service" | "chef" | "grocery") {
+async function openGuestOrders(page: Page, kind: "service" | "chef" | "grocery" | "transfer") {
   const fixture = z.object({ token: z.string().min(1), serviceKey: z.string().min(1) }).strict().parse(JSON.parse(execFileSync(process.execPath,
     ["node_modules/tsx/dist/cli.mjs", "tests/e2e/support/guest-service-order-fixture-worker.cts", kind],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 })));
@@ -92,6 +92,30 @@ test("an Arabic guest can submit exact grocery quantities with purchase instruct
   const items = review.getByTestId("grocery-items");
   await expect(items.getByText(quantity + " " + unit, { exact: true })).toBeVisible();
   await expect(items.getByText("طماطم كاملة", { exact: true })).toBeVisible();
+  await review.getByRole("checkbox", { name: ar.GuestServiceOrders.acknowledge }).check();
+  await review.getByRole("button", { name: ar.GuestServiceOrders.submit }).click();
+  await expect(orders.getByTestId("guest-service-order-receipt").getByText(ar.GuestServiceOrders.orderState.REQUESTED, { exact: true })).toBeVisible();
+});
+
+test("an Arabic guest books one property-local transfer pickup", async ({ page }) => {
+  test.setTimeout(150000);
+  const { orders } = await openGuestOrders(page, "transfer");
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
+  const fields = orders.getByTestId("transfer-request-fields");
+  await fields.getByLabel(ar.Transfers.pickup, { exact: true }).fill("باب المطار");
+  await fields.getByLabel(ar.Transfers.destination, { exact: true }).fill("مدخل الحديقة");
+  await fields.getByLabel(ar.Transfers.pickupTime, { exact: true }).fill("14:35");
+  await fields.getByLabel(ar.Transfers.flightReference, { exact: true }).fill("SYN-2031");
+  await expect(orders.getByLabel(ar.GuestServiceOrders.pickupDate, { exact: true })).toHaveValue("2031-05-01");
+  await expect(orders.getByLabel(ar.GuestServiceOrders.lastServiceDate, { exact: true })).toHaveCount(0);
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.review }).click();
+  const review = orders.getByTestId("guest-service-order-review");
+  const pickup = review.getByTestId("transfer-details");
+  await expect(pickup.getByText("باب المطار", { exact: true })).toBeVisible();
+  await expect(pickup.locator("time")).toHaveAttribute("datetime", "2031-05-01T14:35");
+  await expect(pickup.getByText("(Africa/Casablanca)", { exact: true })).toBeVisible();
+  await expect(review.getByText(formatCurrencyAmount("ar", "120.00", "MAD"), { exact: true })).toBeVisible();
+  await expect(pickup.getByText(ar.Transfers.cashHelp, { exact: true })).toHaveCount(0);
   await review.getByRole("checkbox", { name: ar.GuestServiceOrders.acknowledge }).check();
   await review.getByRole("button", { name: ar.GuestServiceOrders.submit }).click();
   await expect(orders.getByTestId("guest-service-order-receipt").getByText(ar.GuestServiceOrders.orderState.REQUESTED, { exact: true })).toBeVisible();

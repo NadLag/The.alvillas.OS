@@ -12,7 +12,7 @@ import {readCommandNonce,writeCommandNonce,clearCommandNonce} from "@/platform/h
 import {serviceOrderStates,canTransitionServiceOrder,type ServiceOrderState} from "../domain/service-order-contracts";
 import {serviceOrderOriginalResponseSchema,serviceOrderHistoryResponseSchema,serviceOrderHistoryOriginalSchema,serviceOrderTaskChoicesResponseSchema,serviceOrderTransitionPreviewResponseSchema,serviceOrderMutationResponseSchema,type serviceOrderMetadataSchema} from "../domain/service-order-view";
 import {privateServiceRequest,ServicePrivateBrowserError,type ServicePrivateBrowserState} from "./service-catalog-browser";
-import {TransferDetails} from "./transfer-details";
+import {TransferDetails} from "@/platform/services/transfer-details";
 import {GroceryPurchaseHistory} from "./grocery-purchase-history";
 import {GroceryItems} from "@/platform/services/grocery-items";
 import {ChefCompensation} from "./chef-compensation";

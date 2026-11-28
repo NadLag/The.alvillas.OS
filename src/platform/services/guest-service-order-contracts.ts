@@ -14,8 +14,8 @@ export const guestChefMenuSchema = z.object({
   allergens: z.array(chefMenuTextSchema).max(50)
 }).strict();
 export type GuestChefMenu = z.infer<typeof guestChefMenuSchema>;
-export const guestServiceOrderSelectionSchema=z.object({serviceKey:fields.serviceKey,serviceDate:fields.serviceDate,lastServiceDate:fields.lastServiceDate,quantity:fields.quantity,guests:fields.guests,groceryItems:fields.groceryItems}).strict();
-export const guestServiceOfferSchema=z.object({key:configSlugSchema,name:localizedTextSchema,description:localizedTextSchema.nullable(),pricingModel:servicePricingModelSchema,unitAmount:serviceCatalogAmountSchema.nullable(),currency,quoteRequired:z.boolean(),chefMenu:guestChefMenuSchema.optional(),grocery:z.literal(true).optional()}).strict().refine(offer=>offer.quoteRequired===(offer.pricingModel==="CUSTOM")&&(offer.unitAmount===null)===offer.quoteRequired);
+export const guestServiceOrderSelectionSchema=z.object({serviceKey:fields.serviceKey,serviceDate:fields.serviceDate,lastServiceDate:fields.lastServiceDate,quantity:fields.quantity,guests:fields.guests,groceryItems:fields.groceryItems,transfer:fields.transfer}).strict();
+export const guestServiceOfferSchema=z.object({key:configSlugSchema,name:localizedTextSchema,description:localizedTextSchema.nullable(),pricingModel:servicePricingModelSchema,unitAmount:serviceCatalogAmountSchema.nullable(),currency,quoteRequired:z.boolean(),chefMenu:guestChefMenuSchema.optional(),grocery:z.literal(true).optional(),transfer:z.literal(true).optional()}).strict().refine(offer=>offer.quoteRequired===(offer.pricingModel==="CUSTOM")&&(offer.unitAmount===null)===offer.quoteRequired);
 export const guestServiceOfferPageSchema=z.object({items:z.array(guestServiceOfferSchema).max(20),next:configSlugSchema.nullable()}).strict();
 export const guestServiceOrderReviewTokenSchema=z.string().min(40).max(512).regex(/^guest-service-order-review-v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
 export const guestServiceOrderDraftSchema=guestServiceOrderSelectionSchema.extend({idempotencyKey:identity,locale:z.enum(["en","fr","ar"])}).strict();
@@ -33,7 +33,7 @@ export function projectReleasedGuestServiceOffer(item:Pick<ServiceCatalogItem,"k
  const chefMenu = menu && { servingsPerUnit: menu.serving_quantity, ingredients: menu.ingredients.map(ingredient => ingredient.name),
    allergens: menu.allergens.map(allergen => allergen.name) };
  const publicOffer=guestServiceOfferSchema.safeParse({key:item.key,name:item.name,description:item.description,pricingModel:item.pricingModel,unitAmount:item.amount,currency:item.currency,quoteRequired:item.pricingModel==="CUSTOM",...chefMenu && { chefMenu },
-   ...(item.orderTerms.grocery_order ? { grocery: true } : {})});
+   ...(item.orderTerms.grocery_order ? { grocery: true } : {}), ...(item.orderTerms.transfer_order ? { transfer: true } : {})});
  if(!publicOffer.success)throw new GuestServiceOfferUnavailableError();
  return publicOffer.data;
 }

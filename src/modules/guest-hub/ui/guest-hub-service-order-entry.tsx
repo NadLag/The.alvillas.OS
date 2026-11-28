@@ -8,6 +8,7 @@ import { formatCurrencyAmount, formatNumber } from "@/i18n/format";
 import type { AppLocale } from "@/i18n/routing";
 import { clearCommandNonce, readCommandNonce, writeCommandNonce } from "@/platform/http/command-nonce";
 import { GroceryItems, GroceryItemsEditor, groceryOrderItems, type GroceryItemForm } from "@/platform/services/grocery-items";
+import { emptyTransferForm, TransferDetails, TransferRequestFields } from "@/platform/services/transfer-details";
 import { guestServiceOfferPageSchema, guestServiceOrderDraftSchema, guestServiceOrderPublicReviewSchema,
   guestServiceOrderReceiptSchema, guestServiceOrderRecoveryResponseSchema, type GuestChefMenu } from "@/platform/services/guest-service-order-contracts";
 import { GuestHubBrowserError, guestHubRequest } from "./guest-hub-browser";
@@ -32,8 +33,8 @@ function GuestChefMenuDetails({ menu, locale }: { menu: GuestChefMenu; locale: A
   </div>;
 }
 
-export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }: {
-  linkId: string; locale: AppLocale; checkIn: string; checkOut: string;
+export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut, timezone }: {
+  linkId: string; locale: AppLocale; checkIn: string; checkOut: string; timezone: string;
 }) {
   const t = useTranslations("GuestServiceOrders"), common = useTranslations("GuestAccess");
   const nonceKey = `alvillas:guest-service-order:${linkId}`;
@@ -41,6 +42,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
   const [offers, setOffers] = useState<Offers | null>(null);
   const [selectedServiceKey, setSelectedServiceKey] = useState("");
   const [groceryItems, setGroceryItems] = useState<GroceryItemForm[]>([]);
+  const [transfer, setTransfer] = useState(emptyTransferForm);
   const [editing, setEditing] = useState<Draft | null>(null);
   const [review, setReview] = useState<{ draft: Draft; quote: Review } | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -62,7 +64,9 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       if (request.signal.aborted) return;
       const state = failure instanceof GuestHubBrowserError ? failure.state : "unavailable";
       setError(state);
-      if (state === "link_unavailable" || state === "forbidden") { setOffers(null); setSelectedServiceKey(""); setGroceryItems([]); setEditing(null); setReview(null); setReceipt(null); }
+      if (state === "link_unavailable" || state === "forbidden") {
+        setOffers(null); setSelectedServiceKey(""); setGroceryItems([]); setTransfer(emptyTransferForm()); setEditing(null); setReview(null); setReceipt(null);
+      }
     }).finally(() => {
       if (!request.signal.aborted) { controller.current = null; setBusy(false); }
     });
@@ -80,9 +84,12 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
     run(async signal => {
-      const draft = guestServiceOrderDraftSchema.safeParse({ serviceKey: fields.get("serviceKey"), serviceDate: fields.get("serviceDate"),
-        lastServiceDate: fields.get("lastServiceDate"), quantity: Number(fields.get("quantity")), guests: Number(fields.get("guests")),
+      const serviceDate = fields.get("serviceDate");
+      const draft = guestServiceOrderDraftSchema.safeParse({ serviceKey: fields.get("serviceKey"), serviceDate,
+        lastServiceDate: selectedOffer?.transfer ? serviceDate : fields.get("lastServiceDate"),
+        quantity: Number(fields.get("quantity")), guests: Number(fields.get("guests")),
         ...(selectedOffer?.grocery ? { groceryItems: groceryOrderItems(groceryItems) } : {}),
+        ...(selectedOffer?.transfer ? { transfer } : {}),
         locale, idempotencyKey: crypto.randomUUID() });
       if (!draft.success) throw new GuestHubBrowserError("validation");
       const result = guestServiceOrderPublicReviewSchema.parse(await guestHubRequest(`${endpoint}review`, draft.data, signal));
@@ -101,6 +108,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       if (readCommandNonce(nonceKey) !== nonce) throw new GuestHubBrowserError("unavailable");
       setPending(nonce);
       setGroceryItems([]);
+      setTransfer(emptyTransferForm());
       setEditing(null);
       setReview(null);
       const result = guestServiceOrderReceiptSchema.parse(await guestHubRequest(`${endpoint}admit`, {
@@ -143,7 +151,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       <div className="field">
         <label htmlFor="guest-service-order-selection">{t("service")}</label>
         <select id="guest-service-order-selection" name="serviceKey" value={selectedOffer?.key ?? ""}
-          onChange={event => { setSelectedServiceKey(event.target.value); setGroceryItems([]); }} required disabled={busy}>
+          onChange={event => { setSelectedServiceKey(event.target.value); setGroceryItems([]); setTransfer(emptyTransferForm()); }} required disabled={busy}>
           {offers.items.map(offer => <option key={offer.key} value={offer.key}>{localizedText(offer.name, locale)}</option>)}
         </select>
       </div>
@@ -152,9 +160,12 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       {selectedOffer?.grocery && <fieldset disabled={busy}>
         <GroceryItemsEditor value={groceryItems} onChange={setGroceryItems} />
       </fieldset>}
+      {selectedOffer?.transfer && <fieldset disabled={busy}>
+        <TransferRequestFields value={transfer} onChange={setTransfer} />
+      </fieldset>}
       <div className="form-grid two">
-        <label className="field"><span>{t("serviceDate")}</span><input type="date" name="serviceDate" required min={checkIn} max={checkOut} defaultValue={editing?.serviceDate ?? checkIn} disabled={busy} /></label>
-        <label className="field"><span>{t("lastServiceDate")}</span><input type="date" name="lastServiceDate" required min={checkIn} max={checkOut} defaultValue={editing?.lastServiceDate ?? checkIn} disabled={busy} /></label>
+        <label className="field"><span>{t(selectedOffer?.transfer ? "pickupDate" : "serviceDate")}</span><input type="date" name="serviceDate" required min={checkIn} max={checkOut} defaultValue={editing?.serviceDate ?? checkIn} disabled={busy} /></label>
+        {!selectedOffer?.transfer && <label className="field"><span>{t("lastServiceDate")}</span><input type="date" name="lastServiceDate" required min={checkIn} max={checkOut} defaultValue={editing?.lastServiceDate ?? checkIn} disabled={busy} /></label>}
         <label className="field"><span>{t("quantity")}</span><input name="quantity" inputMode="numeric" pattern="[1-9][0-9]*" defaultValue={editing?.quantity ?? 1} required disabled={busy} /></label>
         <label className="field"><span>{t("guests")}</span><input name="guests" type="number" min="1" step="1" defaultValue={editing?.guests ?? 1} required disabled={busy} /></label>
       </div>
@@ -168,6 +179,8 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       <p>{review.quote.totalAmount === null ? t("quoteRequired") : formatCurrencyAmount(locale, review.quote.totalAmount, review.quote.currency)}</p>
       {review.quote.chefMenu && <GuestChefMenuDetails menu={review.quote.chefMenu} locale={locale} />}
       {review.quote.selection.groceryItems && <GroceryItems locale={locale} items={review.quote.selection.groceryItems} />}
+      {review.quote.selection.transfer && <TransferDetails locale={locale} transfer={review.quote.selection.transfer}
+        date={review.quote.selection.serviceDate} guests={review.quote.selection.guests} timezone={timezone} headingLevel={4} showCashHelp={false} />}
       <h5>{review.quote.notice.title}</h5>
       {review.quote.notice.paragraphs.map((paragraph, index) => <p key={index} dir="auto">{paragraph}</p>)}
       <label><input type="checkbox" required disabled={busy} /> {t("acknowledge")}</label>

@@ -4,7 +4,7 @@ import {useTranslations} from "next-intl";
 import type {z} from "zod";
 import type {AppLocale} from "@/i18n/routing";
 import {transferTaskResponseSchema} from "@/platform/services/transfer-task-contracts";
-import {TransferDetails} from "./transfer-details";
+import {TransferDetails} from "@/platform/services/transfer-details";
 import {privateServiceRequest,ServicePrivateBrowserError,type ServicePrivateBrowserState} from "./service-catalog-browser";
 export function TransferTask({locale,taskId,scope}:{locale:AppLocale;taskId:string;scope:string}){
  const t=useTranslations("ServiceOrders"),[value,setValue]=useState<(z.infer<typeof transferTaskResponseSchema>&{scope:string})|null>(null),[state,setState]=useState<ServicePrivateBrowserState>("ready"),controller=useRef<AbortController|null>(null),epoch=useRef(0),[known,setKnown]=useState(false);

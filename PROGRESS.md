@@ -239,7 +239,7 @@ F-GST-07 | IN-PROGRESS | Native approved originals, staff release/withdrawal, pu
 F-GST-08 | IN-PROGRESS | Native guest service requests use the authorized Services catalog and original order lifecycle. Focused TypeScript, typed ESLint, unit and PostgreSQL checks passed. The Arabic Field mobile journey passed with zero retries, including exact quote, private admission and offline clearing. Mandatory CI and staging acceptance remain pending.
 F-GST-09 | IN-PROGRESS | Released native Chef menus are selectable in Guest Hub with exact quote, serving information, ingredients and listed allergens. The reviewed request enters the native Cooking task workflow. Focused TypeScript, ESLint, unit, PostgreSQL and Arabic Field mobile verification passed with zero browser retries. Mandatory CI and staging acceptance remain pending.
 F-GST-10 | IN-PROGRESS | Authorized guests can order groceries using the existing native list, exact localized quantities, pricing review and append-only service receipt. Focused TypeScript, typed ESLint, PostgreSQL and Arabic Field mobile verification passed with zero retries. The request creates no purchase posting. Mandatory CI and staging acceptance remain pending.
-F-GST-11 | TODO |
+F-GST-11 | IN-PROGRESS | Guests can request approved transfers with one property-local pickup date, exact time, route, passengers and flight reference. The canonical order supports authorized dispatch and retains all existing custody rules. Focused TypeScript, typed ESLint, PostgreSQL and Arabic Field mobile passed with zero browser retries. Mandatory CI and staging acceptance remain pending.
 F-GST-12 | TODO |
 F-GST-13 | TODO |
 F-GST-14 | TODO |

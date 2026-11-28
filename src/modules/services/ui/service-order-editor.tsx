@@ -1,6 +1,6 @@
 "use client";
 
-import {TransferDetails,TransferRequestFields,emptyTransferForm} from "./transfer-details";
+import {TransferDetails,TransferRequestFields,emptyTransferForm} from "@/platform/services/transfer-details";
 import {useCallback,useEffect,useId,useRef,useState,type FormEvent} from "react";
 import {useTranslations} from "next-intl";
 import type {z} from "zod";
