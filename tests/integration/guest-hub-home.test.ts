@@ -3,6 +3,11 @@ import {PrismaClient} from "@prisma/client";
 import {beforeAll,afterAll,describe,it,expect} from "vitest";
 import {withTenant,type TenantTransactionRunner,type TenantTransaction} from "@/platform/db/tenant";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
+import { createConfigRuleVersion } from "@/modules/config/application/config-service";
+import { authContextForAccount } from "@/platform/authz/account-context";
+import { guestHubHome } from "@/modules/guest-hub/application/guest-hub-home";
+import { GuestHubRepository } from "@/modules/guest-hub/infrastructure/guest-hub-repository";
+import { guestHubPropertyInformationKey } from "@/platform/config/guest-hub-property-information";
 import {reviewGuestHubIssue,issueGuestHubLink,reviewGuestHubRevocation,revokeGuestHubLink} from "@/modules/guest-hub/application/guest-hub-service";
 import {visitGuestHubLink} from "@/modules/guest-hub/application/guest-hub-visit";
 import {guestHubPresentationPolicyKey} from "@/modules/guest-hub/domain/guest-hub-presentation";
@@ -39,5 +44,39 @@ describe("actual scoped multilingual Guest Hub home source",()=>{
   await expect(visitGuestHubLink({token:issued.token},{...deps(),db:checked})).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(changed).toBe(true);expect(await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"guest_hub.link_opened",resourceId:issued.id}}))).toBe(before);expect((await visit()).home.photoUrl).toBeNull();
  });
  it("rejects caller-provided home facts and a foreign path before exposing either property's native metadata",async()=>{await expect(visitGuestHubLink({token:issued.token,home:{propertyName:"Forged property",photoUrl:publicPhoto}},deps())).rejects.toBeInstanceOf(GuestHubInvalidLinkError);await expect(visitGuestHubLink({token:issued.token},{...deps(),expectedLinkId:randomUUID()})).rejects.toBeInstanceOf(GuestHubInvalidLinkError);});
+ it("publishes encrypted property-only information and discloses Wi-Fi only during the scheduled stay", async () => {
+  const information = { supportPhone: "+212612345678", emergencyPhone: "19",
+    wifi: { network: "Isolated acceptance network", password: randomUUID() },
+    instructions: { en: "Meet reception", fr: "Rendez-vous à la réception", ar: "توجه إلى الاستقبال" } };
+  await withTenant(db, f.organizationId, async tx => {
+   const role = await tx.role.create({ data: { organizationId: f.organizationId, key: `guest_information_${randomUUID()}`, name: "Guest property information publisher" } });
+   const permissions = await tx.permission.findMany({ where: { organizationId: f.organizationId, key: { in: ["config_rule:configure", "property:view"] } } });
+   expect(permissions).toHaveLength(2);
+   await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.organizationId, roleId: role.id, permissionId: permission.id })) });
+   await tx.roleAssignment.create({ data: { organizationId: f.organizationId, personId: f.person.id, userAccountId: f.account.id, roleId: role.id, scopeType: "property", scopeId: f.property.id, validFrom: new Date("2020-01-01") } });
+  });
+  const actor = { ...f.ctx, authContext: await authContextForAccount(f.organizationId, f.account.id, { db }) };
+  const input = { key: guestHubPropertyInformationKey, scopeType: "property" as const, scopeId: f.property.id,
+    lifecycle: "ACTIVE" as const, effectiveFrom: new Date("2020-01-01"), valueJson: JSON.stringify(information),
+    reason: "Publish original property information for the owned test stay" };
+  const action = { db, env, requestId: randomUUID(), ipAddress: null };
+  await expect(createConfigRuleVersion(actor, { ...input, scopeId: sibling.property.id }, action)).rejects.toThrow();
+  const version = await createConfigRuleVersion(actor, input, action);
+  const audit = await withTenant(db, f.organizationId, tx => tx.auditLog.findMany({ where: { resourceId: version.id } }));
+  expect(audit).toHaveLength(1);
+  expect(JSON.stringify({ version, audit })).not.toContain(information.wifi.password);
+  const upcoming = await visit();
+  expect(upcoming.home.propertyInformation).toEqual({ supportPhone: information.supportPhone, emergencyPhone: information.emergencyPhone, instructions: information.instructions });
+  expect(JSON.stringify(upcoming)).not.toContain(information.wifi.network);
+  await withTenant(db, f.organizationId, async tx => {
+   const repository = new GuestHubRepository(tx, f.organizationId);
+   const source = await repository.source(f.reservation.id);
+   if (!source) throw Error("An original Guest Hub stay is required");
+   const arrival = await guestHubHome(tx, f.organizationId, source, [], new Date("2031-05-01T15:00:00Z"), env);
+   const after = await guestHubHome(tx, f.organizationId, source, [], new Date("2031-05-05T15:00:00Z"), env);
+   expect(arrival.data.propertyInformation).toEqual(information);
+   expect(after.data.propertyInformation).toBeUndefined();
+  });
+ });
  it("withholds the entire home after actual final native revocation and retains the original immutable row",async()=>{const before=await withTenant(db,f.organizationId,tx=>tx.guestHubLink.findUniqueOrThrow({where:{id:issued.id}})),review=await reviewGuestHubRevocation(f.ctx,{linkId:issued.id},{db,env});await revokeGuestHubLink(f.ctx,{linkId:issued.id,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Final owned stay-home revocation"},{db,env});await expect(visit()).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(await withTenant(db,f.organizationId,tx=>tx.guestHubLink.findUniqueOrThrow({where:{id:issued.id}}))).toEqual(before);});
 });

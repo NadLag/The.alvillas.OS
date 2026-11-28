@@ -2,6 +2,7 @@
 
 import { memo, useActionState, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { z } from "zod";
 import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import { StatusBadge } from "@/design-system/shells";
@@ -15,6 +16,7 @@ import type { ConfigAdminModel, ConfigRuleView } from "@/modules/config/applicat
 import { formatDateTime } from "@/i18n/format";
 import { safeLocale } from "@/i18n/routing";
 import { ConfigPropertySelect } from "./config-property-select";
+import { guestHubPropertyInformationKey } from "@/platform/config/guest-hub-property-information";
 
 type ConfigLabels = {
   createTitle: string;
@@ -229,7 +231,9 @@ export function ConfigRuleAdmin({
   }, [state, router]);
   const defaultKey = model.catalogKeys[0] ?? "finance.commission";
   const [selectedKey, setSelectedKey] = useState(defaultKey);
-  const [scopeType, setScopeType] = useState("organization");
+  const [scopeType, setScopeType] = useState(defaultKey === guestHubPropertyInformationKey ? "property" : "organization");
+  const guestInformation = selectedKey === guestHubPropertyInformationKey;
+  const guest = useTranslations("GuestStay.propertyInformation");
   const schema = useMemo(
     () =>
       z.object({
@@ -243,7 +247,7 @@ export function ConfigRuleAdmin({
   const form = useZodForm(schema, {
     defaultValues: {
       key: defaultKey,
-      valueJson: "",
+      valueJson: defaultKey === guestHubPropertyInformationKey ? "{}" : "",
       effectiveFrom: utcDateTime(),
       reason: ""
     }
@@ -274,7 +278,12 @@ export function ConfigRuleAdmin({
               {...keyField}
               value={selectedKey}
               onChange={(event) => {
-                setSelectedKey(event.target.value);
+                const nextKey = event.target.value;
+                if (nextKey === guestHubPropertyInformationKey) setScopeType("property");
+                if (nextKey === guestHubPropertyInformationKey || guestInformation) {
+                  form.setValue("valueJson", nextKey === guestHubPropertyInformationKey ? "{}" : "");
+                }
+                setSelectedKey(nextKey);
                 void keyField.onChange(event);
               }}
             >
@@ -293,7 +302,8 @@ export function ConfigRuleAdmin({
           <div className="segmented-control">
             <label>
               <input
-                defaultChecked
+                checked={scopeType === "organization"}
+                disabled={guestInformation}
                 name="scopeType"
                 type="radio"
                 value="organization"
@@ -306,6 +316,7 @@ export function ConfigRuleAdmin({
                 name="scopeType"
                 type="radio"
                 value="property"
+                checked={scopeType === "property"}
                 onChange={() => setScopeType("property")}
               />
               <span>{labels.scopeProperty}</span>
@@ -326,7 +337,19 @@ export function ConfigRuleAdmin({
               <option value="DRAFT">{labels.draft}</option>
             </select>
           </label>
-          <label className="field">
+          {guestInformation ? <fieldset className="config-create-fields">
+            <legend>{guest("title")}</legend>
+            <p className="field-hint">{guest("authoringHelp")}</p>
+            <input type="hidden" {...form.register("valueJson")} />
+            <label className="field"><span>{guest("wifi")}</span><input name="guestWifiNetwork" maxLength={100} dir="auto" /></label>
+            <label className="field"><span>{guest("wifiPassword")}</span><input name="guestWifiPassword" type="password" autoComplete="new-password" maxLength={100} dir="ltr" /></label>
+            <label className="field"><span>{guest("supportPhone")}</span><input name="guestSupportPhone" type="tel" maxLength={16} dir="ltr" /></label>
+            <label className="field"><span>{guest("emergencyPhone")}</span><input name="guestEmergencyPhone" type="tel" maxLength={16} dir="ltr" /></label>
+            {(["En", "Fr", "Ar"] as const).map(language => <label key={language} className="field">
+              <span>{guest("instructions" + language)}</span>
+              <textarea name={`guestInstructions${language}`} rows={3} maxLength={1500} dir={language === "Ar" ? "rtl" : "ltr"} />
+            </label>)}
+          </fieldset> : <label className="field">
             <span>{labels.value}</span>
             <textarea
               data-testid="config-rule-value"
@@ -336,7 +359,7 @@ export function ConfigRuleAdmin({
               {...form.register("valueJson")}
             />
             <FieldError state={state} name="valueJson" />
-          </label>
+          </label>}
           <div className="form-grid two">
             <label className="field">
               <span>{labels.effectiveFrom}</span>

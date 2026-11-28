@@ -6441,6 +6441,17 @@
     "close": "Fermer"
   },
   "GuestStay": {
+    "propertyInformation": {
+      "title": "Informations sur la villa",
+      "wifi": "Réseau Wi-Fi",
+      "wifiPassword": "Mot de passe Wi-Fi",
+      "supportPhone": "Assistance voyageurs",
+      "emergencyPhone": "Contact en cas d’urgence",
+      "instructionsEn": "Consignes pour les voyageurs en anglais",
+      "instructionsFr": "Consignes pour les voyageurs en français",
+      "instructionsAr": "Consignes pour les voyageurs en arabe",
+      "authoringHelp": "Publiez les informations utiles aux voyageurs de cette villa. Si vous ajoutez des consignes, saisissez-les dans les trois langues. Le Wi-Fi est affiché du jour d’arrivée au jour de départ."
+    },
     "photo": "Photo de {property}",
     "photoUnavailable": "Photo indisponible pour {property}",
     "dates": "Les dates de votre séjour",

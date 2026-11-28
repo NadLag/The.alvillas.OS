@@ -27,6 +27,8 @@ import { notificationRoutingSchema } from "@/platform/notifications/notification
 import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
 import {authorizeUnconditionalSource} from "@/platform/authz/organization-authority";
 import {protectedFinancialRuleKey as protectedFinancialRecurrenceKey,financialRuleAccess as recurringExpenseRuleFinancialAccess,recheckFinancialRuleAccess as recheckRecurringExpenseRuleAccess} from "@/platform/config/financial-rule-authority";
+import { protectGuestHubPropertyInformation } from "@/platform/config/guest-hub-property-information-encryption";
+import { guestHubPropertyInformationKey, guestHubPropertyInformationSchema } from "@/platform/config/guest-hub-property-information";
 
 export class ConfigAuthorizationError extends Error {
   constructor(message = "Configuration action is not authorized") {
@@ -54,6 +56,7 @@ type ConfigServiceDeps = {
   requestId?: string;
   ipAddress?: string | null;
   ownerId?:string;
+  env?: NodeJS.ProcessEnv;
 };
 type ConfigSourceScope=Pick<Resource,"propertyId"|"ownerId"|"city"|"region"|"dataClass">;
 
@@ -180,7 +183,7 @@ function hasRuleFinancialAccess(
 
 /** Canonical template rules carry their actual Property/Owner context through each current-authority check. */
 async function propertyTemplateRuleWriteAuthority(ctx:ConfigActorContext,tx:TenantTransaction,key:string,scope:{scopeType:string;scopeId:string|null},action:"create"|"configure",ownerId?:string):Promise<ConfigSourceScope>{
- if(!["services.pricing","inventory.minimums","ops.workflows","ops.reservation_task_templates","ops.checklists","ops.mid_stay_threshold"].includes(key))return{};
+ if(!["services.pricing","inventory.minimums","ops.workflows","ops.reservation_task_templates","ops.checklists","ops.mid_stay_threshold",guestHubPropertyInformationKey].includes(key))return{};
  let source:ConfigSourceScope={dataClass:key==="services.pricing"?"financial":"operational"};
  if(scope.scopeType==="property"){
   if(!scope.scopeId||ownerId&&!uuidSchema.safeParse(ownerId).success)throw new ConfigAuthorizationError();const property=await configurationPropertyHead(tx,ctx.organizationId,scope.scopeId);
@@ -468,7 +471,15 @@ export async function createConfigRuleVersion(
   const key = normalizeKey(input);
   const scope = normalizeScope(input);
   const rawValue = parseJsonObject(input.valueJson);
-  assertValidRuleValue(key, rawValue);
+  const privateGuestInformation = key === guestHubPropertyInformationKey;
+  const propertyId = privateGuestInformation && scope.scopeType === "property" ? scope.scopeId : null;
+  if (privateGuestInformation) {
+    if (!propertyId || !guestHubPropertyInformationSchema.safeParse(rawValue).success) {
+      throw new ConfigValidationError("Guest information requires valid property-scoped content");
+    }
+  } else {
+    assertValidRuleValue(key, rawValue);
+  }
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
@@ -490,7 +501,7 @@ export async function createConfigRuleVersion(
       key,
       scopeType: scope.scopeType,
       scopeId: scope.scopeId,
-      value: rawValue,
+      value: propertyId ? protectGuestHubPropertyInformation(rawValue, ctx.organizationId, propertyId, deps.env) : rawValue,
       effectiveFrom: input.effectiveFrom,
       effectiveTo: input.effectiveTo,
       lifecycle: input.lifecycle,
@@ -534,7 +545,10 @@ export async function activateConfigRuleVersion(
       throw new ConfigNotFoundError();
     }
 
-    assertRuleAllowed(ctx, "configure", source);
+    const nativeScope = source.key === guestHubPropertyInformationKey
+      ? await propertyTemplateRuleWriteAuthority(ctx, tx, source.key, source, "configure")
+      : undefined;
+    assertRuleAllowed(ctx, "configure", source, nativeScope);
     const checks=[{action:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:source.id,propertyId:source.scopeType==="property"?source.scopeId:undefined}}];
     await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
     if (source.key.startsWith("notification.routing.")) await new NotificationRepository(tx, ctx.organizationId)
@@ -562,6 +576,7 @@ export async function activateConfigRuleVersion(
     });
 
     await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
+    if (nativeScope) await propertyTemplateRuleWriteAuthority(ctx, tx, source.key, source, "configure");
     return created;
   });
 }
@@ -582,7 +597,10 @@ export async function retireConfigRuleVersion(
       throw new ConfigNotFoundError();
     }
 
-    assertRuleAllowed(ctx, "configure", source);
+    const nativeScope = source.key === guestHubPropertyInformationKey
+      ? await propertyTemplateRuleWriteAuthority(ctx, tx, source.key, source, "configure")
+      : undefined;
+    assertRuleAllowed(ctx, "configure", source, nativeScope);
     const checks=[{action:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:source.id,propertyId:source.scopeType==="property"?source.scopeId:undefined}}];
     await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
     const created = await repository.retireVersion({
@@ -608,6 +626,7 @@ export async function retireConfigRuleVersion(
     });
 
     await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
+    if (nativeScope) await propertyTemplateRuleWriteAuthority(ctx, tx, source.key, source, "configure");
     return created;
   });
 }

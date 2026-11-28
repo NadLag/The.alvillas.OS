@@ -106,13 +106,13 @@ export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependenci
  let expectedHome:string|null|undefined,expectedForms:string|undefined;
  return withGuestHubCapability(raw,deps,async(context)=>{
   const {tx,actual,authority,resource}=context;
-  const organizationId=actual.row.organizationId,home=await guestHubHome(tx,organizationId,actual.source,actual.settings.scopes,actual.now);
+  const organizationId=actual.row.organizationId,home=await guestHubHome(tx,organizationId,actual.source,actual.settings.scopes,actual.now,deps.env);
   const forms=await formAvailability(context,deps.env,deps.identityDocuments,deps.agreementDocuments);expectedHome=home.fingerprint;expectedForms=jsonbFingerprint(forms);
   const data=guestHubPublicViewSchema.parse({home:{...home.data,...forms.profile?{profileAvailable:true}:{},...forms.stayDetails?{stayDetailsAvailable:true}:{},...forms.identityDocuments?{identityDocumentsAvailable:true}:{},...forms.houseRules?{houseRulesAvailable:true}:{},...forms.agreement?{agreementAvailable:true}:{},...forms.serviceOrders?{serviceOrdersAvailable:true}:{}},id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
   await writeAuditEvent(tx,{organizationId,actorId:null,action:"guest_hub.link_opened",resourceType:"guest_hub",resourceId:actual.row.id,propertyScopeId:actual.row.propertyId,after:{linkId:actual.row.id,reservationId:actual.row.reservationId},requestId:deps.requestId??randomUUID(),occurredAt:actual.now});
   return guestHubPublicViewSchema.parse(present({...authority,visibleDataClasses:new Set()},"view",{...resource,data},catalogFieldPolicy("guest_hub"),actual.now));
  },undefined,async context=>{
-  const {tx,actual}=context,home=await guestHubHome(tx,actual.row.organizationId,actual.source,actual.settings.scopes,actual.now);
+  const {tx,actual}=context,home=await guestHubHome(tx,actual.row.organizationId,actual.source,actual.settings.scopes,actual.now,deps.env);
   if(home.fingerprint!==expectedHome||jsonbFingerprint(await formAvailability(context,deps.env,deps.identityDocuments,deps.agreementDocuments))!==expectedForms)throw new GuestHubInvalidLinkError();
  });
 }

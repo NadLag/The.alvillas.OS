@@ -5,6 +5,7 @@ import type { ZodError } from "zod";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 import { configActorContextFromSession } from "@/modules/config/application/config-access";
+import { guestHubPropertyInformationKey } from "@/platform/config/guest-hub-property-information";
 import {
   ConfigAuthorizationError,
   ConfigNotFoundError,
@@ -36,6 +37,21 @@ function safeLocale(locale: string): AppLocale {
 
 function formValue(formData: FormData, key: string): FormDataEntryValue | undefined {
   return formData.get(key) ?? undefined;
+}
+
+function guestPropertyInformationValue(formData: FormData): string {
+  const field = (name: string) => {
+    const value = formValue(formData, name);
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  };
+  const network = field("guestWifiNetwork"), password = field("guestWifiPassword");
+  const instructions = { en: field("guestInstructionsEn"), fr: field("guestInstructionsFr"), ar: field("guestInstructionsAr") };
+  return JSON.stringify({
+    wifi: network || password ? { network, password } : undefined,
+    supportPhone: field("guestSupportPhone"),
+    emergencyPhone: field("guestEmergencyPhone"),
+    instructions: Object.values(instructions).some(Boolean) ? instructions : undefined
+  });
 }
 
 function flattenZodError(error: ZodError): ConfigFormState {
@@ -74,13 +90,14 @@ export async function createConfigRuleAction(
     return { status: "error", messageKey: "unauthorized" };
   }
 
+  const key = formValue(formData, "key");
   const parsed = parseConfigRuleInput({
-    key: formValue(formData, "key"),
+    key,
     customFeatureFlagKey: formValue(formData, "customFeatureFlagKey"),
     scopeType: formValue(formData, "scopeType"),
     scopeId: formValue(formData, "scopeId"),
     lifecycle: formValue(formData, "lifecycle"),
-    valueJson: formValue(formData, "valueJson"),
+    valueJson: key === guestHubPropertyInformationKey ? guestPropertyInformationValue(formData) : formValue(formData, "valueJson"),
     effectiveFrom: formValue(formData, "effectiveFrom"),
     effectiveTo: formValue(formData, "effectiveTo") || undefined,
     reason: formValue(formData, "reason")

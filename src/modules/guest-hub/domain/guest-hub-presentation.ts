@@ -1,5 +1,6 @@
 import {z} from "zod";
 import {localClockLabel} from "@/platform/time/local-instant";
+import { guestHubPropertyInformationSchema } from "@/platform/config/guest-hub-property-information";
 
 export const guestHubPresentationPolicyKey="guest_hub.presentation";
 function publicOrigin(value:string){
@@ -10,7 +11,15 @@ function publicOrigin(value:string){
 export const guestHubPresentationPolicySchema=z.object({source:z.literal("NATIVE_GUEST_STAY_PRESENTATION"),public_image_origins:z.array(z.string().max(500).refine(value=>{try{publicOrigin(value);return true;}catch{return false;}})).max(30)}).strict().superRefine((value,context)=>{const normalized:string[]=[];for(const origin of value.public_image_origins){try{normalized.push(publicOrigin(origin));}catch{/* The origin validator already records this invalid entry. */}}if(new Set(normalized).size!==normalized.length)context.addIssue({code:"custom",path:["public_image_origins"],message:"distinct_public_image_origins_required"});});
 export type GuestHubPresentationPolicy=z.infer<typeof guestHubPresentationPolicySchema>;
 function publicImageURL(value:string){const url=new URL(value);publicOrigin(url.origin);if(url.username||url.password||url.search||url.hash||!/\.(?:avif|jpe?g|png|webp)$/iu.test(url.pathname))throw Error("public_property_image_required");return url;}
-export const guestHubHomeSchema=z.object({propertyName:z.string().trim().min(1).max(2000),photoUrl:z.url().max(2000).refine(value=>{try{publicImageURL(value);return true;}catch{return false;}}).nullable(),adultCount:z.number().int().nonnegative(),childCount:z.number().int().nonnegative(),checkedAt:z.iso.datetime(),calendarStage:z.enum(["UPCOMING","ARRIVAL_DAY","STAY_DAYS","DEPARTURE_DAY","PAST"]),profileAvailable:z.literal(true).optional(),stayDetailsAvailable:z.literal(true).optional(),identityDocumentsAvailable:z.literal(true).optional(),houseRulesAvailable:z.literal(true).optional(),agreementAvailable:z.literal(true).optional(),serviceOrdersAvailable:z.literal(true).optional()}).strict();
+export const guestHubHomeSchema=z.object({
+ propertyName:z.string().trim().min(1).max(2000),
+ photoUrl:z.url().max(2000).refine(value=>{try{publicImageURL(value);return true;}catch{return false;}}).nullable(),
+ adultCount:z.number().int().nonnegative(),childCount:z.number().int().nonnegative(),checkedAt:z.iso.datetime(),
+ calendarStage:z.enum(["UPCOMING","ARRIVAL_DAY","STAY_DAYS","DEPARTURE_DAY","PAST"]),
+ profileAvailable:z.literal(true).optional(),stayDetailsAvailable:z.literal(true).optional(),identityDocumentsAvailable:z.literal(true).optional(),
+ houseRulesAvailable:z.literal(true).optional(),agreementAvailable:z.literal(true).optional(),serviceOrdersAvailable:z.literal(true).optional(),
+ propertyInformation:guestHubPropertyInformationSchema.optional()
+}).strict();
 
 /** Original private/signed URLs never become public merely because a property contains them. */
 export function guestHubPublicPhoto(raw:unknown,policy:GuestHubPresentationPolicy|null){
