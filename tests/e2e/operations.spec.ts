@@ -161,12 +161,15 @@ for (const locale of ["en", "fr", "ar"] as const)
         .fill("Assign this task to the available operator");
       await assign.locator('button[type="submit"]').click();
       await expect(page.getByTestId("operation-proxy-form")).toBeVisible();
+      const catalog = { en: enMessages, fr: frMessages, ar: arMessages }[locale]
+        .Operations;
       const reschedule = page.getByTestId("operation-reschedule-form");
+      const rescheduleReason = "Reschedule before the next guest arrival";
       await reschedule.locator('[name="startTime"]').fill("14:00");
       await reschedule
         .locator('[name="reason"]')
-        .fill("Reschedule before the next guest arrival");
-      await reschedule.locator('button[type="submit"]').click();
+        .fill(rescheduleReason);
+      await submitAcknowledged(page, reschedule, rescheduleReason, catalog.manage.saved);
       await expect(reschedule.getByRole("status")).toBeVisible();
       const scheduled = await withTenant(db, org, (tx) =>
         tx.operationTask.findUniqueOrThrow({ where: { id: taskId } }),
@@ -217,8 +220,6 @@ for (const locale of ["en", "fr", "ar"] as const)
       if (locale === "ar")
         await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       const evidence = page.getByTestId("operation-evidence-form");
-      const catalog = { en: enMessages, fr: frMessages, ar: arMessages }[locale]
-        .Operations;
       await evidence
         .locator('[name="reason"]')
         .fill("Inspection evidence recorded during the task");
