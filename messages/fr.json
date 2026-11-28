@@ -6374,6 +6374,12 @@
     }
   },
   "GuestServiceOrders": {
+    "chefMenu": {
+      "title": "Menu du chef",
+      "servingsPerUnit": "Portions par unité",
+      "ingredients": "Ingrédients",
+      "allergens": "Allergènes indiqués"
+    },
     "title": "Services de la villa",
     "loading": "Chargement des services…",
     "pending": "Cette demande a peut-être déjà été reçue.",

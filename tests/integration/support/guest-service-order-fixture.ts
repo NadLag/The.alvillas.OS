@@ -10,6 +10,13 @@ import { nativeServiceOrderFixture } from "./service-order-fixture";
 
 export async function nativeGuestServiceOrderFixture(admin: PrismaClient, db: PrismaClient, env: NodeJS.ProcessEnv) {
   const fixture = await nativeServiceOrderFixture(admin, db);
+  return prepareGuestServiceOrderCapability(fixture, db, env);
+}
+
+type GuestOrderFixture = Pick<Awaited<ReturnType<typeof nativeServiceOrderFixture>>,
+  "organizationId" | "account" | "ctx" | "person" | "property" | "reservation"> & { entry: { key: string } };
+
+export async function prepareGuestServiceOrderCapability<F extends GuestOrderFixture>(fixture: F, db: PrismaClient, env: NodeJS.ProcessEnv) {
   await withTenant(db, fixture.organizationId, async tx => {
     const role = await tx.role.create({ data: { organizationId: fixture.organizationId, key: `guest_services_${randomUUID()}`, name: "Scoped guest service publisher" } });
     const keys = ["guest:edit", "guest_hub_service_orders:view", "guest_hub_service_orders:create", "guest_hub_service_orders:void"];

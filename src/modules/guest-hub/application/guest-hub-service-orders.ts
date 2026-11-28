@@ -50,7 +50,8 @@ async function quote(context: Context, input: Draft) {
   const native = await inspectNewServiceOrder(context.form.actor, context.tx, request);
   const totalAmount = native.price.kind === "PRICED" ? native.price.amount.toJSON().amount : null;
   const notice = renderGuestHubFormNotice(context.form.policy.notice, locale);
-  const data = { selection, title: offer.name, totalAmount, currency: offer.currency, quoteRequired: offer.quoteRequired, notice };
+  const data = { selection, title: offer.name, totalAmount, currency: offer.currency, quoteRequired: offer.quoteRequired,
+    ...(offer.chefMenu ? { chefMenu: offer.chefMenu } : {}), notice };
   const binding = { ...data, idempotencyKey, locale, form: context.form.fingerprint, native: native.reviewFingerprint };
   return { data, binding, request, native };
 }

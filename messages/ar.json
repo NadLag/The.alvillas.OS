@@ -6374,6 +6374,12 @@
     }
   },
   "GuestServiceOrders": {
+    "chefMenu": {
+      "title": "قائمة الشيف",
+      "servingsPerUnit": "عدد الحصص لكل وحدة",
+      "ingredients": "المكونات",
+      "allergens": "مسببات الحساسية المذكورة"
+    },
     "title": "خدمات الفيلا",
     "loading": "جارٍ تحميل الخدمات…",
     "pending": "ربما تم استلام هذا الطلب بالفعل.",

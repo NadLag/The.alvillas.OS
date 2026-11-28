@@ -7,7 +7,10 @@ import { listGuestHubServiceOffers } from "@/modules/guest-hub/application/guest
 import { recoverGuestHubServiceOrder, reviewGuestHubServiceOrder, submitGuestHubServiceOrder } from "@/modules/guest-hub/application/guest-hub-service-orders";
 import { GuestHubInvalidLinkError } from "@/modules/guest-hub/domain/guest-hub-policy";
 import { GuestHubServiceOrderConflictError } from "@/modules/guest-hub/domain/guest-hub-service-order-policy";
-import { nativeGuestServiceOrderFixture } from "./support/guest-service-order-fixture";
+import { previewServiceOrderTransition, transitionServiceOrder } from "@/modules/services/application/service-order-transition";
+import { ServiceOrderValidationError } from "@/modules/services/domain/service-order";
+import { nativeChefMenuFixture, ownedChefMenu } from "./support/chef-menu-fixture";
+import { nativeGuestServiceOrderFixture, prepareGuestServiceOrderCapability } from "./support/guest-service-order-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
 
 const env: NodeJS.ProcessEnv = { NODE_ENV: "test", ENCRYPTION_KEYS: `owned-guest-service:${randomBytes(32).toString("base64")}` };
@@ -27,6 +30,40 @@ beforeAll(async () => {
 });
 
 afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+
+it("selects an approved chef menu and hands the reviewed guest order to the canonical cooking workflow", async () => {
+  const fixture = await nativeChefMenuFixture(admin, db);
+  const { deps, capability, decide } = await prepareGuestServiceOrderCapability(fixture, db, env);
+  await decide("GRANTED");
+  const chefMenu = {
+    servingsPerUnit: 4, ingredients: ownedChefMenu.ingredients.map(ingredient => ingredient.name),
+    allergens: ownedChefMenu.allergens.map(allergen => allergen.name)
+  };
+  const offers = await listGuestHubServiceOffers(capability, {}, deps);
+  expect(offers.items).toEqual([expect.objectContaining({ key: fixture.entry.key, chefMenu })]);
+  const serialized = JSON.stringify(offers);
+  for (const privateValue of [fixture.chef.id, ownedChefMenu.ingredients[0].quantity, ownedChefMenu.preparation.en, "30.00"]) {
+    expect(serialized).not.toContain(privateValue);
+  }
+  const draft = { serviceKey: fixture.entry.key, serviceDate: fixture.request.serviceDate, lastServiceDate: fixture.request.lastServiceDate,
+    quantity: 2, guests: fixture.request.guests, locale: "ar", idempotencyKey: randomUUID() };
+  await expect(reviewGuestHubServiceOrder(capability, { ...draft, guests: draft.guests + 1 }, deps)).rejects.toBeInstanceOf(ServiceOrderValidationError);
+  const quote = await reviewGuestHubServiceOrder(capability, draft, deps);
+  expect(quote).toMatchObject({ chefMenu, totalAmount: "240.00", currency: "MAD" });
+  const receipt = await submitGuestHubServiceOrder(capability, { ...draft, acknowledged: true, reviewFingerprint: quote.reviewFingerprint }, deps);
+  expect(receipt).toMatchObject({ state: "REQUESTED", totalAmount: quote.totalAmount });
+  const confirmation = { orderId: receipt.orderId, expectedVersion: receipt.version, state: "CONFIRMED",
+    taskPlan: { type: "CHEF", priority: "NORMAL", checklistTemplateKey: "owned_service" }, reason: "Confirm the original Chef order selected by the guest" };
+  const reviewed = await previewServiceOrderTransition(fixture.ctx, confirmation, fixture.deps);
+  const confirmed = await transitionServiceOrder(fixture.ctx, { ...confirmation, idempotencyKey: randomUUID(), reviewFingerprint: reviewed.reviewFingerprint }, fixture.deps);
+  expect(confirmed).toMatchObject({ orderId: receipt.orderId, state: "CONFIRMED" });
+  const originalTask = await withTenant(db, fixture.organizationId, async tx => {
+    const order = await tx.serviceOrder.findFirstOrThrow({ where: { organizationId: fixture.organizationId, id: receipt.orderId } });
+    if (!order.taskId) throw new Error("The confirmed order did not create its original cooking task");
+    return tx.operationTask.findFirstOrThrow({ where: { organizationId: fixture.organizationId, id: order.taskId } });
+  });
+  expect(originalTask).toMatchObject({ type: "CHEF", propertyId: fixture.property.id, reservationId: fixture.reservation.id });
+});
 
 it("releases a private native catalog offer, accepts one exact request and withdraws guest access, preserving journals", async () => {
   const { fixture, deps, capability, issued, decide } = await nativeGuestServiceOrderFixture(admin, db, env);

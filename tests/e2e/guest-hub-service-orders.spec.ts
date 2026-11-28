@@ -1,13 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { z } from "zod";
 import { formatCurrencyAmount } from "@/i18n/format";
+import { ownedChefMenu } from "../support/chef-menu-definition";
 import ar from "../../messages/ar.json" with { type: "json" };
 
-test("an Arabic Guest Hub capability orders an approved native service", async ({ page, context, request }) => {
-  test.setTimeout(150000);
+async function openGuestOrders(page: Page, kind: "service" | "chef") {
   const fixture = z.object({ token: z.string().min(1), serviceKey: z.string().min(1) }).strict().parse(JSON.parse(execFileSync(process.execPath,
-    ["node_modules/tsx/dist/cli.mjs", "tests/e2e/support/guest-service-order-fixture-worker.cts"],
+    ["node_modules/tsx/dist/cli.mjs", "tests/e2e/support/guest-service-order-fixture-worker.cts", kind],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 })));
   const visited = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/guest-hub/visit");
   await page.goto(`/ar/guest#${fixture.token}`, { waitUntil: "domcontentloaded" });
@@ -15,6 +15,12 @@ test("an Arabic Guest Hub capability orders an approved native service", async (
   await page.waitForURL(/\/ar\/guest\/[a-f0-9-]{36}$/u);
   const orders = page.getByTestId("guest-service-order-entry");
   await expect(orders).toBeVisible();
+  return { orders, serviceKey: fixture.serviceKey };
+}
+
+test("an Arabic Guest Hub capability orders an approved native service", async ({ page, context, request }) => {
+  test.setTimeout(150000);
+  const { orders, serviceKey } = await openGuestOrders(page, "service");
   expect(await page.evaluate(() => document.documentElement.dir)).toBe("rtl");
   const guest = new URL(page.url());
   const linkId = guest.pathname.split("/").at(-1);
@@ -25,8 +31,8 @@ test("an Arabic Guest Hub capability orders an approved native service", async (
   await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
   expect((await listed).status()).toBe(200);
   const service = orders.getByRole("combobox", { name: ar.GuestServiceOrders.service, exact: true });
-  await service.selectOption(fixture.serviceKey);
-  await expect(service).toHaveValue(fixture.serviceKey);
+  await service.selectOption(serviceKey);
+  await expect(service).toHaveValue(serviceKey);
   const quantity = orders.getByLabel(ar.GuestServiceOrders.quantity, { exact: true });
   await quantity.fill("2");
   const review = orders.getByTestId("guest-service-order-review");
@@ -51,4 +57,20 @@ test("an Arabic Guest Hub capability orders an approved native service", async (
   await expect(receipt.getByText(total, { exact: true })).toBeVisible();
   await context.setOffline(true);
   await expect(orders).toHaveCount(0);
+});
+
+test("an Arabic guest can review an approved Chef menu with its listed allergens", async ({ page }) => {
+  test.setTimeout(150000);
+  const { orders, serviceKey } = await openGuestOrders(page, "chef");
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.browse }).click();
+  await expect(orders.getByRole("combobox", { name: ar.GuestServiceOrders.service, exact: true })).toHaveValue(serviceKey);
+  const menu = orders.getByTestId("guest-chef-menu");
+  await expect(menu.getByText(ar.GuestServiceOrders.chefMenu.servingsPerUnit, { exact: true })).toBeVisible();
+  await expect(menu.getByText(ownedChefMenu.ingredients[0].name.ar, { exact: true })).toBeVisible();
+  await expect(menu.getByText(ownedChefMenu.allergens[0].name.ar, { exact: true })).toBeVisible();
+  await expect(orders.getByText(ownedChefMenu.preparation.ar, { exact: true })).toHaveCount(0);
+  await orders.getByRole("button", { name: ar.GuestServiceOrders.review }).click();
+  const review = orders.getByTestId("guest-service-order-review");
+  await expect(review.getByText(formatCurrencyAmount("ar", "120.00", "MAD"), { exact: true })).toBeVisible();
+  await expect(review.getByTestId("guest-chef-menu").getByText(ownedChefMenu.allergens[0].name.ar, { exact: true })).toBeVisible();
 });

@@ -4,17 +4,32 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import type { z } from "zod";
 import { localizedText } from "@/i18n/content";
-import { formatCurrencyAmount } from "@/i18n/format";
+import { formatCurrencyAmount, formatNumber } from "@/i18n/format";
 import type { AppLocale } from "@/i18n/routing";
 import { clearCommandNonce, readCommandNonce, writeCommandNonce } from "@/platform/http/command-nonce";
 import { guestServiceOfferPageSchema, guestServiceOrderDraftSchema, guestServiceOrderPublicReviewSchema,
-  guestServiceOrderReceiptSchema, guestServiceOrderRecoveryResponseSchema } from "@/platform/services/guest-service-order-contracts";
+  guestServiceOrderReceiptSchema, guestServiceOrderRecoveryResponseSchema, type GuestChefMenu } from "@/platform/services/guest-service-order-contracts";
 import { GuestHubBrowserError, guestHubRequest } from "./guest-hub-browser";
 
 type Offers = z.infer<typeof guestServiceOfferPageSchema>;
 type Review = z.infer<typeof guestServiceOrderPublicReviewSchema>;
 type Draft = z.infer<typeof guestServiceOrderDraftSchema>;
 type Receipt = z.infer<typeof guestServiceOrderReceiptSchema>;
+
+function GuestChefMenuDetails({ menu, locale }: { menu: GuestChefMenu; locale: AppLocale }) {
+  const t = useTranslations("GuestServiceOrders.chefMenu");
+  const lists = new Intl.ListFormat(locale);
+  return <div data-testid="guest-chef-menu">
+    <h4>{t("title")}</h4>
+    <dl>
+      <dt>{t("servingsPerUnit")}</dt><dd>{formatNumber(locale, String(menu.servingsPerUnit))}</dd>
+      <dt>{t("ingredients")}</dt><dd dir="auto">{lists.format(menu.ingredients.map(text => localizedText(text, locale)))}</dd>
+      {menu.allergens.length > 0 && <>
+        <dt>{t("allergens")}</dt><dd dir="auto">{lists.format(menu.allergens.map(text => localizedText(text, locale)))}</dd>
+      </>}
+    </dl>
+  </div>;
+}
 
 export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }: {
   linkId: string; locale: AppLocale; checkIn: string; checkOut: string;
@@ -23,6 +38,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
   const nonceKey = `alvillas:guest-service-order:${linkId}`;
   const [pending, setPending] = useState<string | null>(() => readCommandNonce(nonceKey));
   const [offers, setOffers] = useState<Offers | null>(null);
+  const [selectedServiceKey, setSelectedServiceKey] = useState("");
   const [editing, setEditing] = useState<Draft | null>(null);
   const [review, setReview] = useState<{ draft: Draft; quote: Review } | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -30,6 +46,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const controller = useRef<AbortController | null>(null);
+  const selectedOffer = offers?.items.find(offer => offer.key === selectedServiceKey) ?? offers?.items[0];
   useEffect(() => () => { controller.current?.abort(); }, []);
 
   function run(work: (signal: AbortSignal) => Promise<void>) {
@@ -43,7 +60,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
       if (request.signal.aborted) return;
       const state = failure instanceof GuestHubBrowserError ? failure.state : "unavailable";
       setError(state);
-      if (state === "link_unavailable" || state === "forbidden") { setOffers(null); setEditing(null); setReview(null); setReceipt(null); }
+      if (state === "link_unavailable" || state === "forbidden") { setOffers(null); setSelectedServiceKey(""); setEditing(null); setReview(null); setReceipt(null); }
     }).finally(() => {
       if (!request.signal.aborted) { controller.current = null; setBusy(false); }
     });
@@ -121,10 +138,13 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
     {offers && offers.items.length > 0 && !pending && !review && <form className="resource-form" onSubmit={quote}>
       <div className="field">
         <label htmlFor="guest-service-order-selection">{t("service")}</label>
-        <select id="guest-service-order-selection" name="serviceKey" defaultValue={editing?.serviceKey} required disabled={busy}>
+        <select id="guest-service-order-selection" name="serviceKey" value={selectedOffer?.key ?? ""}
+          onChange={event => setSelectedServiceKey(event.target.value)} required disabled={busy}>
           {offers.items.map(offer => <option key={offer.key} value={offer.key}>{localizedText(offer.name, locale)}</option>)}
         </select>
       </div>
+      {selectedOffer?.description && <p dir="auto">{localizedText(selectedOffer.description, locale)}</p>}
+      {selectedOffer?.chefMenu && <GuestChefMenuDetails menu={selectedOffer.chefMenu} locale={locale} />}
       <div className="form-grid two">
         <label className="field"><span>{t("serviceDate")}</span><input type="date" name="serviceDate" required min={checkIn} max={checkOut} defaultValue={editing?.serviceDate ?? checkIn} disabled={busy} /></label>
         <label className="field"><span>{t("lastServiceDate")}</span><input type="date" name="lastServiceDate" required min={checkIn} max={checkOut} defaultValue={editing?.lastServiceDate ?? checkIn} disabled={busy} /></label>
@@ -139,6 +159,7 @@ export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }:
     {review && <form className="resource-form" onSubmit={send} data-testid="guest-service-order-review">
       <h4>{localizedText(review.quote.title, locale)}</h4>
       <p>{review.quote.totalAmount === null ? t("quoteRequired") : formatCurrencyAmount(locale, review.quote.totalAmount, review.quote.currency)}</p>
+      {review.quote.chefMenu && <GuestChefMenuDetails menu={review.quote.chefMenu} locale={locale} />}
       <h5>{review.quote.notice.title}</h5>
       {review.quote.notice.paragraphs.map((paragraph, index) => <p key={index} dir="auto">{paragraph}</p>)}
       <label><input type="checkbox" required disabled={busy} /> {t("acknowledge")}</label>

@@ -6374,6 +6374,12 @@
     }
   },
   "GuestServiceOrders": {
+    "chefMenu": {
+      "title": "Chef's menu",
+      "servingsPerUnit": "Servings per unit",
+      "ingredients": "Ingredients",
+      "allergens": "Listed allergens"
+    },
     "title": "Villa services",
     "loading": "Loading services…",
     "pending": "This request may already have been received.",
