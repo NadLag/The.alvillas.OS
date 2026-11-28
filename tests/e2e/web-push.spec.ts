@@ -10,7 +10,8 @@ test.use({ channel: "chromium" });
 test.describe("browser push permissions", () => {
   test.skip(!process.env.DATABASE_URL, "DATABASE_URL is required for browser push persistence");
   test("permission denial, offline controls, revocation and logout retain secure notification history", async ({ page }, testInfo) => {
-    test.setTimeout(180000);
+    // Keep time for the post-logout checks after three complete accessibility scans.
+    test.setTimeout(240000);
     const email = e2eEmail("push-permission", testInfo.project.name); const password = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
     await ensureE2EAdmin(email, password); await installTestPushSubscription(page, `permissions-${email}`);
     await page.goto("/en/login"); await waitForE2EAdminLoginWindow(page, email);
@@ -42,7 +43,8 @@ test.describe("browser push permissions", () => {
       const account = await db.userAccount.findFirstOrThrow({ where: { email } });
       const subscriptions = await withTenant(db, account.organizationId, (tx) => tx.pushSubscription.findMany({ where: { userAccountId: account.id } }));
       expect(subscriptions.length).toBeGreaterThan(0); expect(subscriptions.every((row) => row.revokedAt !== null)).toBe(true);
-      const response = await page.request.get(`/api/notifications/push/${crypto.randomUUID()}`); expect(response.status()).toBe(401);
+      const response = await page.request.get(`/api/notifications/push/${crypto.randomUUID()}`, { timeout: 10000 });
+      expect(response.status()).toBe(401);
     } finally { await db.$disconnect(); await client.detach(); }
   });
 });
