@@ -1,6 +1,7 @@
 import {z} from "zod";
 import {localClockLabel} from "@/platform/time/local-instant";
 import { guestHubPropertyInformationSchema } from "@/platform/config/guest-hub-property-information";
+import { guestHubCheckInReadinessSchema } from "@/platform/config/guest-hub-check-in-policy";
 
 export const guestHubPresentationPolicyKey="guest_hub.presentation";
 function publicOrigin(value:string){
@@ -18,7 +19,8 @@ export const guestHubHomeSchema=z.object({
  calendarStage:z.enum(["UPCOMING","ARRIVAL_DAY","STAY_DAYS","DEPARTURE_DAY","PAST"]),
  profileAvailable:z.literal(true).optional(),stayDetailsAvailable:z.literal(true).optional(),identityDocumentsAvailable:z.literal(true).optional(),
  houseRulesAvailable:z.literal(true).optional(),agreementAvailable:z.literal(true).optional(),serviceOrdersAvailable:z.literal(true).optional(),
- propertyInformation:guestHubPropertyInformationSchema.optional()
+ propertyInformation:guestHubPropertyInformationSchema.optional(),
+ checkInReadiness:guestHubCheckInReadinessSchema.optional()
 }).strict();
 
 /** Original private/signed URLs never become public merely because a property contains them. */

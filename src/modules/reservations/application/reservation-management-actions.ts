@@ -9,7 +9,7 @@ import { ReservationAuthorizationError, ReservationConflictError, ReservationNot
 import { changeReservation, connectReservationFeed, createCalendarBlock, importReservationCsv, mergeReservationGuests, resolveReservationException, syncReservationFeed, updateReservationFeed, reviewMissingFeedEntry, releaseCalendarBlock } from "./reservation-management-service";
 
 export type ManagementAction = "connect" | "sync" | "feed" | "import" | "change" | "block" | "resolve" | "merge" | "missing" | "release";
-export type ManagementState = { status: "idle" | "success" | "error"; message?: "validation" | "forbidden" | "notFound" | "conflict" | "generic" | "syncFailed"; counts?: { imported: number; modified: number; duplicates: number } };
+export type ManagementState = { status: "idle" | "success" | "error"; message?: "validation" | "forbidden" | "notFound" | "conflict" | "generic" | "syncFailed" | "guestCheckInPending"; counts?: { imported: number; modified: number; duplicates: number } };
 export async function reservationManagementAction(locale: string, kind: ManagementAction, _state: ManagementState, data: FormData): Promise<ManagementState> {
   const ctx = await reservationActorContextFromSession(await auth());
   if (!ctx) return { status: "error", message: "forbidden" };
@@ -30,6 +30,9 @@ export async function reservationManagementAction(locale: string, kind: Manageme
     else if (kind === "release") await releaseCalendarBlock(ctx, values);
     else return { status: "error", message: "validation" };
   } catch (error) {
+    if (error instanceof ReservationConflictError && error.message === "guest_check_in_requirements_pending") {
+      return { status: "error", message: "guestCheckInPending" };
+    }
     const message = error instanceof z.ZodError ? "validation" : error instanceof ReservationAuthorizationError ? "forbidden" : error instanceof ReservationNotFoundError ? "notFound" : error instanceof ReservationConflictError ? "conflict" : "generic";
     return { status: "error", message };
   }

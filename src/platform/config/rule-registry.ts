@@ -19,6 +19,7 @@ import {guestHubServiceOrderPolicyKey,guestHubServiceOrderPolicySchema} from "@/
 import {guestHubProfilePolicyKey,guestHubProfilePolicySchema} from "@/modules/guest-hub/domain/guest-hub-profile-policy";
 import {guestHubPresentationPolicyKey,guestHubPresentationPolicySchema} from "@/modules/guest-hub/domain/guest-hub-presentation";
 import { guestHubPropertyInformationKey, guestHubStoredPropertyInformationSchema } from "./guest-hub-property-information";
+import { guestHubCheckInPolicyKey, guestHubCheckInPolicySchema } from "./guest-hub-check-in-policy";
 import {guestHubLinkPolicyKey,guestHubLinkPolicySchema,guestHubVerificationPolicyKey,guestHubVerificationPolicySchema} from "@/modules/guest-hub/domain/guest-hub-policy";
 import {leadPipelinePolicyKey,leadPipelinePolicySchema} from "@/modules/crm/domain/lead-pipeline";
 import {leadProfilePolicyKey,leadProfilePolicySchema} from "@/modules/crm/domain/lead-profile";
@@ -374,6 +375,7 @@ export const configRuleSchemas = {
   [guestHubHouseRulesPolicyKey]:guestHubHouseRulesPolicySchema,
   [guestHubAgreementPolicyKey]:guestHubAgreementPolicySchema,
   [guestHubServiceOrderPolicyKey]:guestHubServiceOrderPolicySchema,
+  [guestHubCheckInPolicyKey]: guestHubCheckInPolicySchema,
   [guestHubVerificationPolicyKey]:guestHubVerificationPolicySchema,
   [onboardingOwnerPackageContentKey]:onboardingOwnerPackageContentSchema,
   [leadPipelinePolicyKey]:leadPipelinePolicySchema,

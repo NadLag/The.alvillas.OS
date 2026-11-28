@@ -2170,7 +2170,8 @@
       "notFound": "Cet enregistrement n’est pas disponible dans votre espace.",
       "conflict": "La réservation a changé ou son état empêche cette action. Actualisez et vérifiez.",
       "generic": "Impossible de mettre à jour les réservations. Vos saisies sont conservées ; réessayez.",
-      "syncFailed": "Impossible de synchroniser le flux. Vérifiez l’URL privée et son état."
+      "syncFailed": "Impossible de synchroniser le flux. Vérifiez l’URL privée et son état.",
+      "guestCheckInPending": "Les formulaires obligatoires du voyageur doivent être remplis avant l’enregistrement."
     },
     "blockKinds": {
       "OWNER": "Séjour propriétaire",
@@ -6441,6 +6442,21 @@
     "close": "Fermer"
   },
   "GuestStay": {
+    "checkIn": {
+      "title": "Conditions d’enregistrement",
+      "ready": "Vos formulaires obligatoires sont remplis.",
+      "pending": "Remplissez les formulaires obligatoires avant l’enregistrement.",
+      "complete": "Terminé",
+      "required": "Obligatoire",
+      "forms": {
+        "PROFILE": "Profil du voyageur",
+        "ARRIVAL_DETAILS": "Informations d’arrivée",
+        "DEPARTURE_DETAILS": "Informations de départ",
+        "HOUSE_RULES": "Règlement intérieur",
+        "IDENTITY_DOCUMENTS": "Pièces d’identité",
+        "SIGNED_AGREEMENT": "Convention de séjour signée"
+      }
+    },
     "propertyInformation": {
       "title": "Informations sur la villa",
       "wifi": "Réseau Wi-Fi",

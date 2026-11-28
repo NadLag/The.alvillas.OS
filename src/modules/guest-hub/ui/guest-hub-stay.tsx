@@ -28,6 +28,14 @@ export function GuestHubStay({view,locale,onRefresh}:{view:View;locale:AppLocale
   <section aria-labelledby="guest-stay-dates-title"><h3 id="guest-stay-dates-title">{t("dates")}</h3><ol className="guest-stay-itinerary" data-testid="guest-stay-itinerary">{(["arrival","departure"]as const).map(kind=><li key={kind} aria-current={current===kind?"step":undefined}><p>{access(kind)}</p><time dateTime={kind==="arrival"?view.checkIn:view.checkOut}>{day(kind==="arrival"?view.checkIn:view.checkOut)}</time></li>)}</ol><p className="guest-stay-timezone">{t("timezone",{timezone:view.timezone})}</p></section>
   <p>{access("accessUntil",{date:new Intl.DateTimeFormat(locale,{dateStyle:"medium",timeStyle:"short",timeZone:view.timezone}).format(new Date(view.expiresAt))})}</p>
   <p className="guest-stay-checked" data-testid="guest-stay-checked">{t("checkedAt",{date:new Intl.DateTimeFormat(locale,{timeStyle:"short",timeZone:view.timezone}).format(new Date(home.checkedAt))})}</p>
+  {home.checkInReadiness && <section aria-labelledby="guest-check-in-title" data-testid="guest-check-in-readiness">
+    <h3 id="guest-check-in-title">{t("checkIn.title")}</h3>
+    <p role="status">{t(home.checkInReadiness.ready ? "checkIn.ready" : "checkIn.pending")}</p>
+    <dl className="detail-grid">{home.checkInReadiness.requirements.map(requirement => <div key={requirement.form}>
+      <dt>{t(`checkIn.forms.${requirement.form}`)}</dt>
+      <dd>{t(requirement.complete ? "checkIn.complete" : "checkIn.required")}</dd>
+    </div>)}</dl>
+  </section>}
   {home.profileAvailable&&<GuestHubProfileEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.stayDetailsAvailable&&<GuestHubStayDetailsEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.identityDocumentsAvailable&&<GuestHubIdentityDocumentsEntry key={view.id} locale={locale} linkId={view.id}/>}

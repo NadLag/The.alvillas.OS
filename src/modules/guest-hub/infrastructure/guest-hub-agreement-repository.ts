@@ -4,6 +4,18 @@ import type {TenantTransaction} from "@/platform/db/tenant";
 export class GuestHubAgreementRepository{
  constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
  releaseHead(linkId:string){return this.tx.guestHubAgreementRelease.findFirst({where:{organizationId:this.organizationId,linkId},orderBy:{version:"desc"}});}
+ releaseForStay(reservationId: string, propertyId: string, guestId: string) {
+  return this.tx.guestHubAgreementRelease.findFirst({
+   where: { organizationId: this.organizationId, reservationId, propertyId, guestId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }]
+  });
+ }
+ signedRequestForRelease(releaseId: string) {
+  return this.tx.guestHubAgreementDocumentOrigin.findFirst({
+   where: { organizationId: this.organizationId, guestRequest: { releaseId },
+    distributionIntent: { signature: { signedArchive: { isNot: null }, events: { some: { state: "SIGNED" } } } } },
+   select: { id: true }
+  });
+ }
  release(id:string){return this.tx.guestHubAgreementRelease.findFirst({where:{organizationId:this.organizationId,id}});}
  releaseByNonce(actorId:string,commandKey:string){return this.tx.guestHubAgreementRelease.findFirst({where:{organizationId:this.organizationId,createdBy:actorId,commandKey}});}
  createRelease(input:Omit<Prisma.GuestHubAgreementReleaseUncheckedCreateInput,"organizationId">){return this.tx.guestHubAgreementRelease.create({data:{...input,organizationId:this.organizationId}});}

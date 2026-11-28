@@ -4,6 +4,7 @@ import { OperationRepository } from "../infrastructure/operation-repository";
 import { assignTaskInTransaction,taskCandidates } from "./operation-scheduling";
 import { taskResource } from "./operation-service";
 import { connectPropertyReservationChannel, recordPropertyReservationSync } from "@/platform/reservations/property-channel";
+import { readGuestHubCheckIn } from "@/platform/config/guest-hub-check-in";
 import { decryptSecret } from "@/platform/auth/secret-encryption";
 import { createHash, randomUUID } from "node:crypto";
 import { headers } from "next/headers";
@@ -111,6 +112,12 @@ async function appendChange(tx: TenantTransaction, ctx: ReservationActorContext,
   if (input.operation === "TRANSITION") {
     if (!input.status || !canTransition(before.status, input.status)) throw new ReservationConflictError("invalid_reservation_transition");
     status = input.status;
+    if (status === "CHECKED_IN") {
+      const requirements = await readGuestHubCheckIn(tx, ctx.organizationId, {
+        reservationId: before.id, propertyId: before.propertyId, bookingSource: before.source
+      }, new Date());
+      if (requirements && !requirements.ready) throw new ReservationConflictError("guest_check_in_requirements_pending");
+    }
   }
   if (input.operation === "EARLY_CHECKOUT") {
     if (!["CHECKED_IN", "STAYING"].includes(before.status) || !input.checkOut || input.checkOut >= before.checkOut.toISOString().slice(0, 10) || input.checkOut > localDate(new Date(), before.property.timezone)) throw new ReservationConflictError("invalid_early_checkout");

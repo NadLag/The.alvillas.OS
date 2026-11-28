@@ -2170,7 +2170,8 @@
       "notFound": "This record is unavailable in your workspace.",
       "conflict": "The booking changed or this action is not allowed in its current state. Refresh and review it.",
       "generic": "Reservations could not be updated. Your entries are kept; try again.",
-      "syncFailed": "The feed could not be synchronized. Check its private URL and sync health."
+      "syncFailed": "The feed could not be synchronized. Check its private URL and sync health.",
+      "guestCheckInPending": "The guest's required forms must be complete before check-in."
     },
     "blockKinds": {
       "OWNER": "Owner stay",
@@ -6441,6 +6442,21 @@
     "close": "Close"
   },
   "GuestStay": {
+    "checkIn": {
+      "title": "Check-in requirements",
+      "ready": "Your required forms are complete.",
+      "pending": "Complete the required forms before check-in.",
+      "complete": "Complete",
+      "required": "Required",
+      "forms": {
+        "PROFILE": "Guest profile",
+        "ARRIVAL_DETAILS": "Arrival details",
+        "DEPARTURE_DETAILS": "Departure details",
+        "HOUSE_RULES": "House rules",
+        "IDENTITY_DOCUMENTS": "Identity documents",
+        "SIGNED_AGREEMENT": "Signed guest agreement"
+      }
+    },
     "propertyInformation": {
       "title": "Villa information",
       "wifi": "Wi-Fi network",

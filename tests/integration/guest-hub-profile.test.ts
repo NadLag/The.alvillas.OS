@@ -1,8 +1,9 @@
 import {randomBytes,randomUUID} from "node:crypto";
 import {Prisma,PrismaClient} from "@prisma/client";
-import {beforeAll,afterAll,describe,it,expect} from "vitest";
+import {beforeAll,afterAll,describe,it,expect,vi} from "vitest";
 import {withTenant,type TenantTransactionRunner,type TenantTransaction} from "@/platform/db/tenant";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
+import {guestHubCheckInPolicyKey} from "@/platform/config/guest-hub-check-in-policy";
 import {authContextForAccount} from "@/platform/authz/account-context";
 import {reviewGuestHubIssue,issueGuestHubLink} from "@/modules/guest-hub/application/guest-hub-service";
 import {visitGuestHubLink} from "@/modules/guest-hub/application/guest-hub-visit";
@@ -10,6 +11,8 @@ import {reviewGuestHubProfileGrant,recordGuestHubProfileGrant,recoverGuestHubPro
 import {viewGuestHubProfile,reviewGuestHubProfile,submitGuestHubProfile,recoverGuestHubProfile} from "@/modules/guest-hub/application/guest-hub-profile";
 import {GuestHubProfileAccessError,GuestHubProfileConflictError,guestHubProfilePolicyKey} from "@/modules/guest-hub/domain/guest-hub-profile-policy";
 import {GuestHubInvalidLinkError,GuestHubRateLimitError} from "@/modules/guest-hub/domain/guest-hub-policy";
+import {changeReservation} from "@/modules/reservations/application/reservation-management-service";
+import {ReservationAuthorizationError} from "@/modules/reservations/application/reservation-service";
 import {hashRateLimitKey} from "@/platform/rate-limit/postgres-rate-limiter";
 import {nativeGuestHubProfileFixture} from "./support/guest-hub-profile-fixture";
 import {nativeLeadFinancialGuard} from "./support/lead-fixture";
@@ -30,6 +33,46 @@ beforeAll(async()=>{
 },120000);
 afterAll(async()=>{try{if(financial)await financial.assertPreserved(organizations);if(originalSource)expect(await sourceWitness()).toBe(originalSource);}finally{await db?.$disconnect();await admin?.$disconnect();}});
 describe("actual signed form grants and encrypted native reservation profiles",()=>{
+ it("requires the original approved profile before the authorized reservation check-in", async () => {
+  const { fixture, capability, visit } = await fresh();
+  const { organizationId, account, person, property, reservation } = fixture;
+  await withTenant(db, organizationId, async tx => {
+   const permission = await tx.permission.findFirstOrThrow({ where: { organizationId, key: "reservation:edit" } });
+   const role = await tx.role.create({ data: { organizationId, key: "owned_check_in_" + randomUUID(), name: "Original check-in operator" } });
+   await tx.rolePermission.create({ data: { organizationId, roleId: role.id, permissionId: permission.id } });
+   await tx.roleAssignment.create({ data: { organizationId, personId: person.id, userAccountId: account.id, roleId: role.id,
+    scopeType: "property", scopeId: property.id, validFrom: new Date("2020-01-01") } });
+   await new ConfigRuleRepository(tx, organizationId).createVersion({ key: guestHubCheckInPolicyKey,
+    scopeType: "property", scopeId: property.id, createdBy: account.id, effectiveFrom: new Date("2020-01-01"),
+    value: { source: "NATIVE_GUEST_FORM_EVIDENCE", enabled: true, required_forms: ["PROFILE"] },
+    reason: "Require the original guest profile for the owned check-in" });
+  });
+  const operator = { ...fixture.ctx, authContext: { ...await authContextForAccount(organizationId, account.id, { db }), personId: person.id } };
+  vi.stubEnv("ENCRYPTION_KEYS", env.ENCRYPTION_KEYS);
+  try {
+   const requestId = randomUUID();
+   const initial = await withTenant(db, organizationId, tx => tx.reservation.findUniqueOrThrow({ where: { id: reservation.id } }));
+   const command = { reservationId: reservation.id, operation: "TRANSITION", reason: "Review the exact authorized guest check-in" };
+   const preparing = initial.status === "GUEST_PREPARATION" ? initial : await changeReservation(operator, {
+    ...command, status: "GUEST_PREPARATION", expectedVersion: initial.version, idempotencyKey: randomUUID()
+   }, { db, requestId });
+   const checkIn = { ...command, status: "CHECKED_IN", expectedVersion: preparing.version, idempotencyKey: randomUUID() };
+   expect((await visitGuestHubLink(capability, visit)).home.checkInReadiness)
+    .toEqual({ ready: false, requirements: [{ form: "PROFILE", complete: false }] });
+   await expect(changeReservation(operator, checkIn, { db, requestId })).rejects.toThrow("guest_check_in_requirements_pending");
+   await expect(changeReservation(foreign.ctx, checkIn, { db, requestId })).rejects.toBeInstanceOf(ReservationAuthorizationError);
+   const native = await submitCommand(capability, visit, { displayName: "Owned profile before check-in",
+    email: "owned-check-in@example.test", phone: "+212612345678" });
+   await submitGuestHubProfile(capability, native, visit);
+   await policy(fixture, { allowed_fields: ["displayName", "email"], required_fields: ["displayName", "email"] });
+   const readiness = (await visitGuestHubLink(capability, visit)).home.checkInReadiness;
+   expect(readiness).toEqual({ ready: true, requirements: [{ form: "PROFILE", complete: true }] });
+   expect(JSON.stringify(readiness)).not.toContain("owned-check-in@example.test");
+   expect(await changeReservation(operator, checkIn, { db, requestId })).toMatchObject({ id: reservation.id, status: "CHECKED_IN", version: preparing.version + 1 });
+  } finally {
+   vi.unstubAllEnvs();
+  }
+ });
  it("never broadens an existing read link into personal form authority",async()=>{expect((await visitGuestHubLink(cap(),visitDeps())).id).toBe(issued.id);await expect(viewGuestHubProfile(cap(),visitDeps())).rejects.toBeInstanceOf(GuestHubInvalidLinkError);await withTenant(db,f.organizationId,async tx=>{expect(await tx.guestHubFormGrant.count()).toBe(0);expect(await tx.guestHubProfileRevision.count()).toBe(0);});});
  it("requires held and current independent profile and personal-guest permissions on the actual source",async()=>{for(const removed of["guest:edit","guest:view","guest_hub_profile:view","guest_hub_profile:create","reservation:view"]){const assignments=f.ctx.authContext.assignments!.map(item=>({...item,permissions:new Set([...item.permissions].filter(key=>key!==removed))})),held={...f.ctx,authContext:{...f.ctx.authContext,assignments,permissions:new Set([...f.ctx.authContext.permissions].filter(key=>key!==removed))}};await expect(reviewGuestHubProfileGrant(held,{linkId:issued.id,decision:"GRANTED"},deps())).rejects.toBeInstanceOf(Error);}await expect(reviewGuestHubProfileGrant(foreign.ctx,{linkId:issued.id,decision:"GRANTED"},deps())).rejects.toBeInstanceOf(GuestHubProfileAccessError);});
  it("serializes one explicit signed grant, its original command recovery and exact atomic metadata history",async()=>{const input=await grantCommand(f,issued.id);expect(await recoverGuestHubProfileGrant(f.ctx,{linkId:issued.id,idempotencyKey:input.idempotencyKey},{db,env:{NODE_ENV:"test"}})).toEqual({recorded:false,linkId:issued.id,idempotencyKey:input.idempotencyKey});const pair=await Promise.all([recordGuestHubProfileGrant(f.ctx,input,deps()),recordGuestHubProfileGrant(f.ctx,input,deps())]);grant=pair[0];expect(pair[0].id).toBe(pair[1].id);expect(pair.map(row=>row.replayed).sort()).toEqual([false,true]);expect(await recoverGuestHubProfileGrant(f.ctx,{linkId:issued.id,idempotencyKey:input.idempotencyKey},{db,env:{NODE_ENV:"test"}})).toEqual({...grant,replayed:true,recorded:true});await withTenant(db,f.organizationId,async tx=>{expect(await tx.guestHubFormGrant.count()).toBe(1);expect(await tx.auditLog.count({where:{action:"guest_hub.form_grant_recorded"}})).toBe(1);expect(await tx.outboxEvent.count({where:{type:"guest_hub.form_grant_recorded"}})).toBe(1);});});

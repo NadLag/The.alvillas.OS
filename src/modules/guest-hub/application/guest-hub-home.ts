@@ -6,16 +6,18 @@ import type {GuestHubNativeSource} from "../infrastructure/guest-hub-repository"
 import {guestHubHomeSchema,guestHubCalendarStage,guestHubPublicPhoto,guestHubPresentationPolicyKey,guestHubPresentationPolicySchema,type GuestHubPresentationPolicy} from "../domain/guest-hub-presentation";
 import { guestHubPropertyInformationKey, type GuestHubPropertyInformation } from "@/platform/config/guest-hub-property-information";
 import { readGuestHubPropertyInformation } from "@/platform/config/guest-hub-property-information-encryption";
+import { readGuestHubCheckIn } from "./guest-hub-check-in";
 
 /** Resolve only after the signed native source has passed its independent read authority. */
 export async function guestHubHome(tx:TenantTransaction,organizationId:string,source:GuestHubNativeSource,scopes:ConfigScopeCandidate[],now:Date,env?:NodeJS.ProcessEnv){
  const repository = new ConfigRuleRepository(tx, organizationId);
  const calendarStage = guestHubCalendarStage(source.checkIn.toISOString().slice(0,10),source.checkOut.toISOString().slice(0,10),source.timezone,now);
- const [rule, propertyRule] = await Promise.all([
+ const [rule, propertyRule, checkInReadiness] = await Promise.all([
    repository.resolve({key:guestHubPresentationPolicyKey,scopes,asOf:now}),
    calendarStage === "PAST" ? null : repository.resolveMetadata({
      key: guestHubPropertyInformationKey, scopes: [{ scopeType: "property", scopeId: source.propertyId }], asOf: now
-   })
+   }),
+   calendarStage === "PAST" ? null : readGuestHubCheckIn(tx, organizationId, source, now, env, { source, scopes })
  ]);
  let policy:GuestHubPresentationPolicy|null=null;
  if(rule?.createdBy&&rule.lifecycle==="ACTIVE"){try{policy=guestHubPresentationPolicySchema.parse(rule.parsedValue);}catch(error){if(!(error instanceof ZodError))throw error;}}
@@ -33,6 +35,7 @@ export async function guestHubHome(tx:TenantTransaction,organizationId:string,so
    }
  }
  const photoPolicy = rule && {id:rule.id,version:rule.version,lifecycle:rule.lifecycle,value:rule.value};
- return{fingerprint:jsonbFingerprint({photoPolicy, propertyRule: propertyRule?.id ?? null, propertyInformation: propertyInformation ?? null}),
-  data:guestHubHomeSchema.parse({propertyName:source.propertyName,photoUrl:guestHubPublicPhoto(source.photoUrls,policy),adultCount:source.adultCount,childCount:source.childCount,checkedAt:now.toISOString(),calendarStage, ...propertyInformation && { propertyInformation }})};
+ return{fingerprint:jsonbFingerprint({photoPolicy, propertyRule: propertyRule?.id ?? null, propertyInformation: propertyInformation ?? null, checkInReadiness}),
+  data:guestHubHomeSchema.parse({propertyName:source.propertyName,photoUrl:guestHubPublicPhoto(source.photoUrls,policy),adultCount:source.adultCount,childCount:source.childCount,checkedAt:now.toISOString(),calendarStage,
+   ...(propertyInformation ? { propertyInformation } : {}), ...(checkInReadiness ? { checkInReadiness } : {})})};
 }
