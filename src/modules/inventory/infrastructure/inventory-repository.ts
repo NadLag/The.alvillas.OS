@@ -61,6 +61,7 @@ export class InventoryRepository {
   lockCatalogItem(key:string){return this.lock("catalog:"+key,false);}
   async catalogItemById(id:string):Promise<InventoryItemHead|null>{return(await this.catalogHeads(Prisma.sql`i.id=${id}::uuid`,1))[0]??null;}
   catalogItemsByIds(ids:readonly string[]){return ids.length?this.catalogHeads(Prisma.sql`i.id=ANY(${[...new Set(ids)]}::uuid[])`,ids.length):Promise.resolve([]);}
+  catalogItemsByKeys(keys:readonly string[]){return keys.length?this.catalogHeads(Prisma.sql`i.key=ANY(${[...new Set(keys)]}::text[])`,keys.length):Promise.resolve([]);}
   async catalogItemByKey(key:string):Promise<InventoryItemHead|null>{return(await this.catalogHeads(Prisma.sql`i.key=${key}`,1))[0]??null;}
   catalogPage(input:{query:string;category?:string;archived:boolean;after?:string}){
     const pattern="%"+input.query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";

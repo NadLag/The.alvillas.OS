@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { parseConfigRuleValue } from "@/platform/config/rule-registry";
 import {appendInventoryReorderConfigurationReferences} from "./inventory-reorder-reference";
+import {appendLaundrySupplierPriceReference} from "./laundry-price-reference";
 
 export type ConfigScopeType =
   | "organization"
@@ -492,6 +493,7 @@ export class ConfigRuleRepository {
     });
 
     const result={...created,lifecycle:normalizeLifecycle(created.lifecycle)};
+    await appendLaundrySupplierPriceReference(this.tx,this.organizationId,result);
     await appendInventoryReorderConfigurationReferences(this.tx,this.organizationId,result);
     return result;
   }

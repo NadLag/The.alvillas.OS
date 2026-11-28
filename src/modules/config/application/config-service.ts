@@ -1,4 +1,5 @@
 import {configRuleKeyInputSchema} from "@/platform/config/key-contract";
+import {protectedLaundryPricingKey} from "@/platform/config/laundry-pricing-policy";
 import { headers } from "next/headers";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -180,8 +181,8 @@ function hasRuleFinancialAccess(
 
 /** Canonical template rules carry their actual Property/Owner context through each current-authority check. */
 async function propertyTemplateRuleWriteAuthority(ctx:ConfigActorContext,tx:TenantTransaction,key:string,scope:{scopeType:string;scopeId:string|null},action:"create"|"configure",ownerId?:string):Promise<ConfigSourceScope>{
- if(!["services.pricing","inventory.minimums","ops.workflows","ops.reservation_task_templates","ops.checklists","ops.mid_stay_threshold"].includes(key))return{};
- let source:ConfigSourceScope={dataClass:key==="services.pricing"?"financial":"operational"};
+ if(!["services.pricing","inventory.minimums","ops.workflows","ops.reservation_task_templates","ops.checklists","ops.mid_stay_threshold"].includes(key)&&!protectedLaundryPricingKey(key))return{};
+ let source:ConfigSourceScope={dataClass:key==="services.pricing"||protectedLaundryPricingKey(key)?"financial":"operational"};
  if(scope.scopeType==="property"){
   if(!scope.scopeId||ownerId&&!uuidSchema.safeParse(ownerId).success)throw new ConfigAuthorizationError();const property=await configurationPropertyHead(tx,ctx.organizationId,scope.scopeId);
   if(!property||ownerId&&!property.ownership.some(row=>row.ownerId===ownerId))throw new ConfigAuthorizationError();source={...source,propertyId:property.id,ownerId,city:property.cityId,region:property.regionId};
@@ -534,7 +535,8 @@ export async function activateConfigRuleVersion(
       throw new ConfigNotFoundError();
     }
 
-    assertRuleAllowed(ctx, "configure", source);
+    const priceSource=protectedLaundryPricingKey(source.key)?await propertyTemplateRuleWriteAuthority(ctx,tx,source.key,source,"configure"):{};
+    assertRuleAllowed(ctx, "configure", source,priceSource);
     const checks=[{action:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:source.id,propertyId:source.scopeType==="property"?source.scopeId:undefined}}];
     await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
     if (source.key.startsWith("notification.routing.")) await new NotificationRepository(tx, ctx.organizationId)
@@ -562,6 +564,7 @@ export async function activateConfigRuleVersion(
     });
 
     await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
+    if(protectedLaundryPricingKey(source.key))await propertyTemplateRuleWriteAuthority(ctx,tx,source.key,source,"configure");
     return created;
   });
 }
@@ -582,7 +585,8 @@ export async function retireConfigRuleVersion(
       throw new ConfigNotFoundError();
     }
 
-    assertRuleAllowed(ctx, "configure", source);
+    const priceSource=protectedLaundryPricingKey(source.key)?await propertyTemplateRuleWriteAuthority(ctx,tx,source.key,source,"configure"):{};
+    assertRuleAllowed(ctx, "configure", source,priceSource);
     const checks=[{action:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:source.id,propertyId:source.scopeType==="property"?source.scopeId:undefined}}];
     await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
     const created = await repository.retireVersion({
@@ -608,6 +612,7 @@ export async function retireConfigRuleVersion(
     });
 
     await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
+    if(protectedLaundryPricingKey(source.key))await propertyTemplateRuleWriteAuthority(ctx,tx,source.key,source,"configure");
     return created;
   });
 }
