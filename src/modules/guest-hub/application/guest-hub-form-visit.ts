@@ -4,7 +4,7 @@ import {withGuestHubCapability,type GuestHubCapabilityContext,type GuestHubVisit
 
 type FormState={grant:{createdAt:Date;expiresAt:Date};now:Date;fingerprint:string;policy:{limits:Array<{requests:number;window_seconds:number}>}};
 export type GuestHubFormContext<Form extends FormState>=GuestHubCapabilityContext&{form:Form;formAuthority:AuthContext;formResource:Resource};
-type PrivateFormResource="guest_hub_profile"|"guest_hub_stay_details"|"guest_hub_identity_documents"|"guest_hub_house_rules"|"guest_hub_agreement";
+type PrivateFormResource="guest_hub_profile"|"guest_hub_stay_details"|"guest_hub_identity_documents"|"guest_hub_house_rules"|"guest_hub_agreement"|"guest_hub_service_orders";
 /** The scoped visitor form permission follows an already authenticated live native form grant.
  * Canonical document operations continue to use the separately retained original staff cap. */
 export function guestHubFormCapability(context:GuestHubCapabilityContext,form:Pick<FormState,"grant"|"now">,resourceType:PrivateFormResource,action:"view"|"create",denied:Error){

@@ -5,6 +5,7 @@ import {useTranslations} from "next-intl";
 import type {z} from "zod";
 import type {AppLocale} from "@/i18n/routing";
 import type {guestHubPublicViewSchema} from "../domain/guest-hub-contract";
+import {GuestHubServiceOrderEntry} from "./guest-hub-service-order-entry";
 import {GuestHubProfileEntry} from "./guest-hub-profile-entry";
 import {GuestHubStayDetailsEntry} from "./guest-hub-stay-details-entry";
 import {GuestHubHouseRulesEntry} from "./guest-hub-house-rules-entry";
@@ -32,6 +33,7 @@ export function GuestHubStay({view,locale,onRefresh}:{view:View;locale:AppLocale
   {home.identityDocumentsAvailable&&<GuestHubIdentityDocumentsEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.houseRulesAvailable&&<GuestHubHouseRulesEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.agreementAvailable&&<GuestHubAgreementEntry key={view.id} locale={locale} linkId={view.id}/>}
+  {home.serviceOrdersAvailable&&<GuestHubServiceOrderEntry key={view.id} linkId={view.id} locale={locale} checkIn={view.checkIn} checkOut={view.checkOut}/>}
   <div className="guest-stay-tools"><nav aria-label={access("language")}>{(["en","fr","ar"]as const).map(language=><a key={language} className="secondary-button" href={"/"+language+"/guest/"+view.id} hrefLang={language} lang={language} aria-current={locale===language?"page":undefined}>{access("languages."+language)}</a>)}</nav><button type="button" className="primary-button" onClick={onRefresh} data-testid="guest-access-refresh">{access("refresh")}</button></div>
  </section>;
 }

@@ -1,0 +1,149 @@
+"use client";
+
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useTranslations } from "next-intl";
+import type { z } from "zod";
+import { localizedText } from "@/i18n/content";
+import { formatCurrencyAmount } from "@/i18n/format";
+import type { AppLocale } from "@/i18n/routing";
+import { clearCommandNonce, readCommandNonce, writeCommandNonce } from "@/platform/http/command-nonce";
+import { guestServiceOfferPageSchema, guestServiceOrderDraftSchema, guestServiceOrderPublicReviewSchema,
+  guestServiceOrderReceiptSchema, guestServiceOrderRecoveryResponseSchema } from "@/platform/services/guest-service-order-contracts";
+import { GuestHubBrowserError, guestHubRequest } from "./guest-hub-browser";
+
+type Offers = z.infer<typeof guestServiceOfferPageSchema>;
+type Review = z.infer<typeof guestServiceOrderPublicReviewSchema>;
+type Draft = z.infer<typeof guestServiceOrderDraftSchema>;
+type Receipt = z.infer<typeof guestServiceOrderReceiptSchema>;
+
+export function GuestHubServiceOrderEntry({ linkId, locale, checkIn, checkOut }: {
+  linkId: string; locale: AppLocale; checkIn: string; checkOut: string;
+}) {
+  const t = useTranslations("GuestServiceOrders"), common = useTranslations("GuestAccess");
+  const nonceKey = `alvillas:guest-service-order:${linkId}`;
+  const [pending, setPending] = useState<string | null>(() => readCommandNonce(nonceKey));
+  const [offers, setOffers] = useState<Offers | null>(null);
+  const [editing, setEditing] = useState<Draft | null>(null);
+  const [review, setReview] = useState<{ draft: Draft; quote: Review } | null>(null);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [error, setError] = useState<GuestHubBrowserError["state"] | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => { controller.current?.abort(); }, []);
+
+  function run(work: (signal: AbortSignal) => Promise<void>) {
+    if (controller.current) return;
+    const request = new AbortController();
+    controller.current = request;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    void work(request.signal).catch((failure: unknown) => {
+      if (request.signal.aborted) return;
+      const state = failure instanceof GuestHubBrowserError ? failure.state : "unavailable";
+      setError(state);
+      if (state === "link_unavailable" || state === "forbidden") { setOffers(null); setEditing(null); setReview(null); setReceipt(null); }
+    }).finally(() => {
+      if (!request.signal.aborted) { controller.current = null; setBusy(false); }
+    });
+  }
+
+  const endpoint = `links/${linkId}/service-orders/`;
+  function load(after?: string) {
+    run(async signal => {
+      const page = guestServiceOfferPageSchema.parse(await guestHubRequest(`${endpoint}view`, after ? { after } : {}, signal));
+      setOffers(previous => ({ items: after ? [...(previous?.items ?? []), ...page.items] : page.items, next: page.next }));
+    });
+  }
+
+  function quote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    run(async signal => {
+      const draft = guestServiceOrderDraftSchema.safeParse({ serviceKey: fields.get("serviceKey"), serviceDate: fields.get("serviceDate"),
+        lastServiceDate: fields.get("lastServiceDate"), quantity: Number(fields.get("quantity")), guests: Number(fields.get("guests")),
+        locale, idempotencyKey: crypto.randomUUID() });
+      if (!draft.success) throw new GuestHubBrowserError("validation");
+      const result = guestServiceOrderPublicReviewSchema.parse(await guestHubRequest(`${endpoint}review`, draft.data, signal));
+      setReview({ draft: draft.data, quote: result });
+      setReceipt(null);
+    });
+  }
+
+  function send(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!review || pending) return;
+    const checked = review;
+    run(async signal => {
+      const nonce = checked.draft.idempotencyKey;
+      writeCommandNonce(nonceKey, nonce);
+      if (readCommandNonce(nonceKey) !== nonce) throw new GuestHubBrowserError("unavailable");
+      setPending(nonce);
+      setEditing(null);
+      setReview(null);
+      const result = guestServiceOrderReceiptSchema.parse(await guestHubRequest(`${endpoint}admit`, {
+        ...checked.draft, acknowledged: true, reviewFingerprint: checked.quote.reviewFingerprint
+      }, signal));
+      if (result.idempotencyKey !== nonce) throw new GuestHubBrowserError("uncertain");
+      clearCommandNonce(nonceKey, nonce);
+      setPending(null);
+      setReceipt(result);
+    });
+  }
+
+  function recover() {
+    if (!pending) return;
+    run(async signal => {
+      const result = guestServiceOrderRecoveryResponseSchema.parse(await guestHubRequest(`${endpoint}recover`, { idempotencyKey: pending }, signal));
+      if (result.idempotencyKey !== pending) throw new GuestHubBrowserError("uncertain");
+      clearCommandNonce(nonceKey, pending);
+      setPending(null);
+      if (result.recorded) setReceipt(result);
+      else setNotice(t("unrecorded"));
+    });
+  }
+
+  return <section className="resource-form" aria-labelledby="guest-services-title" aria-busy={busy} data-testid="guest-service-order-entry">
+    <h3 id="guest-services-title">{t("title")}</h3>
+    {busy && <p role="status">{t("loading")}</p>}
+    {error && <p role="alert">{common(`states.${error}`)}</p>}
+    {notice && <p role="status">{notice}</p>}
+    {pending && <div className="form-actions">
+      <p>{t("pending")}</p><button type="button" className="secondary-button" disabled={busy} onClick={recover}>{t("recover")}</button>
+    </div>}
+    {receipt && <div role="status" data-testid="guest-service-order-receipt">
+      <p>{t("received")}</p><p>{t(`orderState.${receipt.state}`)}</p>
+      {receipt.totalAmount !== null && <p>{formatCurrencyAmount(locale, receipt.totalAmount, receipt.currency)}</p>}
+    </div>}
+    {!offers && !pending && <button type="button" className="secondary-button" disabled={busy} onClick={() => load()}>{t("browse")}</button>}
+    {offers && offers.items.length === 0 && <p role="status">{t("empty")}</p>}
+    {offers && offers.items.length > 0 && !pending && !review && <form className="resource-form" onSubmit={quote}>
+      <div className="field">
+        <label htmlFor="guest-service-order-selection">{t("service")}</label>
+        <select id="guest-service-order-selection" name="serviceKey" defaultValue={editing?.serviceKey} required disabled={busy}>
+          {offers.items.map(offer => <option key={offer.key} value={offer.key}>{localizedText(offer.name, locale)}</option>)}
+        </select>
+      </div>
+      <div className="form-grid two">
+        <label className="field"><span>{t("serviceDate")}</span><input type="date" name="serviceDate" required min={checkIn} max={checkOut} defaultValue={editing?.serviceDate ?? checkIn} disabled={busy} /></label>
+        <label className="field"><span>{t("lastServiceDate")}</span><input type="date" name="lastServiceDate" required min={checkIn} max={checkOut} defaultValue={editing?.lastServiceDate ?? checkIn} disabled={busy} /></label>
+        <label className="field"><span>{t("quantity")}</span><input name="quantity" inputMode="numeric" pattern="[1-9][0-9]*" defaultValue={editing?.quantity ?? 1} required disabled={busy} /></label>
+        <label className="field"><span>{t("guests")}</span><input name="guests" type="number" min="1" step="1" defaultValue={editing?.guests ?? 1} required disabled={busy} /></label>
+      </div>
+      <div className="form-actions">
+        <button type="submit" className="primary-button" disabled={busy}>{t("review")}</button>
+        {offers.next && <button type="button" className="secondary-button" onClick={() => load(offers.next ?? undefined)} disabled={busy}>{t("more")}</button>}
+      </div>
+    </form>}
+    {review && <form className="resource-form" onSubmit={send} data-testid="guest-service-order-review">
+      <h4>{localizedText(review.quote.title, locale)}</h4>
+      <p>{review.quote.totalAmount === null ? t("quoteRequired") : formatCurrencyAmount(locale, review.quote.totalAmount, review.quote.currency)}</p>
+      <h5>{review.quote.notice.title}</h5>
+      {review.quote.notice.paragraphs.map((paragraph, index) => <p key={index} dir="auto">{paragraph}</p>)}
+      <label><input type="checkbox" required disabled={busy} /> {t("acknowledge")}</label>
+      <div className="form-actions"><button type="submit" className="primary-button" disabled={busy}>{t("submit")}</button>
+        <button type="button" className="secondary-button" onClick={() => { setEditing(review.draft); setReview(null); }} disabled={busy}>{t("edit")}</button></div>
+    </form>}
+  </section>;
+}

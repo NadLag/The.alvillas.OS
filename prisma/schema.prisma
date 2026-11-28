@@ -624,6 +624,8 @@ model Organization {
 
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCaptureOrganization")
   guestHubIdentityDocumentDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationOrganization")
+  guestHubServiceOrderDelegations GuestHubServiceOrderDelegation[] @relation("GuestServiceDelegationOrganization")
+  guestHubServiceOrderRequests GuestHubServiceOrderRequest[] @relation("GuestServiceRequestOrganization")
   guestHubIdentityDocumentFiles GuestHubIdentityDocumentFile[]
  guestIdentityDocumentAdmissions GuestHubIdentityDocumentAdmission[] @relation("GuestIdentityAdmissionOrganization")
  guestIdentityDocumentPublications GuestHubIdentityDocumentPublication[] @relation("GuestIdentityPublicationOrganization")
@@ -2365,6 +2367,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  guestHubServiceOrderRequests GuestHubServiceOrderRequest[] @relation("GuestServiceRequestCurrency")
   serviceOrders ServiceOrder[]
   externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentRefundIntents ExternalPaymentRefundIntent[]
@@ -2417,6 +2420,8 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  guestServiceCatalogDelegations GuestHubServiceOrderDelegation[] @relation("GuestServiceDelegationCatalog")
+  guestServiceOrderingDelegations GuestHubServiceOrderDelegation[] @relation("GuestServiceDelegationOrdering")
   serviceOrders ServiceOrder[] @relation("ServiceOrderCatalog")
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkPolicy")
   leadConversions LeadConversion[] @relation("LeadConversionPolicy")
@@ -2660,6 +2665,7 @@ model VarianceWorkflowEvent {
 }
 
 model OutboxEvent {
+  guestHubServiceOrderRequest GuestHubServiceOrderRequest? @relation("GuestServiceRequestOutbox")
   issuedGuestHubLinks GuestHubLink[] @relation("GuestHubLinkOutbox")
   guestHubRevocations GuestHubLinkRevocation[] @relation("GuestHubRevocationOutbox")
   notificationDeliveries NotificationDelivery[]
@@ -5948,6 +5954,7 @@ model OwnerOnboardingDelivery {
 }
 
 model GuestHubLink {
+  serviceOrderRequests GuestHubServiceOrderRequest[] @relation("GuestServiceRequestLink")
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
  organizationId String @map("organization_id") @db.Uuid
  reservationId String @map("reservation_id") @db.Uuid
@@ -6023,6 +6030,8 @@ model GuestHubLinkRevocation {
 }
 
 model GuestHubFormGrant {
+ serviceOrderDelegation GuestHubServiceOrderDelegation? @relation("GuestServiceDelegationGrant")
+ serviceOrderRequests GuestHubServiceOrderRequest[] @relation("GuestServiceRequestGrant")
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
  organizationId String @map("organization_id") @db.Uuid
  linkId String @map("link_id") @db.Uuid
@@ -6478,6 +6487,7 @@ model GuestHubAgreementDocumentOrigin {
 }
 
 model ServiceOrder {
+ guestHubRequest GuestHubServiceOrderRequest? @relation("GuestServiceRequestOrder")
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
  organizationId String @map("organization_id") @db.Uuid
  propertyId String @map("property_id") @db.Uuid
@@ -6522,6 +6532,7 @@ model ServiceOrder {
 }
 
 model ServiceOrderEvent {
+ guestHubRequest GuestHubServiceOrderRequest? @relation("GuestServiceRequestEvent")
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
  organizationId String @map("organization_id") @db.Uuid
  orderId String @map("order_id") @db.Uuid
@@ -6599,4 +6610,74 @@ model ExpensePurchase {
  originalDocument Document? @relation(fields:[organizationId,receiptDocumentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_document_fk")
  @@index([organizationId,receiptDocumentId],map:"expense_purchase_receipt_document_idx")
  @@index([organizationId,receiptSha256],map:"expense_purchase_receipt_sha_idx")
+}
+
+model GuestHubServiceOrderDelegation {
+ organizationId String @map("organization_id") @db.Uuid
+ grantId String @map("grant_id") @db.Uuid
+ catalogRuleId String @map("catalog_rule_id") @db.Uuid
+ catalogRuleVersion Int @map("catalog_rule_version")
+ catalogFingerprint String @map("catalog_fingerprint")
+ orderingRuleId String @map("ordering_rule_id") @db.Uuid
+ orderingRuleVersion Int @map("ordering_rule_version")
+ orderingSnapshot Json @map("ordering_snapshot")
+ publicOffers Json @map("public_offers")
+ authorizationCapFingerprint String @map("authorization_cap_fingerprint")
+ sourceFingerprint String @map("source_fingerprint")
+ signatureVersion String @map("signature_version")
+ signature String
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+ organization Organization @relation("GuestServiceDelegationOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_delegation_organization_fk")
+ grant GuestHubFormGrant @relation("GuestServiceDelegationGrant",fields:[organizationId,grantId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_delegation_grant_fk")
+ catalogRule ConfigRule @relation("GuestServiceDelegationCatalog",fields:[organizationId,catalogRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_delegation_catalog_fk")
+ orderingRule ConfigRule @relation("GuestServiceDelegationOrdering",fields:[organizationId,orderingRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_delegation_ordering_fk")
+ requests GuestHubServiceOrderRequest[] @relation("GuestServiceRequestDelegation")
+ @@id([organizationId,grantId],map:"guest_service_delegation_pkey")
+ @@index([organizationId,catalogRuleId],map:"guest_service_delegation_catalog_idx")
+ @@index([organizationId,orderingRuleId],map:"guest_service_delegation_ordering_idx")
+ @@map("guest_hub_service_order_delegation")
+}
+
+model GuestHubServiceOrderRequest {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ linkId String @map("link_id") @db.Uuid
+ grantId String @map("grant_id") @db.Uuid
+ orderId String @map("order_id") @db.Uuid
+ eventId String @map("event_id") @db.Uuid
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ commandKeyVersion String @map("command_key_version")
+ reviewFingerprint String @map("review_fingerprint")
+ nativeReviewFingerprint String @map("native_review_fingerprint")
+ sourceFingerprint String @map("source_fingerprint")
+ selectionSnapshot Json @map("selection_snapshot")
+ noticeSnapshot Json @map("notice_snapshot")
+ totalAmount Decimal? @map("total_amount") @db.Decimal(18,2)
+ currency String @db.VarChar(3)
+ requestedLocale String @map("requested_locale")
+ reviewedAt DateTime @map("reviewed_at") @db.Timestamptz(6)
+ reviewExpiresAt DateTime @map("review_expires_at") @db.Timestamptz(6)
+ signatureVersion String @map("signature_version")
+ signature String
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestServiceRequestOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_request_organization_fk")
+ link GuestHubLink @relation("GuestServiceRequestLink",fields:[organizationId,linkId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_request_link_fk")
+ grant GuestHubFormGrant @relation("GuestServiceRequestGrant",fields:[organizationId,grantId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_request_grant_fk")
+ delegation GuestHubServiceOrderDelegation @relation("GuestServiceRequestDelegation",fields:[organizationId,grantId],references:[organizationId,grantId],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_request_delegation_fk")
+ order ServiceOrder @relation("GuestServiceRequestOrder",fields:[organizationId,orderId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_request_order_fk")
+ event ServiceOrderEvent @relation("GuestServiceRequestEvent",fields:[organizationId,eventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_request_event_fk")
+ currencyRef Currency @relation("GuestServiceRequestCurrency",fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_request_currency_fk")
+ outbox OutboxEvent @relation("GuestServiceRequestOutbox",fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_service_request_outbox_fk")
+ @@unique([organizationId,id],map:"guest_service_request_org_id_key")
+ @@unique([organizationId,linkId,commandKey],map:"guest_service_request_nonce_key")
+ @@unique([organizationId,orderId],map:"guest_service_request_order_key")
+ @@unique([organizationId,eventId],map:"guest_service_request_event_key")
+ @@unique([organizationId,outboxEventId],map:"guest_service_request_outbox_key")
+ @@index([organizationId,linkId,createdAt,id],map:"guest_service_request_link_history_idx")
+ @@index([organizationId,grantId,createdAt,id],map:"guest_service_request_grant_history_idx")
+ @@map("guest_hub_service_order_request")
 }

@@ -29,7 +29,8 @@ type Decision="GRANTED"|"WITHDRAWN";
 type Settings={rule:{id:string;version:number};snapshot:Prisma.InputJsonObject;fingerprint:string};
 export type GuestHubFormGrantExtension={fingerprint:string;policyIds:readonly string[];snapshot:Prisma.InputJsonObject};
 type GrantExtension={context:(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,now:Date,settings:Settings)=>Promise<GuestHubFormGrantExtension>;record:(actor:AccountActorContext,tx:TenantTransaction,grant:GuestHubFormGrant,extension:GuestHubFormGrantExtension,deps:GuestHubDependencies)=>Promise<void>};
-type Definition={resourceType:PermissionResource;reviewProtocol:string;settings:(tx:TenantTransaction,organizationId:string,source:GuestHubNativeSource,now:Date)=>Promise<Settings>;AccessError:new()=>Error;ConflictError:new()=>Error}&({formKey:Exclude<GuestHubFormKey,"IDENTITY_DOCUMENTS">;extension?:never}|{formKey:"IDENTITY_DOCUMENTS";extension:GrantExtension});
+type DelegatedForm = "IDENTITY_DOCUMENTS" | "SERVICE_ORDERS";
+type Definition={resourceType:PermissionResource;reviewProtocol:string;settings:(tx:TenantTransaction,organizationId:string,source:GuestHubNativeSource,now:Date)=>Promise<Settings>;AccessError:new()=>Error;ConflictError:new()=>Error}&({formKey:Exclude<GuestHubFormKey,DelegatedForm>;extension?:never}|{formKey:DelegatedForm;extension:GrantExtension});
 export function createGuestHubFormGrantService(definition:Definition){
 async function grantContext(actor:AccountActorContext,tx:TenantTransaction,linkId:string,decision:Decision|null,requireEnabled=true){
  const repository=new GuestHubRepository(tx,actor.organizationId),profiles=new GuestHubFormGrantRepository(tx,actor.organizationId,definition.formKey),row=await repository.byId(linkId);if(!row)throw new definition.AccessError();

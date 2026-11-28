@@ -2,7 +2,7 @@
 
 Status: accepted for implementation under F-GST-08; end-to-end acceptance remains required. Scope unchanged: all 355 features remain required.
 
-Guest service selection uses the existing signed Guest Hub capability and an explicit staff release of canonical catalog offers. The release retains the actual staff authorization cap, source fingerprints and expiry, following the native guest-agreement release pattern. Every new request repeats the retained and current issuer/source checks and the current reservation, guest, link and release fences.
+Guest service selection uses the existing signed Guest Hub capability and form-grant history for an explicit staff release of canonical catalog offers. An immutable native-service delegation binds that grant's actual staff authorization cap, catalog and ordering sources, public offer projection and expiry. Every new request repeats the retained and current issuer/source checks and the current reservation, guest, link and release fences.
 
 The public input contains structured service identity, dates, quantity and participants. The server binds property and reservation identity from the authenticated capability and uses the canonical order policy, availability and exact pricing. Public contracts exclude internal cost, providers, allocation/tax recipes, staff caps and client-supplied price or state.
 
