@@ -60,5 +60,27 @@ it("runs the real browser producer against original physical stock and actual ac
  const f=await nativeLaundryBatchFixture(admin,db),output=resolve(".tmp/native-laundry-producer-"+randomUUID()+"/fixture.private.json");await promisify(execFile)(process.execPath,[resolve("node_modules/tsx/dist/cli.mjs"),resolve("tests/e2e/support/laundry-batch-fixture-worker.ts"),JSON.stringify({organizationId:f.organizationId,accountId:f.account.id,personId:f.person.id,guestLocale:"fr",output})],{env:process.env,windowsHide:true,timeout:120000,maxBuffer:2*1024*1024});const actual=z.object({itemId:z.uuid(),homeId:z.uuid(),financialCount:z.number()}).passthrough().parse(JSON.parse(await readFile(output,"utf8")));expect(await withTenant(db,f.organizationId,tx=>new InventoryMovementRepository(tx,f.organizationId).position(actual.homeId,actual.itemId))).toMatchObject({quantity:"20",reserved:"0",damaged:"0"});expect(actual.financialCount).toBe(0);
 });
 it("rechecks every original batch page source after its final identity query",async()=>{
- const f=await nativeLaundryBatchFixture(admin,db),created=await nativeLaundryCreate(f,[{condition:"USABLE",quantity:"2"}]);expect((await laundryBatchPage(f.ctx,{},f.deps)).items.map(row=>row.id)).toEqual([created.receipt.batchId]);const original=originalPrototypeMethod(LaundryBatchRepository.prototype,"page");let calls=0;vi.spyOn(LaundryBatchRepository.prototype,"page").mockImplementation(async function(this:LaundryBatchRepository,...args){const value=await original.apply(this,args);if(++calls===2)await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants["inventory_location:view"]},data:{archivedAt:new Date()}}));return value;});await expect(laundryBatchPage(f.ctx,{},f.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);expect(calls).toBe(2);
+ const f = await nativeLaundryBatchFixture(admin, db);
+ const created = await nativeLaundryCreate(f, [{condition:"USABLE",quantity:"2"}]);
+ expect((await laundryBatchPage(f.ctx, {}, f.deps)).items.map(row => row.id)).toEqual([created.receipt.batchId]);
+
+ const original = originalPrototypeMethod(LaundryBatchRepository.prototype, "page");
+ let calls = 0;
+ vi.spyOn(LaundryBatchRepository.prototype, "page").mockImplementation(function(this: LaundryBatchRepository, ...args) {
+  const query = original.apply(this, args);
+  const resolveQuery = query.then.bind(query);
+  // Keep the real PrismaPromise and withdraw authority after its second identity read.
+  query.then = (onfulfilled, onrejected) => resolveQuery(async rows => {
+   if (++calls === 2) {
+    await withTenant(db, f.organizationId, tx => tx.roleAssignment.update({
+     where: {id:f.grants["inventory_location:view"]},
+     data: {archivedAt:new Date()},
+    }));
+   }
+   return rows;
+  }).then(onfulfilled, onrejected);
+  return query;
+ });
+ await expect(laundryBatchPage(f.ctx, {}, f.deps)).rejects.toBeInstanceOf(InventoryCatalogAccessError);
+ expect(calls).toBe(2);
 });
