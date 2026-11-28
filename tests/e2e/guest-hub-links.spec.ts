@@ -7,6 +7,7 @@ import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {guestHubIssueCommandSchema,guestHubRevokeCommandSchema,guestHubRecoveryResultSchema,guestHubPublicViewSchema} from "@/modules/guest-hub/domain/guest-hub-contract";
 import {guestHubLinkPolicyKey} from "@/modules/guest-hub/domain/guest-hub-policy";
+import { guestHubLinkDeliveryPolicyKey } from "@/platform/config/guest-hub-link-delivery-policy";
 import { guestHubPropertyInformationKey } from "@/platform/config/guest-hub-property-information";
 import { protectGuestHubPropertyInformation } from "@/platform/config/guest-hub-property-information-encryption";
 import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace,nativeGuestHubResponse,retainNativeGuestHubResponses} from "./support/guest-hub-fixture";
@@ -39,6 +40,17 @@ for(const locale of["en","fr","ar"]as const)test("Actual scoped Guest Hub links 
     effectiveFrom: new Date("2020-01-01"), value: protectGuestHubPropertyInformation(guestInformation, fixture.organizationId, fixture.property.id),
     reason: "Publish synthetic villa details for the original Guest Hub journey"
   }));
+  if (locale === "ar") {
+    await withTenant(db, fixture.organizationId, async tx => {
+      await tx.reservation.update({ where: { id: fixture.reservation.id }, data: { guestPhone: "+212612345678" } });
+      await new ConfigRuleRepository(tx, fixture.organizationId).createVersion({
+        key: guestHubLinkDeliveryPolicyKey, scopeType: "property", scopeId: fixture.property.id, createdBy: account.id,
+        effectiveFrom: new Date("2020-01-01"), value: {
+          source: "ORIGINAL_RESERVATION_CONTACT", channels: ["WHATSAPP"], approval_reference: "Synthetic browser acceptance"
+        }, reason: "Allow a manual WhatsApp draft for the synthetic original reservation"
+      });
+    });
+  }
   if(info.project.name==="field-mobile")await page.setViewportSize({width:360,height:800});
   await openNativeGuestHubWorkspace(page,fixture.reservation.id,async()=>{await page.goto(`/${locale}/app/reservations/${fixture.reservation.id}`);await page.getByTestId("reservation-guest-access").click();});
   const panel=page.getByTestId("guest-link-manager"),form=page.getByTestId("guest-link-form"),history=page.getByTestId("guest-link-history");await expect(form).toBeVisible();await expect(history).toContainText(t.empty);expect(await page.evaluate(()=>document.documentElement.dir)).toBe(locale==="ar"?"rtl":"ltr");
@@ -57,6 +69,26 @@ for(const locale of["en","fr","ar"]as const)test("Actual scoped Guest Hub links 
   const original=await withTenant(db,fixture.organizationId,async tx=>{const rows=await tx.guestHubLink.findMany({where:{reservationId:fixture.reservation.id}});expect(rows).toHaveLength(1);expect(rows[0].commandKey===nonce).toBe(true);expect(await tx.outboxEvent.count({where:{id:rows[0].outboxEventId,type:"guest_hub.link_issued"}})).toBe(1);expect(await tx.auditLog.count({where:{resourceId:rows[0].id,action:"guest_hub.link_issued"}})).toBe(1);return rows[0];});
   // Exercise the actual browser clipboard action. The authenticated response supplies only the original bearer.
   await context.grantPermissions(["clipboard-read","clipboard-write"],{origin});const copy=response(page,"issue/recover").then(async result=>{expect(result.status()).toBe(200);return guestHubRecoveryResultSchema.parse(await result.json());});const[,copied]=await Promise.all([page.getByTestId("guest-link-copy").click(),copy]);if(!copied.recorded||!copied.token)throw Error("Actual original guest capability required");const token=copied.token;expect(copied.id).toBe(original.id);await expect(page.getByTestId("guest-link-status")).toContainText(t.notices.copied);const shared=await page.evaluate(()=>navigator.clipboard.readText());expect(shared===origin+"/"+locale+"/guest#"+token).toBe(true);await privateStorage(page,[token,reason]);
+  if (locale === "ar") {
+    const delivery = messages.ar.GuestLinkDelivery;
+    await page.getByTestId("guest-link-delivery-open").click();
+    const deliveryPanel = page.getByTestId("guest-link-delivery-panel");
+    const [contactReview] = await Promise.all([response(page, "delivery/review"), deliveryPanel.getByRole("button", { name: delivery.whatsapp, exact: true }).click()]);
+    expect(contactReview.status()).toBe(200);
+    await expect(deliveryPanel).toContainText("5678");
+    await expect(deliveryPanel).not.toContainText("+212612345678");
+    const [draft] = await Promise.all([response(page, "delivery/admit"), deliveryPanel.getByRole("button", { name: delivery.prepareWhatsapp, exact: true }).click()]);
+    expect(draft.status()).toBe(200);
+    const href = await deliveryPanel.getByRole("link", { name: delivery.openWhatsapp, exact: true }).getAttribute("href");
+    const target = new URL(href ?? "https://missing.invalid");
+    expect(target.origin).toBe("https://wa.me");
+    expect(target.pathname).toBe("/212612345678");
+    expect(target.searchParams.get("text")?.includes(`/ar/guest#${token}`)).toBe(true);
+    await expect(deliveryPanel.getByRole("link", { name: delivery.openWhatsapp, exact: true })).toHaveAttribute("rel", "noopener noreferrer");
+    await deliveryPanel.getByRole("button", { name: delivery.close, exact: true }).click();
+    await expect(deliveryPanel).toHaveCount(0);
+    await privateStorage(page, [token, "+212612345678"]);
+  }
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   let photoRequests=0;await visitor.route("https://photos.example.test/**",async route=>{photoRequests++;expect(route.request().url().includes(token)).toBe(false);const headers=await route.request().allHeaders();expect(headers.referer).toBeUndefined();expect(headers.cookie).toBeUndefined();await route.fulfill({status:200,contentType:"image/png",headers:{"Cache-Control":"private, no-store"},body:Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=","base64")});});const guest=await visitor.newPage();guest.on("pageerror",error=>errors.push(error.name));await guest.bringToFront();let opened=response(guest,"visit");await guest.goto(shared);expect((await opened).status()).toBe(200);const record=guest.getByTestId("guest-access-record");await expect(record.locator("time")).toHaveCount(2);await expect(guest).toHaveURL(new RegExp("/"+locale+"/guest/"+original.id+"$","u"));expect(await guest.evaluate(()=>location.hash)).toBe("");await expect(guest.getByTestId("guest-stay-home")).toContainText(fixture.property.name);await expect(guest.getByTestId("guest-stay-stage")).toContainText(messages[locale].GuestStay.calendarStage.UPCOMING);const image=guest.getByTestId("guest-stay-photo").locator("img");await expect(image).toBeVisible();await expect.poll(()=>image.evaluate(node=>(node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);expect(photoRequests).toBeGreaterThan(0);
   const guestDetails = guest.getByTestId("guest-property-information");

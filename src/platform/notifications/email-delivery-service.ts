@@ -15,6 +15,10 @@ import { channelPayloadSchema, resolveNotificationChannel } from "./notification
 import { emailFailure, recipientKey, emailIdempotencyKey } from "./email-delivery";
 import { deliveryAudit } from "./delivery-service";
 import {onboardingOwnerEmailEvent} from "@/platform/events/onboarding-owner-email";
+import { guestLinkEmailEvent } from "@/platform/events/guest-link-email";
+import { resolveGuestHubLinkEmail } from "@/modules/guest-hub/application/guest-hub-link-delivery";
+import { GuestHubLinkDeliveryAccessError } from "@/modules/guest-hub/domain/guest-hub-link-delivery";
+import { GuestHubAccessError, GuestHubConflictError } from "@/modules/guest-hub/domain/guest-hub-policy";
 import type {DocumentObjectStore} from "@/modules/documents/infrastructure/document-object-store";
 import type {OnboardingOwnerEmailCapture} from "./onboarding-owner-email-source";
 import type * as NativeOwnerEmailSourceModule from "./onboarding-owner-email-source";
@@ -27,11 +31,11 @@ export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransa
     const payload = stored.payload as Record<string, unknown>;
     const accountId = payload.recipientId ?? payload.userAccountId;
     if (accountId !== undefined && !z.uuid().safeParse(accountId).success) throw new Error("email_recipient_invalid");
-    if (!["notification.channel.requested", "identity.invitation.delivery_requested", "identity.recovery.delivery_requested",onboardingOwnerEmailEvent].includes(stored.type) || payload.channel !== "email") throw new Error("email_event_invalid");
+    if (!["notification.channel.requested", "identity.invitation.delivery_requested", "identity.recovery.delivery_requested",onboardingOwnerEmailEvent,guestLinkEmailEvent].includes(stored.type) || payload.channel !== "email") throw new Error("email_event_invalid");
     return (await repository.ensure(event.id, accountId as string | undefined ?? null, typeof payload.kind === "string" ? payload.kind : stored.type)).id;
   });
   if (!id) return;
-  const native=event.type===onboardingOwnerEmailEvent,nativeEnv:NodeJS.ProcessEnv={...env,NODE_ENV:env.NODE_ENV==="production"?"production":env.NODE_ENV==="test"?"test":env.NODE_ENV==="development"?"development":process.env.NODE_ENV},encryptionEnv=native?nativeEnv:process.env;
+  const native=event.type===onboardingOwnerEmailEvent,nativeEnv:NodeJS.ProcessEnv={...env,NODE_ENV:env.NODE_ENV==="production"?"production":env.NODE_ENV==="test"?"test":env.NODE_ENV==="development"?"development":process.env.NODE_ENV},encryptionEnv=native||event.type===guestLinkEmailEvent?nativeEnv:process.env;
   let nativeSource:typeof NativeOwnerEmailSourceModule|undefined,nativeCapture:OnboardingOwnerEmailCapture|undefined,nativeFailure:ReturnType<typeof NativeOwnerEmailSourceModule.onboardingOwnerEmailFailure>|undefined;
   if(native){nativeSource=await import("./onboarding-owner-email-source");try{nativeCapture=await nativeSource.captureOnboardingOwnerEmail(event,{db,env:nativeEnv,objects:deps.objects});}catch(error){nativeFailure=nativeSource.onboardingOwnerEmailFailure(error);}}
   for (const prepare of [true, false]) await withTenant(db, event.organizationId, async (tx) => {
@@ -55,6 +59,17 @@ export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransa
       if(!nativeSource||!nativeCapture){await stop("FAILED","provider_not_configured");return;}
       try{email=await nativeSource.validateOnboardingOwnerEmail(tx,stored,nativeCapture,{db,env:nativeEnv,objects:deps.objects});}
       catch(error){const failure=nativeSource.onboardingOwnerEmailFailure(error);await stop(failure.status,failure.code);return;}
+    }else if (stored.type === guestLinkEmailEvent) {
+      try { email = await resolveGuestHubLinkEmail(tx, stored, { db, env: nativeEnv }); }
+      catch (error) {
+        if (error instanceof GuestHubAccessError || error instanceof GuestHubLinkDeliveryAccessError) {
+          await stop("SUPPRESSED", "preferences_or_access_changed"); return;
+        }
+        if (error instanceof GuestHubConflictError || error instanceof z.ZodError) {
+          await stop("SUPPRESSED", "content_or_recipient_changed"); return;
+        }
+        throw error;
+      }
     }else if (stored.type === "notification.channel.requested") {
       const payload = channelPayloadSchema.parse(stored.payload); const context = await resolveNotificationChannel(notifications, payload);
       if (!context.allowed || !context.candidate?.email || !context.destination) { await stop("SUPPRESSED", "preferences_or_access_changed"); return; }

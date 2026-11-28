@@ -16,6 +16,7 @@ import {configuredGuestHubExpiry,GuestHubAccessError,GuestHubConflictError,Guest
 import {guestHubResource,guestHubSourceChecks} from "./guest-hub-access";
 import {guestHubSettings,guestHubSourceSnapshot,currentGuestHubState} from "./guest-hub-source";
 import type {GuestHubDependencies} from "./guest-hub-service";
+import { guestHubLinkDeliverySettings } from "./guest-hub-link-delivery";
 
 async function phase(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource){
  const now=await new GuestHubRepository(tx,actor.organizationId).clock(),stored=await authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId);
@@ -50,6 +51,7 @@ export async function readGuestHubWorkspace(actor:AccountActorContext,raw:unknow
   const heads=await repository.revocationHeads(page.map(row=>row.id)),byHead=new Map(heads.map(row=>[row.linkId,row.id]));if(page.some(row=>(row.revocations[0]?.id??null)!==(byHead.get(row.id)??null)))throw new GuestHubConflictError();
   const currentSource=await repository.source(source.reservationId);if(!currentSource)throw new GuestHubAccessError();const current=await phase(actor,tx,currentSource),currentSettings=await settingsOrUnavailable(tx,actor.organizationId,currentSource,current.now);
   if(current.cap!==first.cap||jsonbFingerprint(guestHubSourceSnapshot(actor.organizationId,currentSource))!==sourceFingerprint||(currentSettings?.fingerprint??null)!==binding.policy)throw new GuestHubConflictError();
+  const delivery = currentSettings ? await guestHubLinkDeliverySettings(tx, actor.organizationId, currentSettings.scopes, current.now) : null;
   const items=[];
   for(const row of page){
    const target=byTarget.get(row.id);if(!target)throw new GuestHubConflictError();const resource=guestHubResource(actor.organizationId,currentSource,target);if(!allowed(actor,current,resource,"view"))continue;
@@ -62,7 +64,10 @@ export async function readGuestHubWorkspace(actor:AccountActorContext,raw:unknow
    const canManageIdentityDocuments=allowed(actor,current,{...resource,type:"guest_hub_identity_documents"},"view")&&allowed(actor,current,personal,"view")&&allowed(actor,current,personal,"edit");
    const canManageServiceOrders=allowed(actor,current,{...resource,type:"guest_hub_service_orders"},"view")&&allowed(actor,current,personal,"view")&&allowed(actor,current,personal,"edit");
    const originalCreator=row.createdBy===actor.actorId,recoverable=originalCreator&&allowed(actor,current,resource,"create"),data={id:row.id,createdAt:row.createdAt.toISOString(),expiresAt:row.expiresAt.toISOString(),state,originalCreator,...recoverable?{recoveryKey:row.commandKey}:{},canRevoke:!revoked&&allowed(actor,current,resource,"void"),...canManageProfile?{canManageProfile:true as const}:{},...canManageStayDetails?{canManageStayDetails:true as const}:{},...canManageIdentityDocuments?{canManageIdentityDocuments:true as const}:{},...canManageHouseRules?{canManageHouseRules:true as const}:{},...canManageServiceOrders?{canManageServiceOrders:true as const}:{},...canManageAgreement?{canManageAgreement:true as const}:{},...canReadAgreementHistory?{canReadAgreementHistory:true as const}:{}};
-   items.push(guestHubLinkSummarySchema.parse(present({...actor.authContext,visibleDataClasses:new Set()},"view",{...resource,data},catalogFieldPolicy("guest_hub"),current.now)));
+   const deliveryChannels = recoverable && state === "ACTIVE" ? delivery?.policy.channels : undefined;
+   items.push(guestHubLinkSummarySchema.parse(present({...actor.authContext,visibleDataClasses:new Set()},"view",{
+    ...resource, data: { ...data, ...(deliveryChannels?.length ? { deliveryChannels } : {}) }
+   },catalogFieldPolicy("guest_hub"),current.now)));
   }
   const creationResource={...guestHubResource(actor.organizationId,currentSource),occurredAt:current.now},last=page.at(-1),lookahead=selected[25],next=lookahead&&last&&allowed(actor,current,guestHubResource(actor.organizationId,currentSource,lookahead.target),"view")?signGuestHubDirectoryCursor({...binding,protocol:"NATIVE_GUEST_LINK_DIRECTORY_V1",asOf:asOf.toISOString(),beforeId:last.id,beforeAt:last.createdAt.toISOString()},deps.env):null;
   const data=guestHubWorkspaceSchema.parse({reservationId:source.reservationId,propertyId:source.propertyId,reference:source.reference,locale:source.locale,timezone:source.timezone,checkedAt:current.now.toISOString(),canCreate:allowed(actor,current,creationResource,"create")&&allowed(actor,current,creationResource,"view"),issuanceAvailable:eligible(currentSource,currentSettings,current.now),items,next});

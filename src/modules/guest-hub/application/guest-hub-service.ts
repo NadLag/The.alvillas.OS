@@ -88,6 +88,17 @@ export async function recoverGuestHubLink(actor:AccountActorContext,raw:unknown,
  });
 }
 
+export async function readGuestHubDeliveryLink(actor: AccountActorContext, tx: TenantTransaction, linkId: string, deps: GuestHubDependencies) {
+ const repository = new GuestHubRepository(tx, actor.organizationId);
+ await repository.lockLink(linkId);
+ const row = await repository.byId(linkId);
+ if (!row || row.createdBy !== actor.actorId) throw new GuestHubAccessError();
+ await repository.lockSources(row.reservationId);
+ const receipt = await privateReceipt(actor, tx, row, true, deps);
+ if (receipt.state !== "ACTIVE" || !receipt.token) throw new GuestHubAccessError();
+ return { row, token: receipt.token, repository };
+}
+
 export async function recoverGuestHubRevocation(actor:AccountActorContext,raw:unknown,deps:GuestHubDependencies){
  const input=guestHubRevocationRecoveryInputSchema.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
   const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);await repository.lockLink(input.linkId);

@@ -27,6 +27,12 @@ export class GuestHubRepository{
  propertyDimensionsMany(ids:readonly string[]){return this.tx.$queryRaw<Array<{id:string;city:string;cityId:string|null;region:string;regionId:string|null}>>(Prisma.sql`SELECT id,city,city_id AS "cityId",region,region_id AS "regionId" FROM property WHERE organization_id=${this.organizationId}::uuid AND id=ANY(${[...ids]}::uuid[]) ORDER BY id FOR SHARE`);}
  revocationHeads(linkIds:readonly string[]){return this.tx.guestHubLinkRevocation.findMany({where:{organizationId:this.organizationId,linkId:{in:[...linkIds]}},select:{id:true,linkId:true}});}
  byId(id:string){return this.tx.guestHubLink.findFirst({where:{organizationId:this.organizationId,id}});}
+ deliveryContact(reservationId: string, guestId: string) {
+  return this.tx.reservation.findFirst({
+   where: { organizationId: this.organizationId, id: reservationId, guestId, archivedAt: null },
+   select: { guestEmail: true, guestPhone: true, guestPreferredLocale: true }
+  });
+ }
  byNonce(commandKey:string){return this.tx.guestHubLink.findFirst({where:{organizationId:this.organizationId,commandKey}});}
  revocation(linkId:string){return this.tx.guestHubLinkRevocation.findFirst({where:{organizationId:this.organizationId,linkId}});}
  revocationByNonce(commandKey:string){return this.tx.guestHubLinkRevocation.findFirst({where:{organizationId:this.organizationId,commandKey}});}

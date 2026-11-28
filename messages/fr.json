@@ -6373,6 +6373,24 @@
       "storage_unavailable": "Ce navigateur ne peut pas enregistrer votre demande en attente. Autorisez le stockage de session ou utilisez un autre navigateur avant de confirmer."
     }
   },
+  "GuestLinkDelivery": {
+    "title": "Partager le lien privé du voyageur",
+    "email": "E-mail",
+    "whatsapp": "WhatsApp",
+    "recipient": "Partager avec {recipient}",
+    "sendEmail": "Demander l’envoi par e-mail",
+    "prepareWhatsapp": "Préparer le message WhatsApp",
+    "openWhatsapp": "Ouvrir WhatsApp",
+    "queued": "L’envoi par e-mail a été demandé.",
+    "failed": "Le lien privé n’a pas pu être partagé. Actualisez cet espace et réessayez.",
+    "close": "Fermer",
+    "message": {
+      "subject": "Votre lien privé ALVILLAS",
+      "intro": "Ouvrez l’espace voyageur pour préparer votre séjour ALVILLAS.",
+      "open": "Ouvrir l’espace voyageur",
+      "private": "Ce lien est réservé à votre séjour. Gardez-le privé."
+    }
+  },
   "GuestServiceOrders": {
     "category": { "CLEANING": "Ménage", "EXPERIENCE": "Expériences" },
     "pickupDate": "Date de prise en charge",

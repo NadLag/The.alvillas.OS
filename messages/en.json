@@ -6373,6 +6373,24 @@
       "storage_unavailable": "This browser cannot save your pending request. Allow session storage or use another browser before confirming."
     }
   },
+  "GuestLinkDelivery": {
+    "title": "Share private guest link",
+    "email": "Email",
+    "whatsapp": "WhatsApp",
+    "recipient": "Share with {recipient}",
+    "sendEmail": "Request email delivery",
+    "prepareWhatsapp": "Prepare WhatsApp draft",
+    "openWhatsapp": "Open WhatsApp",
+    "queued": "Email delivery requested.",
+    "failed": "The private link could not be shared. Refresh the workspace and try again.",
+    "close": "Close",
+    "message": {
+      "subject": "Your private ALVILLAS guest link",
+      "intro": "Open Guest Hub to prepare for your ALVILLAS stay.",
+      "open": "Open Guest Hub",
+      "private": "This link is for your stay. Keep it private."
+    }
+  },
   "GuestServiceOrders": {
     "category": { "CLEANING": "Cleaning", "EXPERIENCE": "Experiences" },
     "pickupDate": "Pickup date",

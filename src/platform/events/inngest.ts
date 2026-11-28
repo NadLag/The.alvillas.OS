@@ -3,6 +3,7 @@ import type { OutboxHandlers } from "@/platform/events/outbox-dispatcher";
 import type { EmailProvider } from "@/platform/providers";
 import { deliverEmail } from "@/platform/notifications/email-delivery-service";
 import {onboardingOwnerEmailEvent} from "./onboarding-owner-email";
+import { guestLinkEmailEvent } from "./guest-link-email";
 import type {DocumentObjectStore} from "@/modules/documents/infrastructure/document-object-store";
 import { notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
 import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
@@ -111,6 +112,7 @@ export function createInngestOutboxHandlers(
     "identity.invitation.delivery_requested": identityDelivery,
     "identity.recovery.delivery_requested": identityDelivery,
     [onboardingOwnerEmailEvent]: async event=>{await deliverEmail(event,{db:deps.db,env,now:deps.now,provider:emailProvider,objects:deps.objects});},
+    [guestLinkEmailEvent]: async event => { await deliverEmail(event, { db: deps.db, env, now: deps.now, provider: emailProvider }); },
     "*": async (event) => {
       await handler(event);
     }
