@@ -1,8 +1,11 @@
+import {transferTaskDetailsSchema} from "@/platform/services/transfer-task-contracts";
 import { z } from "zod";
 import { stayDateSchema } from "./reservation";
 import { fieldDevicePolicySnapshotSchema } from "@/platform/config/field-device-policy";
 import { fieldLinenSnapshotSchema } from "@/platform/inventory/field-stocktake";
 import { fieldCashSnapshotSchema } from "@/platform/ledger/field-cash";
+import {groceryTaskDetailsSchema} from "@/platform/services/grocery-task-contracts";
+import {chefTaskResponseSchema} from "@/platform/services/chef-menu-contracts";
 
 export const fieldPullPageSize = 50;
 const date = stayDateSchema;
@@ -13,7 +16,7 @@ export const fieldPullInputSchema = z.object({
   organization_id: z.uuid(), actor_user_id: z.uuid(), mode: z.enum(["today", "assigned", "supervised"]).default("today"),
   property_id: z.uuid().optional(), cursor: z.string().min(1).max(2048).optional(),
   known_tasks: z.array(fieldKnownTaskSchema).max(fieldPullPageSize).default([]), only_known: z.boolean().default(false),
-  include_device_policy: z.boolean().optional(), include_linen: z.boolean().optional(), include_inventory: z.boolean().optional(), include_issue_capture: z.boolean().optional(), include_cash: z.boolean().optional()
+  include_device_policy: z.boolean().optional(), include_linen: z.boolean().optional(), include_inventory: z.boolean().optional(), include_issue_capture: z.boolean().optional(), include_cash: z.boolean().optional(), include_chef_menu:z.boolean().optional(),include_grocery_orders:z.boolean().optional(),include_transfers:z.boolean().optional()
 }).strict();
 export const fieldWorkSnapshotSchema = z.object({
   id: z.uuid(), propertyId: z.uuid(), propertyName: z.string().max(240), propertyAddress: z.string().max(1000),
@@ -22,8 +25,12 @@ export const fieldWorkSnapshotSchema = z.object({
   priority: z.string().max(80), dueDate: date, businessDate: date, serverVersion: z.iso.datetime(), revision,
   canEdit: z.boolean(), canReportIssue: z.boolean().optional(), checklistItems: z.array(z.object({ id: z.uuid(), key: z.string().max(160), label: translations, completed: z.boolean() }).strict()).max(50),
   proxyValidation: z.object({ performedByPersonId: z.uuid(), expectedVersion: z.number().int().min(1), performerName: z.string().max(240).optional() }).strict().optional(),
-  devicePolicy: fieldDevicePolicySnapshotSchema.nullable().optional(), linen: fieldLinenSnapshotSchema.optional(), inventory: fieldLinenSnapshotSchema.optional(), cash: fieldCashSnapshotSchema.optional()
-}).strict();
+  devicePolicy: fieldDevicePolicySnapshotSchema.nullable().optional(), linen: fieldLinenSnapshotSchema.optional(), inventory: fieldLinenSnapshotSchema.optional(), cash: fieldCashSnapshotSchema.optional(), chefRecipe:chefTaskResponseSchema.optional(),groceryRequest:groceryTaskDetailsSchema.optional(),transferRequest:transferTaskDetailsSchema.optional()
+}).strict().superRefine((value,context)=>{
+ if(value.transferRequest&&(value.type!=="TRANSFER"||value.transferRequest.taskId!==value.id||value.transferRequest.propertyId!==value.propertyId))context.addIssue({code:"custom",path:["transferRequest"],message:"field_transfer_task_scope_required"});
+ if(value.groceryRequest&&(value.groceryRequest.taskId!==value.id||value.groceryRequest.propertyId!==value.propertyId||value.groceryRequest.taskType!==value.type))context.addIssue({code:"custom",path:["groceryRequest"],message:"field_grocery_task_scope_required"});
+ if(value.chefRecipe&&(value.type!=="CHEF"||value.chefRecipe.taskId!==value.id||value.chefRecipe.propertyId!==value.propertyId))context.addIssue({code:"custom",path:["chefRecipe"],message:"field_chef_recipe_task_scope_required"});
+});
 export const fieldPullResultSchema = z.object({
   op_schema_version: z.literal(1), organization_id: z.uuid(), actor_user_id: z.uuid(), snapshot_at: z.iso.datetime(),
   cursor: z.string().min(1).max(2048), next_cursor: z.string().min(1).max(2048).nullable(),

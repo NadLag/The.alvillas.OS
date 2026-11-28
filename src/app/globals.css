@@ -2927,9 +2927,32 @@ textarea:disabled {
 .service-catalog-list > li.detail-panel { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: var(--space-4); }
 .service-catalog .checkbox-field { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); }
 .service-catalog .checkbox-field input { inline-size: 24px; block-size: 24px; min-block-size: 24px; flex: 0 0 auto; }
-.service-catalog-terms, .service-catalog-review { display: grid; gap: var(--space-4); padding-block: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
+.service-catalog-terms, .service-catalog-review { min-inline-size: 0; overflow-wrap: anywhere; display: grid; gap: var(--space-4); padding-block: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
 .service-catalog-provider { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); justify-content: space-between; }
 .service-catalog .money { font-variant-numeric: tabular-nums; }
 .service-catalog-original-terms { min-inline-size: 0; }
 .service-catalog-original-terms summary { min-block-size: var(--target-min); padding-block: var(--space-3); cursor: pointer; }
 .service-catalog-original-terms pre { max-inline-size: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.preserve-lines { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.service-catalog-list { overflow-wrap: anywhere; }
+
+.inventory-page { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.inventory-page > *,
+.inventory-page :is(.resource-form, fieldset, .field, .form-grid, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
+.inventory-page .resource-form,
+.inventory-page .service-catalog-list > li.detail-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
+.inventory-page :is(.primary-button, .secondary-button, .quiet-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.inventory-page :is(input, select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
+.inventory-page table { inline-size: 100%; min-inline-size: 36rem; border-collapse: collapse; text-align: start; }
+.inventory-page :is(th, td) { padding: var(--space-3); border-block-end: 1px solid var(--border-subtle); text-align: start; vertical-align: top; }
+.inventory-page .checkbox-field { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); }
+.inventory-page .checkbox-field input { inline-size: var(--target-compact); block-size: var(--target-compact); min-block-size: var(--target-compact); flex: 0 0 auto; }
+.inventory-stock-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: var(--space-4); margin: 0; }
+.inventory-stock-totals dt { color: var(--text-secondary); }
+.inventory-stock-totals dd { margin: 0; padding-block-start: var(--space-2); overflow-wrap: anywhere; }
+
+.inventory-location-page { overflow-wrap: anywhere; }
+.inventory-location-page :is(fieldset, .resource-form, .field, .form-grid, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
+.inventory-location-page .resource-form { grid-template-columns: minmax(0, 1fr); }
+.inventory-location-page :is(button, input, select) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }

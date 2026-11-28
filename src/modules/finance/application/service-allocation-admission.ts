@@ -33,6 +33,7 @@ async function prepare(ctx:FinanceActorContext,input:z.infer<typeof serviceAlloc
  const providers:Array<{binding:typeof bindings[number];cost:Awaited<ReturnType<typeof inspectServiceProviderCost>>}>=[];for(const {binding} of ordered.sort((a,b)=>a.key.localeCompare(b.key))){
   const kind=binding.supplierInvoiceLineId?"SUPPLIER_INVOICE_LINE"as const:"EMPLOYEE_COST"as const,costId=binding.supplierInvoiceLineId??binding.employeeCostId!,cost=await inspectServiceProviderCost(ctx,kind,costId,tx);
   if(cost.amount.currency!==collection.currency||cost.propertyId&&cost.propertyId!==collection.propertyId||cost.reservationId&&cost.reservationId!==collection.reservationId)throw new ServiceAllocationSourceChangedError();
+  if(source.order?.chef&&input.providers.find(row=>row.bindingId===binding.id)?.componentKey===source.order.chef.componentKey&&(kind!=="EMPLOYEE_COST"||cost.partyId.toLowerCase()!==source.order.chef.personId.toLowerCase()))throw new ServiceAllocationSourceChangedError();
   await repository.lockProvider(kind,costId);const current=await repository.latestBinding(kind,costId);if(current?.id!==binding.id)throw new ServiceAllocationSourceChangedError();providers.push({binding,cost});
  }
  await repository.lockCollection(collection.id);

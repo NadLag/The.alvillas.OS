@@ -1,0 +1,27 @@
+import {randomUUID} from "node:crypto";
+import {expect,it} from "vitest";
+import {transferRequestSchema,transferOrderTermsSchema} from "@/platform/config/transfer-order-policy";
+import {serviceCatalogOrderTermsSchema} from "@/platform/config/service-catalog-policy";
+import {priceServiceOrder,ServiceOrderValidationError} from "@/modules/services/domain/service-order";
+import {fieldWorkSnapshotSchema} from "@/modules/reservations/domain/field-pull";
+import {financialTransferSchema,financialTransferPostings} from "@/modules/finance/domain/financial-transfer";
+const transfer={pickup:"Actual airport meeting point",destination:"Actual property entrance",pickupTime:"23:59",flightReference:"AT 123",instructions:"Use the requested pickup details only"},terms={schemaVersion:1 as const,task_type:"TRANSFER"as const,cash:"NATIVE_CASH_CUSTODY"as const};
+it("retains exact handover Money above the binary safe-integer limit without allocating ownership again",()=>{
+ const input={fromAccountId:randomUUID(),toAccountId:randomUUID(),kind:"CUSTODY_HANDOVER"as const,cashCollectionId:randomUUID(),amount:"9007199254740993.13",currency:"MAD",purpose:"Actual original large cash location movement",reason:"Preserve exact original custody independently of ownership",idempotencyKey:randomUUID()},postings=financialTransferPostings(financialTransferSchema.parse(input));expect(postings.map(row=>[row.side,row.amount.toJSON().amount])).toEqual([["DEBIT",input.amount],["CREDIT",input.amount]]);expect(postings.every(row=>row.dimensions.custody_collection_id===input.cashCollectionId&&row.bucket==="CUSTODY_HANDOVER")).toBe(true);expect(financialTransferSchema.safeParse({...input,cashCollectionId:undefined}).success).toBe(false);expect(financialTransferSchema.safeParse({...input,kind:"TRANSFER"}).success).toBe(false);
+});
+it("prices the original transfer with exact configured Money and requires one actual pickup",()=>{
+ const property={id:randomUUID(),cityId:null,regionId:null},reservation={id:randomUUID(),propertyId:property.id,status:"CONFIRMED",source:"DIRECT",checkIn:new Date("2031-05-01"),checkOut:new Date("2031-05-03"),adultCount:3,childCount:0},request={propertyId:property.id,reservationId:reservation.id,serviceKey:"transfer",serviceDate:"2031-05-01",lastServiceDate:"2031-05-01",quantity:3,guests:3,reason:"Actual agreed original transfer",transfer},entry={key:"transfer",name:{en:"Transfer",fr:"Transfert"},available:true,pricing_model:"PER_GUEST"as const,amount:"0.10",currency:"MAD",order_terms:{schemaVersion:1 as const,approval_reference:"Actual configured original approval",internal_cost:{amount:"0.00",currency:"MAD"},providers:[],allocation_rule_id:randomUUID(),tax_rule_id:randomUUID(),availability:{all:[]},transfer_order:terms}},policy={schemaVersion:1 as const,max_quantity:10,max_service_days:3,participant_basis:"SELECTED_RESERVATION_GUESTS"as const,date_basis:"INCLUSIVE_RESERVATION_DATES"as const},priced=priceServiceOrder(request,entry,reservation,property,policy);
+ expect(priced.price.kind).toBe("PRICED");if(priced.price.kind!=="PRICED")throw Error("Actual price required");expect(priced.price.amount.toJSON()).toEqual({amount:"0.90",currency:"MAD"});
+ expect(()=>priceServiceOrder({...request,transfer:undefined},entry,reservation,property,policy)).toThrow(ServiceOrderValidationError);
+ expect(()=>priceServiceOrder(request,{...entry,order_terms:{...entry.order_terms,transfer_order:undefined}},reservation,property,policy)).toThrow(ServiceOrderValidationError);
+ expect(()=>priceServiceOrder({...request,lastServiceDate:"2031-05-02"},entry,reservation,property,policy)).toThrow(ServiceOrderValidationError);
+ expect(serviceCatalogOrderTermsSchema.safeParse({...entry.order_terms,grocery_order:{schemaVersion:1,task_type:"TRANSFER",purchases:"CANONICAL_PROPERTY_EXPENSE",reimbursement:"CONFIGURED_NATIVE_SETTLEMENT"}}).success).toBe(false);
+});
+it("bounds pickup details without accepting prices, another task kind or arbitrary guest records",()=>{
+ expect(transferRequestSchema.parse(transfer)).toEqual(transfer);for(const value of["24:00","09:60","9:00","2026-11-16T09:00Z"])expect(transferRequestSchema.safeParse({...transfer,pickupTime:value}).success).toBe(false);
+ expect(transferRequestSchema.safeParse({...transfer,guestName:"Unrelated private guest"}).success).toBe(false);expect(transferRequestSchema.safeParse({...transfer,amount:"500.00"}).success).toBe(false);expect(transferOrderTermsSchema.safeParse({...terms,task_type:"CHEF"}).success).toBe(false);
+});
+it("rejects transfer details on another property or a non-transfer cached task",()=>{
+ const taskId=randomUUID(),propertyId=randomUUID(),snapshot={id:taskId,propertyId,propertyName:"Actual property",propertyAddress:"Original address",propertyTimezone:"Africa/Casablanca",reservationReference:null,title:{en:"Transfer",fr:"Transfert"},type:"TRANSFER",state:"ASSIGNED",priority:"NORMAL",dueDate:"2031-05-01",businessDate:"2031-05-01",serverVersion:new Date().toISOString(),revision:"a".repeat(43),canEdit:true,checklistItems:[],transferRequest:{available:true,taskId,propertyId,orderId:randomUUID(),name:{en:"Transfer",fr:"Transfert"},date:"2031-05-01",timezone:"Africa/Casablanca",guests:3,transfer}};
+ expect(fieldWorkSnapshotSchema.safeParse(snapshot).success).toBe(true);expect(fieldWorkSnapshotSchema.safeParse({...snapshot,type:"CHEF"}).success).toBe(false);expect(fieldWorkSnapshotSchema.safeParse({...snapshot,transferRequest:{...snapshot.transferRequest,propertyId:randomUUID()}}).success).toBe(false);
+});

@@ -1,3 +1,5 @@
+import {taskTypeSchema} from "./task-type";
+export {taskTypeSchema} from "./task-type";
 import { ledgerIntegrityPolicyKey, ledgerIntegrityPolicySchema, ledgerIntegrityRoutingKey, ledgerIntegrityRoutingSchema } from "@/modules/finance/domain/ledger-integrity";
 import { paymentMethodPolicyKey, paymentMethodPolicySchema } from "@/modules/finance/domain/payment-method";
 import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@/modules/finance/domain/financial-attachment-policy";
@@ -73,21 +75,7 @@ const moneyAmountSchema = z
 
 const currencySchema = z.string().trim().regex(/^[A-Z]{3}$/u);
 
-export const taskTypeSchema = z.enum([
-  "ARRIVAL_PREPARATION",
-  "CHECKOUT_CLEANING",
-  "CLEANING_MIDSTAY",
-  "INSPECTION",
-  "POOL",
-  "GARDEN",
-  "MAINTENANCE",
-  "CLEANING",
-  "LAUNDRY",
-  "INVENTORY",
-  "CHEF",
-  "TRANSFER",
-  "CUSTOM"
-]);
+
 
 export const taskDueAnchorSchema = z.enum(["CHECK_IN", "CHECK_OUT"]);
 

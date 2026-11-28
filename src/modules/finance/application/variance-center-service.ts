@@ -15,6 +15,7 @@ import { EmployeeCompensationRunAccessError } from "../domain/employee-compensat
 import { captureVarianceWorkflowActor, inspectVarianceWorkflowSource, type VarianceSourceAuthority } from "./variance-workflow-service";
 import { encodeVarianceCenterCursor, decodeVarianceCenterCursor } from "./variance-center-cursor";
 import type { FinanceActorContext } from "./finance-access";
+import {authorizeNativeInventoryVarianceBrowsing} from "@/platform/inventory/variance-workflow-source";
 
 type Deps = { db: TenantTransactionRunner; authorizeSource: VarianceSourceAuthority; requestId?: string; env?: NodeJS.ProcessEnv };
 const roots: Record<VarianceCenterProvider, readonly string[]> = { OTA: ["financial_transaction"], BANK: ["bank_statement", "financial_transaction"],
@@ -22,8 +23,9 @@ const roots: Record<VarianceCenterProvider, readonly string[]> = { OTA: ["financ
 
 async function gate(ctx: FinanceActorContext, provider: VarianceCenterProvider, tx: TenantTransaction) {
   const now = await new FinanceRepository(tx, ctx.organizationId).clock();
-  await recheckAccountAuthorization(ctx, tx, now, roots[provider].map(type => ({ action: "view" as const,
-    resource: { type, organizationId: ctx.organizationId, dataClass: provider === "INVENTORY" ? "operational" as const : "financial" as const }, organizationOnly: true })), new VarianceCenterAccessError());
+  try{await recheckAccountAuthorization(ctx, tx, now, roots[provider].map(type => ({ action: "view" as const,
+    resource: { type, organizationId: ctx.organizationId, dataClass: provider === "INVENTORY" ? "operational" as const : "financial" as const }, organizationOnly: true })), new VarianceCenterAccessError());}
+  catch(error){if(provider!=="INVENTORY"||!(error instanceof VarianceCenterAccessError))throw error;try{await authorizeNativeInventoryVarianceBrowsing(ctx,tx);}catch(denied){if(denied instanceof VarianceWorkflowSourceError)throw new VarianceCenterAccessError();throw denied;}}
   return { now, current: { ...await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId), personId: ctx.authContext.personId } };
 }
 

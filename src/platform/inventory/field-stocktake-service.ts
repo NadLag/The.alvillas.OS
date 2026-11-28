@@ -1,3 +1,6 @@
+import {configuredInventoryItem} from "@/modules/inventory/domain/item-definition";
+import {inventoryMinimumsForLocation} from "@/modules/inventory/domain/reorder";
+import {appendInventoryReorderSignal} from "./reorder-events";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { ConfigRuleRepository, type ConfigRuleRecord, type ConfigScopeCandidate, type ResolvedConfigRule } from "@/platform/config/config-rule-repository";
 import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
@@ -56,18 +59,20 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   if (task.archivedAt || terminalTaskStates.some(state => state === task.state) || batch.tasks.get(task.id)?.propertyId !== task.propertyId) throw new ReservationNotFoundError();
   const property = await batch.repository.property(task.propertyId); if (!property) throw new ReservationNotFoundError();
   const rule = batch.rules.get(task.propertyId); if (!rule) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
-  const current = inventoryMinimumsSchema.parse(rule.parsedValue).minimums.find(item => item.item === input.itemKey);
-  if (!current?.category) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
+  let item = await batch.repository.item(input.itemKey), location = await batch.repository.propertyLocation(task.propertyId);
+  const current = inventoryMinimumsForLocation(rule.parsedValue,location?.id??"").find(item => item.item === input.itemKey);
+  const currentDefinition = current ? configuredInventoryItem(current, item ?? undefined) : null;
+  if (!current || !currentDefinition) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
   if (!batch.reportedRules.has(input.catalogRuleId)) batch.reportedRules.set(input.catalogRuleId, await new ConfigRuleRepository(tx, ctx.organizationId).findById(input.catalogRuleId));
   const reported = batch.reportedRules.get(input.catalogRuleId);
   if (!reported || reported.key !== inventoryMinimumsKey || reported.version !== input.catalogVersion || reported.lifecycle === "DRAFT" ||
     reported.effectiveFrom > batch.now || !(batch.scopes.get(task.propertyId) ?? []).some(scope => scope.scopeType === reported.scopeType && scope.scopeId === reported.scopeId))
     throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
-  const prior = inventoryMinimumsSchema.parse(reported.value).minimums.find(item => item.item === input.itemKey);
-  if (!prior?.category || prior.category !== current.category) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
-  if ((current.unit ?? null) !== input.unit || (prior.unit ?? null) !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
-  let item = await batch.repository.item(input.itemKey), location = await batch.repository.propertyLocation(task.propertyId);
-  if (item?.archivedAt || location?.archivedAt || (item && item.category !== current.category)) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
+  const prior = inventoryMinimumsForLocation(reported.value,location?.id??"").find(item => item.item === input.itemKey);
+  const priorDefinition=prior?configuredInventoryItem(prior,item??undefined):null;
+  if (!priorDefinition || priorDefinition.category !== currentDefinition.category) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
+  if (currentDefinition.unit !== input.unit || priorDefinition.unit !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
+  if (item?.archivedAt || location?.archivedAt || (item && item.category !== currentDefinition.category)) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
   if (item && item.unit !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
   const position = item && location ? await batch.repository.position(location.id, item.id) : { quantity: "0", revision: "0" };
   const decision = decideStocktake({ expected: { quantity: input.expectedQuantity, revision: input.expectedRevision }, current: position,
@@ -75,13 +80,13 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   const appliedCatalog = { id: rule.id, key: rule.key, version: rule.version, scopeType: rule.scopeType, scopeId: rule.scopeId,
     effectiveFrom: rule.effectiveFrom.toISOString(), effectiveTo: rule.effectiveTo?.toISOString() ?? null };
   const source = { appliedCatalog, reportedCatalog: { id: reported.id, version: reported.version }, scopes: batch.scopes.get(task.propertyId) ?? [],
-    item: { key: input.itemKey, category: current.category, unit: input.unit, minimum: String(current.quantity) } };
+    item: { key: input.itemKey, category: currentDefinition.category, unit: input.unit, minimum: String(current.quantity) } };
   const audit = async (action: string, resourceType: string, resourceId: string, after: unknown, before?: unknown) => writeAuditEvent(tx,
     { organizationId: ctx.organizationId, actorId: ctx.actorId, action, resourceType, resourceId, propertyScopeId: task.propertyId,
       before, after, reason: input.note, requestId: meta.requestId, ipAddress: meta.ipAddress ?? null, deviceId: transport.deviceId, occurredAt: batch.now });
   if (!item) {
     const labels = current.name ?? { en: input.itemKey, fr: input.itemKey };
-    item = await batch.repository.createItem({ key: input.itemKey, category: current.category, unit: input.unit,
+    item = await batch.repository.createItem({ key: input.itemKey, category: currentDefinition.category, unit: input.unit,
       labels, sourceConfigRuleId: rule.id });
     await audit("inventory.item.materialized", "inventory_item", item.id, { key: item.key, category: item.category, unit: item.unit, appliedCatalog });
   }
@@ -107,6 +112,8 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   const payload = { propertyId: task.propertyId, taskId: task.id, inventory: { item: input.itemKey, quantity: decision.quantity }, stocktake, configuration: source };
   const outbox = new OutboxRepository(tx, ctx.organizationId);
   if (decision.variance) await outbox.append("StocktakeVariance", payload, `inventory:${recorded.observation.id}:variance`, batch.now);
-  if (decision.belowMinimum) await outbox.append("InventoryBelowMinimum", payload, `inventory:${recorded.observation.id}:below-minimum`, batch.now);
+  const policy=inventoryMinimumsSchema.parse(rule.parsedValue);
+  if(current.reorder||policy.location_overrides?.some(value=>value.location_id===location.id))await appendInventoryReorderSignal(tx,ctx,{locationId:location.id,itemId:item.id,revision:recorded.position.revision,source:{kind:"STOCKTAKE",id:recorded.observation.id}},batch.now);
+  else if (decision.belowMinimum) await outbox.append("InventoryBelowMinimum", payload, `inventory:${recorded.observation.id}:below-minimum`, batch.now);
   return { stocktakeId: recorded.observation.id, serverVersion: recorded.position.revision };
 }

@@ -69,6 +69,24 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/team`}>
             {t("team")}
           </Link>
+          {reservationContext && authorizeOrganizationSource(reservationContext.authContext,"view",{type:"inventory_item",organizationId:session.user.organizationId,dataClass:"operational"},new Date()) ?
+            <Link className="secondary-button" data-testid="inventory-items-link" prefetch={false} href={`/${appLocale}/app/inventory/items`}>{(await getTranslations("InventoryItems"))("title")}</Link> : null}
+          {reservationContext && authorizeOrganizationSource(reservationContext.authContext,"view",{type:"inventory_location",organizationId:session.user.organizationId,dataClass:"operational"},new Date()) ?
+            <Link className="secondary-button" data-testid="inventory-locations-link" prefetch={false} href={`/${appLocale}/app/inventory/locations`}>{(await getTranslations("InventoryLocations"))("title")}</Link> : null}
+          {reservationContext && ["inventory_movement","inventory_item","inventory_location"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
+            <Link className="secondary-button" data-testid="inventory-movements-link" prefetch={false} href={`/${appLocale}/app/inventory/movements`}>{(await getTranslations("InventoryMovements"))("title")}</Link> : null}
+          {reservationContext && ["inventory_movement","inventory_item","inventory_location"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
+            <Link className="secondary-button" data-testid="inventory-stock-link" prefetch={false} href={`/${appLocale}/app/inventory/stock`}>{(await getTranslations("InventoryStockLevels"))("title")}</Link> : null}
+          {reservationContext && ["inventory_movement","inventory_item","inventory_location"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
+            <Link className="secondary-button" data-testid="inventory-stocktakes-link" prefetch={false} href={`/${appLocale}/app/inventory/stocktakes`}>{(await getTranslations("InventoryStocktakes"))("title")}</Link> : null}
+          {reservationContext && ["inventory_movement","inventory_item","inventory_location","config_rule"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
+            <Link className="secondary-button" data-testid="inventory-reorder-link" prefetch={false} href={`/${appLocale}/app/inventory/reorder`}>{(await getTranslations("InventoryReorder"))("title")}</Link> : null}
+          {reservationContext && ["inventory_movement","inventory_item","inventory_location","config_rule"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
+            <Link className="secondary-button" data-testid="inventory-stays-link" prefetch={false} href={`/${appLocale}/app/inventory/stays`}>{(await getTranslations("InventoryStayConsumption"))("title")}</Link> : null}
+          {reservationContext && ["inventory_movement","inventory_item","inventory_location","config_rule"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
+            <Link className="secondary-button" data-testid="inventory-procurement-link" prefetch={false} href={`/${appLocale}/app/inventory/procurement`}>{(await getTranslations("InventoryProcurement"))("title")}</Link> : null}
+          {reservationContext && ["inventory_movement","inventory_item","inventory_location","config_rule"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"operational"},new Date())) ?
+            <Link className="secondary-button" data-testid="linen-pool-link" prefetch={false} href={`/${appLocale}/app/inventory/linen`}>{(await getTranslations("LinenPool"))("title")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/security`}>
             {t("security")}
           </Link>

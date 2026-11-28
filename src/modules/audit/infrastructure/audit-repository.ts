@@ -11,8 +11,11 @@ import { externalPaymentSourceSchema } from "@/platform/ledger/external-payment-
 import { Money } from "@/platform/money/money";
 import { externalPaymentFinancialSources, type ExternalPaymentFinancialSources } from "@/platform/authz/external-payment-resource";
 import { expenseResource } from "@/platform/authz/expense-resource";
+import {nativeInventoryLocationResources} from "@/platform/inventory/location-resource";
+import {nativeInventoryMovementResources} from "@/platform/inventory/movement-resource";
+import {nativeInventoryReorderResources,nativeInventoryAutomationAuditResources} from "@/platform/inventory/reorder-resource";
 
-export type FinancialAuditResource = NativeFinancialResource & { attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
+export type FinancialAuditResource = NativeFinancialResource & { inventorySources?:readonly Resource[]; attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -74,6 +77,10 @@ function whereFor(organizationId: string, filters: AuditHistoryFilters): Prisma.
 }
 
 export class AuditRepository {
+  inventoryAutomationResources(ids:string[]){return nativeInventoryAutomationAuditResources(this.tx,this.organizationId,ids);}
+  inventoryReorderResources(ids:string[]){return nativeInventoryReorderResources(this.tx,this.organizationId,ids);}
+  inventoryMovementResources(ids:string[]){return nativeInventoryMovementResources(this.tx,this.organizationId,ids);}
+  inventoryLocationResources(ids:string[]){return nativeInventoryLocationResources(this.tx,this.organizationId,ids);}
   constructor(
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
@@ -183,13 +190,14 @@ export class AuditRepository {
     }
     return result;
   }
-  async expenseResources(ids: string[]): Promise<Map<string, Resource>> {
+  async expenseResources(ids: string[]): Promise<Map<string, FinancialAuditResource>> {
     if (!ids.length) return new Map();
     const rows = await this.tx.expense.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
       select: { id: true, propertyId: true, reservationId: true, amount: true, state: true, createdBy: true, occurredOn: true,
         externalPaymentRefundFeeCorrection: { select: { refundIntent: { select: { identity: { select: { observations: { where: { state: "COMPLETED" }, orderBy: [{ providerUpdatedAt: "asc" }, { id: "asc" }], take: 1, select: { refundedAt: true } } } } } } } },
         externalPaymentFee: { select: { capture: { select: { capturedAt: true } } } },
         property: { select: { city: true, cityId: true, region: true, regionId: true, timezone: true } } } });
-    return new Map(rows.map(row => [row.id, expenseResource(this.organizationId, { ...row.property, id: row.propertyId }, { ...row, amount: row.amount.toString() })]));
+    const purchases=await new FinancialTransactionResourceRepository(this.tx,this.organizationId).purchaseDisclosures(ids);
+    return new Map(rows.map(row => {const resource=expenseResource(this.organizationId,{...row.property,id:row.propertyId},{...row,amount:row.amount.toString()}),purchase=purchases.get(row.id);return[row.id,{...resource,...purchase?{personalExpenseSources:purchase}:{}}];}));
   }
 }

@@ -188,3 +188,44 @@ prisma/migrations/20261115210000_native_service_order_lifecycle/migration.sql te
 prisma/migrations/20261115220000_service_order_native_fulfillment/migration.sql text eol=lf
 prisma/migrations/20261115230000_native_service_order_tenant_policy_names/migration.sql text eol=lf
 /prisma/migrations/20261115233000_native_service_order_financial_sources/migration.sql text eol=lf
+/prisma/migrations/20261116120000_native_chef_menu_work_bindings/migration.sql text eol=lf
+/prisma/migrations/20261116123000_native_chef_cost_party_bindings/migration.sql text eol=lf
+/prisma/migrations/20261116160000_native_grocery_order_receipts/migration.sql text eol=lf
+/prisma/migrations/20261116170000_native_expense_purchase_funding/migration.sql text eol=lf
+/prisma/migrations/20261116173000_native_purchase_payable_admission/migration.sql text eol=lf
+/prisma/migrations/20261116180000_native_grocery_purchase_evidence/migration.sql text eol=lf
+/prisma/migrations/20261116183000_native_purchase_settlement_reference/migration.sql text eol=lf
+/prisma/migrations/20261116190000_native_purchase_settlement_source/migration.sql text eol=lf
+/prisma/migrations/20261116193000_native_purchase_settlement_source_namespace/migration.sql text eol=lf
+/prisma/migrations/20261116200000_native_purchase_settlement_alias/migration.sql text eol=lf
+/prisma/migrations/20261116203000_native_purchase_original_receipt_admission/migration.sql text eol=lf
+/prisma/migrations/20261116210000_native_purchase_receipt_family_admission/migration.sql text eol=lf
+/prisma/migrations/20261116213000_native_grocery_purchase_families/migration.sql text eol=lf
+/prisma/migrations/20261116220000_native_service_transfer_requests/migration.sql text eol=lf
+/prisma/migrations/20261116223000_native_cash_custody_handovers/migration.sql text eol=lf
+
+/prisma/migrations/20261116224500_native_custody_physical_birth/migration.sql text eol=lf
+/prisma/migrations/20261116230000_native_custody_amount_reference/migration.sql text eol=lf
+/prisma/migrations/20261116231500_native_transfer_original_timezone/migration.sql text eol=lf
+/prisma/migrations/20261117003000_native_inventory_item_receipts/migration.sql text eol=lf
+/prisma/migrations/20261117004500_inventory_item_receipt_delivery/migration.sql text eol=lf
+prisma/migrations/20261117010000_inventory_item_negative_receipts/migration.sql text eol=lf
+prisma/migrations/20261117013000_native_inventory_location_receipts/migration.sql text eol=lf
+prisma/migrations/20261117023000_native_inventory_movement_groups/migration.sql text eol=lf
+prisma/migrations/20261117024500_native_inventory_movement_history/migration.sql text eol=lf
+prisma/migrations/20261117033000_native_inventory_reorder_sources/migration.sql text eol=lf
+
+prisma/migrations/20261117034500_inventory_reorder_native_effect_transaction/migration.sql text eol=lf
+
+prisma/migrations/20261117040000_inventory_reorder_company_source/migration.sql text eol=lf
+
+prisma/migrations/20261117041500_inventory_reorder_immutable_effects/migration.sql text eol=lf
+
+prisma/migrations/20261117043000_inventory_reorder_configuration_sources/migration.sql text eol=lf
+
+prisma/migrations/20261117044500_inventory_reorder_configuration_json_operators/migration.sql text eol=lf
+prisma/migrations/20261117180000_native_inventory_workspace_stocktakes/migration.sql text eol=lf
+prisma/migrations/20261117193000_native_inventory_purchase_receipts/migration.sql text eol=lf
+prisma/migrations/20261117194500_inventory_purchase_receipt_movement_alias/migration.sql text eol=lf
+prisma/migrations/20261117195500_inventory_purchase_receipt_leg_json/migration.sql text eol=lf
+prisma/migrations/20261117202500_inventory_purchase_original_attachment_id/migration.sql text eol=lf

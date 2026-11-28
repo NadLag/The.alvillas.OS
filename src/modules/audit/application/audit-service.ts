@@ -92,6 +92,27 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  const inventoryAutomation=row.resourceType==="automation"&&Boolean(row.after&&typeof row.after==="object"&&!Array.isArray(row.after)&&Object.hasOwn(row.after,"inventorySource"));
+  if(row.resourceType==="inventory_movement"||row.resourceType==="inventory_movement_command"||row.resourceType==="inventory_reorder"||inventoryAutomation){
+    const now=new Date(),command=row.resourceType==="inventory_movement_command",source=financialResource;
+    const allowed=["inventory_movement","inventory_item","inventory_location"].every(type=>(["view",action]as const).every(permission=>authorizeOrganizationSource(ctx.authContext,permission,{type,organizationId:ctx.organizationId,dataClass:"operational"},now)))&&
+      (command||source?.type===row.resourceType&&source.id===(inventoryAutomation?row.id:row.resourceId)&&source.organizationId===ctx.organizationId&&Boolean(source.sourceRecordId)&&Boolean(source.inventorySources)&&source.inventorySources!.every(original=>original.organizationId===ctx.organizationId&&(["view",action]as const).every(permission=>authorizeUnconditionalSource(ctx.authContext,permission,original,now))));
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["operational"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"operational"},after:{dataClass:"operational"},reason:{dataClass:"operational"}})as AuditHistoryRow;
+  }
+  if(row.resourceType==="inventory_location"||row.resourceType==="inventory_location_command"){
+    const now=new Date(),source={type:"inventory_location",organizationId:ctx.organizationId,dataClass:"operational"as const},location=row.resourceType==="inventory_location"?financialResource:undefined,propertyId=location?.propertyId??undefined;
+    const allowed=authorizeOrganizationSource(ctx.authContext,"view",source,now)&&authorizeOrganizationSource(ctx.authContext,action,source,now)&&
+      (row.resourceType==="inventory_location_command"||location?.type==="inventory_location"&&location.id===row.resourceId&&location.organizationId===ctx.organizationId&&(location.propertyId??null)===row.propertyScopeId&&
+       (!propertyId||(["view",action]as const).every(permission=>authorizeUnconditionalSource(ctx.authContext,permission,{...location,type:"property",id:propertyId},now))));
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["operational"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"operational"},after:{dataClass:"operational"},reason:{dataClass:"operational"}})as AuditHistoryRow;
+  }
+  if(row.resourceType==="inventory_item"||row.resourceType==="inventory_item_command"){
+    const now=new Date(),source={type:"inventory_item",organizationId:ctx.organizationId,dataClass:"operational"as const},allowed=authorizeOrganizationSource(ctx.authContext,"view",source,now)&&authorizeOrganizationSource(ctx.authContext,action,source,now);
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["operational"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"operational"},after:{dataClass:"operational"},reason:{dataClass:"operational"}})as AuditHistoryRow;
+  }
+  // Order history remains operational; the same atomic mutation has a native
+  // expense audit carrying its independently authorized financial evidence.
+  if(row.action.startsWith("service.grocery."))return present({...ctx.authContext,visibleDataClasses:new Set()},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
   if (row.action.startsWith("finance.external_payment.")) {
     const allowed = Boolean(row.resourceType === "financial_transaction" && financialResource?.id === row.resourceId &&
       canReadExternalPayment(ctx.authContext, financialResource, action, new Date(), row.action.startsWith("finance.external_payment.fee_")));
@@ -190,6 +211,8 @@ export function presentAuditHistoryRow(
     const allowed = Boolean(financialResource && financialResource.type === expectedType &&
       (!requiresSourceId || financialResource.id === row.resourceId) && permissionResource && authorize(ctx.authContext, action, permissionResource) &&
         (!financialResource.companyFinancialSources||financialResource.companyFinancialSources.every(source=>source.organizationId===ctx.organizationId&&source.type==="financial_transaction"&&authorizeOrganizationSource(ctx.authContext,"view",source,new Date())))&&
+        (!financialResource.custodySources||financialResource.custodySources.length>0&&financialResource.custodySources.every(source=>source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source)))&&
+        (!financialResource.personalExpenseSources||financialResource.personalExpenseSources.length>0&&financialResource.personalExpenseSources.every(source=>source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source)))&&
         (!financialResource.walletSources||financialResource.walletSources.every(source=>source.type==="wallet"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source)))&&
         (!financialResource.salarySources||Boolean(financialResource.compensationRoot?.type==="employee_payable"&&financialResource.compensationRoot.organizationId===ctx.organizationId&&authorize(ctx.authContext,action,financialResource.compensationRoot)&&
         financialResource.salarySources.length&&financialResource.salarySources.every(source=>source.type==="staff_compensation"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source))&&
@@ -324,6 +347,10 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     read("financial_attachment", ids => repository.financialAttachmentResources(ids)),
     repository.propertyFinanceResources([...new Set(settingRows.flatMap(row => row.propertyScopeId ? [row.propertyScopeId] : []))])
   ]);
+  const inventoryLocations = await read("inventory_location",ids=>repository.inventoryLocationResources(ids));
+  const inventoryMovements = await read("inventory_movement",ids=>repository.inventoryMovementResources(ids));
+  const inventoryReorders = await read("inventory_reorder",ids=>repository.inventoryReorderResources(ids));
+  const automationIds=rows.filter(row=>row.resourceType==="automation").map(row=>row.id),inventoryAutomations=automationIds.length?await repository.inventoryAutomationResources(automationIds):new Map<string,FinancialAuditResource>();
   const originalCashIds = [...new Set([...transactions.values()].flatMap(resource => resource.guestPayment?.originalCollectionId ? [resource.guestPayment.originalCollectionId] : []))];
   const originalCash = originalCashIds.length ? await repository.cashResources(originalCashIds) : new Map<string, Resource>();
   for (const [id, resource] of transactions) if (resource.guestPayment?.originalCollectionId) {
@@ -331,6 +358,10 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     transactions.set(id, { ...resource, guestPayment: { ...resource.guestPayment, cashSource: actual ? { ...actual, occurredAt: resource.guestPayment.receivedAt } : undefined } });
   }
   return new Map([
+    ...[...inventoryAutomations].map(([id,resource])=>["automation:"+id,resource]as const),
+    ...[...inventoryReorders].map(([id,resource])=>["inventory_reorder:"+id,resource]as const),
+    ...[...inventoryMovements].map(([id,resource])=>["inventory_movement:"+id,resource]as const),
+    ...[...inventoryLocations].map(([id,resource])=>["inventory_location:"+id,resource]as const),
     ...settingRows.flatMap(row => row.resourceId ? [[`${row.resourceType}:${row.resourceId}`, {
       ...settingProperties.get(row.propertyScopeId ?? ""), type: row.resourceType, organizationId, id: row.resourceId, propertyId: row.propertyScopeId
     }] as const] : []),
@@ -374,7 +405,11 @@ export async function listAuditHistory(
 async function presentCurrentAuditRows(ctx:AuditActorContext,tx:TenantTransaction,repository:AuditRepository,rows:AuditHistoryRow[],action:"view"|"export"){
   const resources=await financialAuditResources(repository,rows,ctx.organizationId),authContext=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),current={...ctx,authContext};
   if(authContext.organizationId!==ctx.organizationId||authContext.userAccountId!==ctx.actorId)throw new AuditAuthorizationError();assertAllowed(ctx,action);assertAllowed(current,action);
-  return rows.map(row=>{const source=row.resourceId?resources.get(`${row.resourceType}:${row.resourceId}`):undefined;return presentAuditHistoryRow(current,presentAuditHistoryRow(ctx,row,action,source),action,source);});
+  const locationIds=[...new Set(rows.filter(row=>row.resourceType==="inventory_location").flatMap(row=>row.resourceId?[row.resourceId]:[]))],locations=locationIds.length?await repository.inventoryLocationResources(locationIds):new Map<string,FinancialAuditResource>();
+  const movementIds=[...new Set(rows.filter(row=>row.resourceType==="inventory_movement").flatMap(row=>row.resourceId?[row.resourceId]:[]))],movements=movementIds.length?await repository.inventoryMovementResources(movementIds):new Map<string,FinancialAuditResource>();
+  const reorderIds=[...new Set(rows.filter(row=>row.resourceType==="inventory_reorder").flatMap(row=>row.resourceId?[row.resourceId]:[]))],reorders=reorderIds.length?await repository.inventoryReorderResources(reorderIds):new Map<string,FinancialAuditResource>();
+  const automationIds=rows.filter(row=>row.resourceType==="automation").map(row=>row.id),automations=automationIds.length?await repository.inventoryAutomationResources(automationIds):new Map<string,FinancialAuditResource>();
+  return rows.map(row=>{let source=row.resourceType==="automation"?resources.get("automation:"+row.id):row.resourceId?resources.get(`${row.resourceType}:${row.resourceId}`):undefined;if(row.resourceType==="inventory_location"&&!isDeepStrictEqual(source,locations.get(row.resourceId??"")))source=undefined;if(row.resourceType==="inventory_movement"&&!isDeepStrictEqual(source,movements.get(row.resourceId??"")))source=undefined;if(row.resourceType==="inventory_reorder"&&!isDeepStrictEqual(source,reorders.get(row.resourceId??"")))source=undefined;if(row.resourceType==="automation"&&!isDeepStrictEqual(source,automations.get(row.id)))source=undefined;return presentAuditHistoryRow(current,presentAuditHistoryRow(ctx,row,action,source),action,source);});
 }
 
 function csvCell(value: unknown): string {

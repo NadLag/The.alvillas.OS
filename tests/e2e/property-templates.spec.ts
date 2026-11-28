@@ -161,8 +161,11 @@ test.describe("property template administration", () => {
           .fill(`turnover-${suffix}`);
       }
       if (kind === "INVENTORY") {
+        await page.getByTestId("template-property-types").fill(property.propertyType+"\nCustom original property type");
         await entry.getByRole("spinbutton", { name: "Minimum quantity", exact: true }).fill("8");
         await entry.getByRole("textbox", { name: "Unit", exact: true }).fill("piece");
+        await entry.getByRole("combobox",{name:"Category",exact:true}).selectOption("LINEN");
+        await page.getByRole("button",{name:"Add a linen set",exact:true}).click();const set=page.getByTestId("linen-set-definition");await set.getByRole("textbox",{name:"Reference",exact:true}).fill("bed.original");await set.locator('input[lang="en"]').fill("Actual browser linen set");await set.locator('input[lang="fr"]').fill("Parure réelle du navigateur");await set.getByRole("button",{name:"Add a linen component",exact:true}).click();const component=set.getByTestId("linen-set-component");await component.getByRole("textbox",{name:"Original linen item reference",exact:true}).fill(await entry.getByRole("textbox",{name:"Reference",exact:true}).inputValue());await component.getByRole("spinbutton",{name:"Units in one set",exact:true}).fill("2");
       }
       if (kind === "SERVICE_CATALOG") {
         await entry.getByRole("textbox", { name: "Amount", exact: true }).fill("800.00");
@@ -171,6 +174,17 @@ test.describe("property template administration", () => {
       await saveAndOpen(page, `${kind.toLowerCase()}-${suffix}`, `${kind} ${suffix}`);
       await apply(page);
       await expect(page.getByTestId("template-diff-row").first()).toBeVisible();
+      if (kind === "INVENTORY") {
+        const query = new URL(page.url()).search;
+        for (const locale of ["en", "fr", "ar"]) {
+          await page.goto(`/${locale}/app/templates${query}`);
+          await expect(page.getByTestId("templates-page").getByRole("heading", { level: 1 })).toBeVisible();
+          await expect(page.getByTestId("template-property-types")).toHaveValue(property.propertyType + "\nCustom original property type");
+          await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+          expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+          expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+        }
+      }
     }
   });
 });

@@ -60,6 +60,16 @@ export function formatNumber(
   return new Intl.NumberFormat(locale, options).format(decimalToSafeNumber(value));
 }
 
+/** Recipe requirements retain all six decimal digits even when their integer
+ * totals exceed a safe JS number. BigInt formats each digit without rounding. */
+export function formatRecipeQuantity(locale:AppLocale,value:string):string{
+  if(value.length>100||!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/u.test(value))throw new RangeError("Exact recipe quantity required");
+  const [whole,fraction]=value.split("."),integer=new Intl.NumberFormat(locale,{maximumFractionDigits:0}).format(BigInt(whole));
+  if(!fraction)return integer;
+  const separator=new Intl.NumberFormat(locale).formatToParts(1.1).find(part=>part.type==="decimal")!.value;
+  return integer+separator+new Intl.NumberFormat(locale,{useGrouping:false,minimumIntegerDigits:fraction.length}).format(BigInt(fraction));
+}
+
 export function formatCurrency(locale: AppLocale, money: Money): string {
   return formatCurrencyAmount(locale, money.amount, money.currency);
 }

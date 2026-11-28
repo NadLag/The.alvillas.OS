@@ -55,6 +55,9 @@ export const permissionResources = [
   "issue",
   "service",
   "service_order",
+  "inventory_item",
+  "inventory_location",
+  "inventory_movement",
   "wallet",
   "cash_collection",
   "expense",
@@ -492,13 +495,6 @@ export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
   {
     resource: "wallet",
     field: "balance",
-    dataClass: "financial",
-    requiredPermission: permissionKey("wallet", "view"),
-    mask: "placeholder"
-  },
-  {
-    resource: "wallet",
-    field: "movements",
     dataClass: "financial",
     requiredPermission: permissionKey("wallet", "view"),
     mask: "placeholder"

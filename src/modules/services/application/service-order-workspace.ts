@@ -38,7 +38,7 @@ export async function readServiceOrderOriginal(actor:AccountActorContext,raw:unk
  const input=identity.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{
   const source=await inspectOriginalServiceOrder(actor,tx,input.orderId);await source.recheck();return{order:serviceOrderMetadata(source.head),request:source.request,
    catalog:projectServiceCatalogItem(actor,{target:{...source.context.scope,type:"service",id:source.entry.key},now:source.authority.now},source.entry,source.terms.policies.find(row=>row.serviceKey===source.entry.key)),
-   catalogRule:{id:source.root.catalogRuleId,version:source.root.catalogRuleVersion},totalAmount:source.total?.toJSON().amount??null,currency:source.root.currency,quoteReference:source.root.quoteReference};
+   catalogRule:{id:source.root.catalogRuleId,version:source.root.catalogRuleVersion},totalAmount:source.total?.toJSON().amount??null,currency:source.root.currency,quoteReference:source.root.quoteReference,...source.request.transfer?{transferTimezone:z.object({property:z.object({timezone:z.string().min(1).max(100)})}).parse(source.root.sourceWitnesses).property.timezone}:{}};
  });
 }
 export async function serviceOrderTaskChoices(actor:AccountActorContext,raw:unknown,deps:Dependencies){

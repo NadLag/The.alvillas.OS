@@ -1,9 +1,11 @@
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
-import { inventoryMinimumsKey, inventoryMinimumsSchema } from "@/platform/config/inventory-policy";
+import { inventoryMinimumsKey } from "@/platform/config/inventory-policy";
 import { fieldLinenSnapshotSchema, type FieldLinenSnapshot } from "./field-stocktake";
 import { InventoryRepository } from "@/modules/inventory/infrastructure/inventory-repository";
+import {configuredInventoryItem} from "@/modules/inventory/domain/item-definition";
+import {inventoryMinimumsForLocation} from "@/modules/inventory/domain/reorder";
 
 /** Caller supplies only currently authorized task properties, once per pull page. */
 export async function fieldStockSnapshots(tx: TenantTransaction, organizationId: string, propertyIds: string[], asOf: Date) {
@@ -12,20 +14,22 @@ export async function fieldStockSnapshots(tx: TenantTransaction, organizationId:
   // Wire cursors have millisecond precision. Include that entire recorded-time
   // bucket, without changing the effective business instant used for agreements.
   const rules = await new ConfigRuleRepository(tx, organizationId).resolveScopeGroups(inventoryMinimumsKey, scopes, asOf, { recordedBefore: new Date(asOf.getTime() + 1) });
-  const catalogs = new Map(ids.map(id => { const rule = rules.get(id); return [id, rule ? inventoryMinimumsSchema.parse(rule.parsedValue).minimums
-    .filter(item => item.category !== undefined) : []] as const; }));
+  const repository = new InventoryRepository(tx, organizationId),places=await repository.metadata([],ids);
+  const catalogs = new Map(ids.map(id => { const rule = rules.get(id); return [id, rule ? inventoryMinimumsForLocation(rule.parsedValue,places.locations.get(id)?.id??"") : []] as const; }));
   const streams = [...catalogs].flatMap(([propertyId, items]) => items.map(item => ({ propertyId, itemKey: item.item })));
-  const repository = new InventoryRepository(tx, organizationId), keys = [...new Set(streams.map(stream => stream.itemKey))];
+  const keys = [...new Set(streams.map(stream => stream.itemKey))];
   const [positions, metadata] = await Promise.all([repository.snapshotPositions(streams, asOf), repository.metadata(keys, ids)]);
   const byStream = new Map(positions.map(position => [`${position.propertyId}:${position.itemKey}`, position]));
   return new Map(ids.map(id => {
     const rule = rules.get(id), location = metadata.locations.get(id);
     const snapshot = (surface: "linen" | "inventory"): FieldLinenSnapshot => ({ catalog: rule ? { id: rule.id, version: rule.version } : null,
-      items: (catalogs.get(id) ?? []).filter(item => surface === "linen" ? item.category === "LINEN" : item.category !== "LINEN").map(configured => {
-        const item = metadata.items.get(configured.item), position = byStream.get(`${id}:${configured.item}`);
-        return { key: configured.item, name: configured.name ?? { en: configured.item, fr: configured.item }, unit: configured.unit ?? null,
+      items: (catalogs.get(id) ?? []).flatMap(configured => {
+        const item=metadata.items.get(configured.item),definition=configuredInventoryItem(configured,item);
+        if(!definition||(surface==="linen"?definition.category!=="LINEN":definition.category==="LINEN"))return[];
+        const position = byStream.get(`${id}:${configured.item}`);
+        return [{ key: configured.item, name: definition.name, unit: definition.unit,
           quantity: position?.quantity ?? "0", revision: position?.revision ?? "0",
-          available: !location?.archivedAt && (!item || (!item.archivedAt && item.category === configured.category && item.unit === (configured.unit ?? null))) };
+          available: !location?.archivedAt && (!item || (!item.archivedAt && item.category === definition.category && item.unit === definition.unit)) }];
       }) });
     return [id, { linen: fieldLinenSnapshotSchema.parse(snapshot("linen")), inventory: fieldLinenSnapshotSchema.parse(snapshot("inventory")) }] as const;
   }));

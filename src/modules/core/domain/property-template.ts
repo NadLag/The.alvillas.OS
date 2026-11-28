@@ -297,9 +297,9 @@ export function validateTemplateValues(kind: TemplateKind, values: TemplateValue
   }
   if (kind === "INVENTORY") {
     const rule = parsed.rules?.["inventory.minimums"] as
-      | { minimums: Array<Record<string, unknown>> }
+      | { minimums: Array<Record<string, unknown>>;linen_sets?:unknown[] }
       | undefined;
-    if (!rule?.minimums.length) throw new Error("Inventory template is empty");
+    if (!rule||!rule.minimums.length&&!rule.linen_sets?.length) throw new Error("Inventory template is empty");
     for (const item of rule.minimums) {
       localizedTextSchema.parse(item.name);
       z.string().trim().min(1).parse(item.unit);

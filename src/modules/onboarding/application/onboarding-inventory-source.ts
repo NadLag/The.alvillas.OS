@@ -5,6 +5,7 @@ import {assertAccountAuthorization,type CurrentAuthorityCheck} from "@/platform/
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
 import {nativeOnboardingPropertyHeads} from "@/platform/onboarding/property-source";
 import {nativeOnboardingInventoryTemplateHeads,nativeOnboardingInventoryTemplateRows,nativeOnboardingInventoryBindingHead,previewNativeOnboardingInventoryTemplate} from "@/platform/onboarding/inventory-source";
+import {nativeOnboardingInventoryTemplateMatchesProperty} from "@/platform/onboarding/inventory-source";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {ReservationConfigScopeRepository} from "@/platform/config/reservation-scope-repository";
 import {canonicalOnboardingInventorySettings,projectOnboardingInventorySettings,onboardingInventoryRuleKey} from "@/platform/onboarding/contracts";
@@ -53,6 +54,7 @@ async function sourceValues(actor:AccountActorContext,tx:TenantTransaction,prope
  const after=await onboardingInventorySourceMetadata(actor,tx,propertyId,ownerId,raw);if(before.fingerprint!==after.fingerprint||rows.length!==before.templates.length||before.rule&&(!rule||rule.xmin!==before.rule.xmin||rule.tuple!==before.rule.tuple))throw new OnboardingConflictError();
  const bindingId=before.binding?.templateVersionId,selectedId=before.target?.mode==="TEMPLATE"?before.target.templateVersionId:null,bindingTemplate=bindingId?rows.find(row=>row.id===bindingId):null,selected=selectedId?rows.find(row=>row.id===selectedId):null;
  if(before.binding&&!bindingTemplate||before.target?.mode==="TEMPLATE"&&!selected)throw new OnboardingConflictError();
+ if(selected&&!await nativeOnboardingInventoryTemplateMatchesProperty(tx,actor.organizationId,propertyId,selected.values))throw new OnboardingConflictError();
  const templateProjection=(row:NonNullable<typeof selected>)=>({id:row.id,key:row.key,version:row.version,propertyId:row.propertyId,name:row.name,status:row.status,createdBy:row.createdBy,createdAt:row.createdAt.toISOString()}),previous=onboardingInventorySnapshotSchema.parse({propertyId,rule:before.rule?{id:before.rule.id,key:before.rule.key,version:before.rule.version,scopeType:before.rule.scopeType,scopeId:before.rule.scopeId,lifecycle:before.rule.lifecycle,createdBy:before.rule.createdBy,createdAt:before.rule.createdAt.toISOString()}:null,settings:rule?projectOnboardingInventorySettings(rule.value):null,template:bindingTemplate?templateProjection(bindingTemplate):null,templateRevision:before.binding?.revision??null});
  return{rows,rule,bindingTemplate,selected,templateProjection,previous};
 }
