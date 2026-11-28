@@ -37,8 +37,14 @@ async function authority(actor:AccountActorContext,tx:TenantTransaction,actions:
 type Authority=Awaited<ReturnType<typeof authority>>;
 export const inventoryMovementReadAuthorityInTransaction=(actor:AccountActorContext,tx:TenantTransaction)=>authority(actor,tx);
 export const inventoryMovementAuthorityInTransaction=authority;
-async function sources(actor:AccountActorContext,context:Authority,itemId:string,locationIds:readonly string[],reservationIds:readonly string[],writing=false){
- const item=await context.inventory.catalogItemById(itemId),locations=await Promise.all([...new Set(locationIds)].sort().map(id=>context.inventory.locationCatalogById(id))),reservations=await Promise.all([...new Set(reservationIds)].sort().map(id=>context.movements.reservation(id)));
+type SourceHeads={items:ReadonlyMap<string,Awaited<ReturnType<InventoryRepository["catalogItemById"]>>>;locations:ReadonlyMap<string,Awaited<ReturnType<InventoryRepository["locationCatalogById"]>>>;reservations:ReadonlyMap<string,Awaited<ReturnType<InventoryMovementRepository["reservation"]>>>};
+async function sources(actor:AccountActorContext,context:Authority,itemId:string,locationIds:readonly string[],reservationIds:readonly string[],writing=false,heads?:SourceHeads){
+ const item = heads ? heads.items.get(itemId) ?? null : await context.inventory.catalogItemById(itemId);
+ const locationKeys = [...new Set(locationIds)].sort(), reservationKeys = [...new Set(reservationIds)].sort();
+ const locations = heads ? locationKeys.map(id => heads.locations.get(id) ?? null)
+   : await Promise.all(locationKeys.map(id => context.inventory.locationCatalogById(id)));
+ const reservations = heads ? reservationKeys.map(id => heads.reservations.get(id) ?? null)
+   : await Promise.all(reservationKeys.map(id => context.movements.reservation(id)));
  if(!item||locations.some(row=>!row)||reservations.some(row=>!row))throw new InventoryCatalogAccessError();
  const actualLocations=locations.filter(row=>row!==null),actualReservations=reservations.filter(row=>row!==null),checks:CurrentAuthorityCheck[]=[];
  if(writing&&(item.archivedAt||actualLocations.some(row=>row.archivedAt||row.propertyArchivedAt)||actualReservations.some(row=>row.propertyArchivedAt)))throw new InventoryCatalogAccessError();
@@ -78,6 +84,12 @@ async function verifySources(actor:AccountActorContext,tx:TenantTransaction,valu
 }
 export async function assertInventoryMovementsViewer(actor:AccountActorContext,deps:Dependencies={}){return withTenant(deps.db??prisma,actor.organizationId,async tx=>{const context=await authority(actor,tx);await recheckAccountAuthorization(actor,tx,await context.inventory.catalogClock(),context.checks,new InventoryCatalogAccessError());});}
 export const inventoryMovementSourcesInTransaction=sources;
+/** Bounded metadata reads share the original per-source authorization and
+ * witness builder. The cache exists only for this one source snapshot. */
+export async function inventoryMovementSourceBatchInTransaction(actor:AccountActorContext,context:Authority,itemIds:readonly string[],locationIds:readonly string[],reservationIds:readonly string[],writing=false){
+ const ids=[...new Set(itemIds)].sort(),locations=[...new Set(locationIds)].sort(),reservations=[...new Set(reservationIds)].sort(),[items,places,stays]=await Promise.all([context.inventory.catalogItemsByIds(ids),context.inventory.locationCatalogAuditSources(locations),Promise.all(reservations.map(id=>context.movements.reservation(id)))]),heads:SourceHeads={items:new Map(items.map(row=>[row.id,row])),locations:new Map(places.map(row=>[row.id,row])),reservations:new Map(stays.flatMap(row=>row?[[row.id,row]as const]:[]))};
+ return Promise.all(ids.map(id=>sources(actor,context,id,locations,reservations,writing,heads)));
+}
 export const verifyInventoryMovementSourcesInTransaction=verifySources;
 export async function previewInventoryMovement(actor:AccountActorContext,raw:unknown,deps:Dependencies={}){
  const draft=inventoryMovementRequestSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{const before=await prepare(actor,tx,draft),after=await prepare(actor,tx,draft);if(before.reviewFingerprint!==after.reviewFingerprint)throw new InventoryCatalogConflictError();return review(draft,after);});

@@ -402,6 +402,10 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  laundryBatches LaundryBatch[] @relation("LaundryBatchOrganization")
+  laundryBatchLines LaundryBatchLine[] @relation("LaundryLineOrganization")
+  laundryBatchEvents LaundryBatchEvent[] @relation("LaundryEventOrganization")
+  laundryBatchChanges LaundryBatchChange[] @relation("LaundryChangeOrganization")
   serviceOrders ServiceOrder[]
   serviceOrderEvents ServiceOrderEvent[]
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkOrganization")
@@ -847,6 +851,8 @@ model Person {
 }
 
 model UserAccount {
+  createdLaundryBatches LaundryBatch[] @relation("LaundryBatchCreator")
+  createdLaundryEvents LaundryBatchEvent[] @relation("LaundryEventCreator")
   serviceOrders ServiceOrder[] @relation("ServiceOrderCreator")
   serviceOrderEvents ServiceOrderEvent[] @relation("ServiceOrderEventActor")
   issuedGuestHubLinks GuestHubLink[] @relation("GuestHubLinkIssuer")
@@ -1592,6 +1598,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  laundryBatches LaundryBatch[] @relation("LaundryBatchReservation")
   inventoryMovements InventoryMovement[] @relation("InventoryMovementReservation")
   serviceOrders ServiceOrder[]
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkReservation")
@@ -3155,6 +3162,7 @@ model ReservationException {
 }
 
 model InventoryItem {
+  laundryBatchLines LaundryBatchLine[] @relation("LaundryLineItem")
   reorderSuggestions AutomationSuggestion[] @relation("InventoryReorderItem")
   id                 String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId     String                 @map("organization_id") @db.Uuid
@@ -3178,6 +3186,11 @@ model InventoryItem {
 }
 
 model InventoryLocation {
+  originLaundryBatches LaundryBatch[] @relation("LaundryBatchOrigin")
+  outboundLaundryBatches LaundryBatch[] @relation("LaundryBatchOutbound")
+  processingLaundryBatches LaundryBatch[] @relation("LaundryBatchProcessor")
+  inboundLaundryBatches LaundryBatch[] @relation("LaundryBatchInbound")
+  returnedLaundryBatches LaundryBatch[] @relation("LaundryBatchReturned")
   reorderSuggestions AutomationSuggestion[] @relation("InventoryReorderLocation")
   id             String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String                 @map("organization_id") @db.Uuid
@@ -3503,6 +3516,7 @@ model ApprovalStageRecipient {
 }
 
 model Supplier {
+  laundryBatches LaundryBatch[] @relation("LaundryBatchSupplier")
   documents Document[] @relation("DocumentSupplier")
   documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientSupplier")
   receivableAssignments ReceivableAssignment[] @relation("ReceivableSupplier")
@@ -6599,4 +6613,105 @@ model ExpensePurchase {
  originalDocument Document? @relation(fields:[organizationId,receiptDocumentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_document_fk")
  @@index([organizationId,receiptDocumentId],map:"expense_purchase_receipt_document_idx")
  @@index([organizationId,receiptSha256],map:"expense_purchase_receipt_sha_idx")
+}
+
+model LaundryBatch {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  sourceLocationId String @map("source_location_id") @db.Uuid
+  outboundTransitId String @map("outbound_transit_id") @db.Uuid
+  laundryLocationId String @map("laundry_location_id") @db.Uuid
+  inboundTransitId String @map("inbound_transit_id") @db.Uuid
+  returnLocationId String @map("return_location_id") @db.Uuid
+  supplierId String? @map("supplier_id") @db.Uuid
+  reservationId String? @map("reservation_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  snapshot Json
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation("LaundryBatchOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_org_fk")
+  source InventoryLocation @relation("LaundryBatchOrigin",fields:[organizationId,sourceLocationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_origin_fk")
+  outbound InventoryLocation @relation("LaundryBatchOutbound",fields:[organizationId,outboundTransitId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_outbound_fk")
+  processor InventoryLocation @relation("LaundryBatchProcessor",fields:[organizationId,laundryLocationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_processor_fk")
+  inbound InventoryLocation @relation("LaundryBatchInbound",fields:[organizationId,inboundTransitId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_inbound_fk")
+  returned InventoryLocation @relation("LaundryBatchReturned",fields:[organizationId,returnLocationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_returned_fk")
+  supplier Supplier? @relation("LaundryBatchSupplier",fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_supplier_fk")
+  reservation Reservation? @relation("LaundryBatchReservation",fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_reservation_fk")
+  creator UserAccount @relation("LaundryBatchCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_batch_creator_fk")
+  lines LaundryBatchLine[]
+  events LaundryBatchEvent[]
+  @@unique([organizationId,id],map:"laundry_batch_org_id_key")
+  @@unique([organizationId,idempotencyKey],map:"laundry_batch_nonce_key")
+  @@index([organizationId,createdAt(sort:Desc),id(sort:Desc)],map:"laundry_batch_history_idx")
+  @@map("laundry_batch")
+}
+model LaundryBatchLine {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  batchId String @map("batch_id") @db.Uuid
+  itemId String @map("item_id") @db.Uuid
+  condition String @db.VarChar(16)
+  quantity Decimal @db.Decimal(65,0)
+  organization Organization @relation("LaundryLineOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_line_org_fk")
+  batch LaundryBatch @relation(fields:[organizationId,batchId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_line_batch_fk")
+  item InventoryItem @relation("LaundryLineItem",fields:[organizationId,itemId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_line_item_fk")
+  changes LaundryBatchChange[]
+  @@unique([organizationId,id],map:"laundry_line_org_id_key")
+  @@unique([organizationId,batchId,itemId,condition],map:"laundry_line_source_key")
+  @@map("laundry_batch_line")
+}
+model LaundryBatchEvent {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  batchId String @map("batch_id") @db.Uuid
+  sequence Int
+  operation String @db.VarChar(32)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  reversesEventId String? @map("reverses_event_id") @db.Uuid
+  command Json
+  snapshot Json
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  observedAt DateTime? @map("observed_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation("LaundryEventOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_event_org_fk")
+  batch LaundryBatch @relation(fields:[organizationId,batchId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_event_batch_fk")
+  creator UserAccount @relation("LaundryEventCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_event_creator_fk")
+  reverses LaundryBatchEvent? @relation("LaundryEventReversal",fields:[organizationId,reversesEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_event_reverses_fk")
+  reversal LaundryBatchEvent[] @relation("LaundryEventReversal")
+  changes LaundryBatchChange[]
+  @@unique([organizationId,id],map:"laundry_event_org_id_key")
+  @@unique([organizationId,idempotencyKey],map:"laundry_event_nonce_key")
+  @@unique([organizationId,batchId,sequence],map:"laundry_event_sequence_key")
+  @@unique([organizationId,reversesEventId],map:"laundry_event_reversal_key")
+  @@index([organizationId,batchId,createdAt(sort:Desc),id(sort:Desc)],map:"laundry_event_history_idx")
+  @@map("laundry_batch_event")
+}
+model LaundryBatchChange {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  eventId String @map("event_id") @db.Uuid
+  lineId String @map("line_id") @db.Uuid
+  fromBucket String @map("from_bucket") @db.VarChar(40)
+  toBucket String @map("to_bucket") @db.VarChar(40)
+  quantity Decimal @db.Decimal(65,0)
+  reversesChangeId String? @map("reverses_change_id") @db.Uuid
+  movementGroupId String? @map("movement_group_id") @db.Uuid
+  movementReceipt Json? @map("movement_receipt")
+  organization Organization @relation("LaundryChangeOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_change_org_fk")
+  event LaundryBatchEvent @relation(fields:[organizationId,eventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_change_event_fk")
+  line LaundryBatchLine @relation(fields:[organizationId,lineId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_change_line_fk")
+  reverses LaundryBatchChange? @relation("LaundryChangeReversal",fields:[organizationId,reversesChangeId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"laundry_change_reverses_fk")
+  reversal LaundryBatchChange[] @relation("LaundryChangeReversal")
+  @@unique([organizationId,id],map:"laundry_change_org_id_key")
+  @@unique([organizationId,eventId,lineId,fromBucket,toBucket],map:"laundry_change_event_line_key")
+  @@unique([organizationId,reversesChangeId],map:"laundry_change_reversal_key")
+  @@unique([organizationId,movementGroupId],map:"laundry_change_movement_key")
+  @@index([organizationId,lineId,eventId],map:"laundry_change_history_idx")
+  @@map("laundry_batch_change")
 }
